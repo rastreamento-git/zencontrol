@@ -1,0 +1,12 @@
+node_modules
+apps/*/node_modules
+apps/web/dist
+data
+.env
+.git
+wppconnect-server
+quality
+docs
+*.zip
+*.7z
+*.sqlite*

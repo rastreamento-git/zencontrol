@@ -1,0 +1,17 @@
+node_modules/
+.env
+.env.*.local
+data/
+apps/web/dist/
+coverage/
+*.sqlite*
+*.db
+*.log
+wppconnect-server/.env
+wppconnect-server/tokens/
+wppconnect-server/dist/
+
+# WPPConnect runs as an optional independent service.
+wppconnect-server/
+*.zip
+*.7z

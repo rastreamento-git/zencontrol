@@ -1,0 +1,62 @@
+# Configure os valores privados no Render. Este arquivo não cria nem limpa o banco do inventário.
+services:
+  - type: web
+    name: zencontrol
+    runtime: node
+    plan: starter
+    numInstances: 1
+    buildCommand: npm ci --include=dev && npm run build
+    preDeployCommand: npm run migrate
+    startCommand: npm start
+    healthCheckPath: /healthz
+    maxShutdownDelaySeconds: 120
+    autoDeployTrigger: "off"
+    disk:
+      name: zencontrol-data
+      mountPath: /var/data/zencontrol
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: TRUST_PROXY
+        value: "1"
+      - key: ZEN_DATA_DIR
+        value: /var/data/zencontrol
+      - key: ZEN_RUN_WORKER
+        value: "true"
+      - key: APP_ADMIN_USER
+        value: admin
+      - key: APP_PASSWORD
+        generateValue: true
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: ZEN_WEBHOOK_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_SSL
+        value: verify-full
+      - key: DATABASE_CA
+        sync: false
+      - key: ZEN_PUBLIC_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: INTEGRATIONS_ENABLED
+        value: "false"
+      - key: AUTO_CLOSE_ENABLED
+        value: "false"
+      - key: SGA_SYNC_ENABLED
+        value: "false"
+      - key: STOCK_ENABLED
+        value: "false"
+      - key: STOCK_API_URL
+        sync: false
+      - key: STOCK_API_SECRET
+        sync: false
+      - key: STOCK_SOURCE_SYSTEM
+        value: zencontrol

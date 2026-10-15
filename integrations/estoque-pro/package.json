@@ -1,0 +1,33 @@
+{
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.4",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.7.1",
+    "helmet": "^8.3.0",
+    "pg": "^8.23.0"
+  },
+  "name": "estoque-pro-zencontrol-adapter",
+  "version": "1.3.0",
+  "description": "API PostgreSQL para inventário e rastreamento de seriais",
+  "main": "server.js",
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.9"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "migrate": "node scripts/migrate.js",
+    "reconcile": "node scripts/reconcile.js",
+    "test": "node --test --test-concurrency=1 test/*.test.js",
+    "check": "node --check server.js && node --check src/app.js && node --check src/inventory.js && node --check src/auth.js && node --check src/admin.js && node --check src/trace.js && node --check src/zencontrol.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "engines": {
+    "node": "24.x"
+  },
+  "private": true
+}

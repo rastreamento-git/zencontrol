@@ -1,0 +1,34 @@
+{
+  "name": "zencontrol-platform",
+  "version": "6.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/api",
+    "apps/web",
+    "integrations/estoque-pro"
+  ],
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "dev": "npm run dev --workspace apps/api",
+    "dev:web": "npm run dev --workspace apps/web",
+    "build": "npm run build --workspace apps/web",
+    "start": "npm run start --workspace apps/api",
+    "worker": "npm run worker --workspace apps/api",
+    "migrate": "npm run migrate --workspace apps/api",
+    "import:legacy": "npm run import:legacy --workspace apps/api --",
+    "test": "npm run test --workspace apps/api && npm run test --workspace integrations/estoque-pro",
+    "check": "npm run check --workspace apps/api && npm run check --workspace integrations/estoque-pro",
+    "format": "prettier --write apps scripts",
+    "restore": "npm run restore --workspace apps/api --",
+    "setup": "node scripts/setup.js",
+    "demo": "npm run demo --workspace apps/api",
+    "db:purge": "npm run db:purge --workspace apps/api --",
+    "stock:dev": "npm run dev --workspace integrations/estoque-pro",
+    "stock:migrate": "npm run migrate --workspace integrations/estoque-pro"
+  },
+  "devDependencies": {
+    "prettier": "^3.9.10"
+  }
+}
