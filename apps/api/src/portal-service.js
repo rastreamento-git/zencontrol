@@ -1,11 +1,21 @@
 const { randomUUID, createHash } = require("node:crypto");
 const sharp = require("sharp");
 const { createMediaStore } = require("./media-store");
+const { identifyEquipment } = require("./equipment-photo");
+const { PDFDocument } = require("pdf-lib");
 const { transaction } = require("./database");
 const { fail, integer, serials } = require("./errors");
 const d = require("./domain"),
   o = require("./orders");
-const kinds = ["vehicle", "label", "installed", "service", "other"];
+const kinds = [
+  "vehicle",
+  "label",
+  "installed",
+  "service",
+  "other",
+  "inspection",
+  "checklist",
+];
 async function technician(db, userId) {
   const t = await d.one(
     db,
@@ -60,6 +70,9 @@ const publicOrder = (order) =>
       "version",
       "stock_sync_state",
       "workflow_mode",
+      "executed_on",
+      "execution_finished_at",
+      "conference_started_at",
     ].map((k) => [k, order[k]]),
   );
 async function ownBatch(db, userId, id) {
@@ -128,6 +141,7 @@ async function startDraft(pool, userId, id, version) {
       order_id: id,
       technician_id: t.id,
       source: "portal",
+      capture_version: 2,
       source_user_id: userId,
       sender: "portal",
       vehicle: order.vehicle,
@@ -144,29 +158,59 @@ async function startDraft(pool, userId, id, version) {
 }
 async function upload(pool, cfg, userId, id, input) {
   if (!kinds.includes(input.kind)) fail(400, "Selecione o tipo de foto.");
-  const code = d.string(input.serial_code || "", "IMEI/serial", 128);
+  const initial = await ownBatch(pool, userId, id);
+  editable(initial.b, initial.order, input.version);
   if (typeof input.image !== "string" || input.image.length > 12 * 1024 * 1024)
-    fail(400, "Foto inválida ou acima do limite.");
-  let bytes;
-  try {
-    const raw = Buffer.from(input.image.split(",").at(-1), "base64");
-    const image = sharp(raw, { limitInputPixels: 24000000 });
-    const metadata = await image.metadata();
-    if (!["jpeg", "png", "webp"].includes(metadata.format))
-      fail(400, "Formato de foto inválido.");
-    bytes = await image
-      .rotate()
-      .resize({
-        width: 2400,
-        height: 2400,
-        fit: "inside",
-        withoutEnlargement: true,
-      })
-      .jpeg({ quality: 90 })
-      .toBuffer();
-  } catch {
-    fail(400, "A foto não pôde ser processada. Use JPEG, PNG ou WebP.");
+    fail(400, "Arquivo inválido ou acima do limite.");
+  const raw = Buffer.from(input.image.split(",").at(-1), "base64");
+  let bytes,
+    mime = "image/jpeg",
+    extension = ".jpg";
+  if (input.kind === "checklist" && raw.subarray(0, 5).toString() === "%PDF-") {
+    try {
+      const pdf = await PDFDocument.load(raw);
+      if (
+        !pdf.getPageCount() ||
+        pdf.getPageCount() > 30 ||
+        raw.length > 8 * 1024 * 1024
+      )
+        throw Error();
+      // Parse the file to reject malformed and encrypted PDFs; preserve signed originals.
+      bytes = raw;
+      mime = "application/pdf";
+      extension = ".pdf";
+    } catch {
+      fail(
+        400,
+        "Checklist inválido. Envie um PDF sem senha de até 8 MB e 30 páginas, ou fotos das páginas assinadas.",
+      );
+    }
+  } else {
+    try {
+      const image = sharp(raw, { limitInputPixels: 24000000 });
+      const metadata = await image.metadata();
+      if (!["jpeg", "png", "webp"].includes(metadata.format)) throw Error();
+      bytes = await image
+        .rotate()
+        .resize({
+          width: 2400,
+          height: 2400,
+          fit: "inside",
+          withoutEnlargement: true,
+        })
+        .jpeg({ quality: 90 })
+        .toBuffer();
+    } catch {
+      fail(
+        400,
+        "A foto não pôde ser processada. Use JPEG, PNG ou WebP; o checklist também aceita PDF.",
+      );
+    }
   }
+  const equipment =
+    input.kind === "label"
+      ? await identifyEquipment(bytes, initial.t, cfg)
+      : { serial_code: "", equipment_type: "", equipment_model: "" };
   return transaction(pool, async (db) => {
     const { b, order } = await ownBatch(db, userId, id);
     editable(b, order, input.version);
@@ -184,18 +228,18 @@ async function upload(pool, cfg, userId, id, input) {
       fail(400, "Limite de 30 fotos por serviço.");
     const eid = randomUUID(),
       sha = createHash("sha256").update(bytes).digest("hex"),
-      name = eid + "-" + sha.slice(0, 12) + ".jpg";
+      name = eid + "-" + sha.slice(0, 12) + extension;
     await createMediaStore(cfg).put(name, bytes);
     await o.insert(db, "zc_evidence", {
       id: eid,
       batch_id: id,
       message_id: "portal:" + eid,
       path: name,
-      mime: "image/jpeg",
+      mime,
       sha256: sha,
       state: "ready",
       kind: input.kind,
-      serial_code: code,
+      ...equipment,
     });
     await db.query(
       "UPDATE zc_batches SET version=version+1,expected_count=expected_count+1 WHERE id=$1",
@@ -205,10 +249,19 @@ async function upload(pool, cfg, userId, id, input) {
       evidence_id: eid,
       kind: input.kind,
     });
-    return { id: eid, version: b.version + 1 };
+    return { id: eid, version: b.version + 1, ...equipment };
   });
 }
-async function verifyEvidence(db, b, r, codes) {
+function requiredEquipment(order) {
+  const selected = order.document_data?.equipment || [];
+  return {
+    RASTREADOR:
+      Number(selected.includes("tracker")) +
+      Number(selected.includes("tracker_extra")),
+    TAG: Number(selected.includes("tag")),
+  };
+}
+async function verifyEvidence(db, b, r, codes, order) {
   const files = await d.rows(
     db,
     "SELECT * FROM zc_evidence WHERE batch_id=$1",
@@ -223,6 +276,10 @@ async function verifyEvidence(db, b, r, codes) {
   for (const required of r.required_photos)
     if (files.filter((f) => f.kind === required.kind).length < required.min)
       fail(400, "Foto obrigatória pendente: " + required.label + ".");
+  if (b.capture_version >= 2 && !files.some((f) => f.kind === "inspection"))
+    fail(400, "Anexe as fotos da vistoria.");
+  if (b.capture_version >= 2 && !files.some((f) => f.kind === "checklist"))
+    fail(400, "Anexe o checklist preenchido e assinado (PDF ou fotos).");
   if (codes.length < r.min_serials)
     fail(400, "Informe os IMEIs/seriais exigidos para este serviço.");
   if (
@@ -233,6 +290,43 @@ async function verifyEvidence(db, b, r, codes) {
     )
   )
     fail(400, "Vincule uma foto da etiqueta a cada IMEI/serial informado.");
+  if (
+    b.capture_version >= 2 &&
+    r.stock_action === "install" &&
+    files.some(
+      (f) =>
+        f.kind === "label" &&
+        (!codes.includes(f.serial_code) ||
+          !["RASTREADOR", "TAG"].includes(f.equipment_type)),
+    )
+  )
+    fail(
+      400,
+      "Confira os equipamentos identificados nas fotos antes de enviar.",
+    );
+  if (b.capture_version >= 2 && r.stock_action === "install") {
+    for (const [type, min] of Object.entries(requiredEquipment(order))) {
+      const received = new Set(
+        files
+          .filter(
+            (f) =>
+              f.kind === "label" &&
+              f.equipment_type === type &&
+              codes.includes(f.serial_code),
+          )
+          .map((f) => f.serial_code),
+      );
+      if (received.size < min)
+        fail(
+          400,
+          "A OS exige " +
+            min +
+            " equipamento(s) do tipo " +
+            type +
+            ". Envie a foto de cada etiqueta.",
+        );
+    }
+  }
   return files;
 }
 async function submit(pool, userId, id, input) {
@@ -241,17 +335,29 @@ async function submit(pool, userId, id, input) {
     editable(b, order, input.version);
     if (input.confirmed !== true)
       fail(400, "Confira o veículo, as fotos e os IMEIs antes de enviar.");
+    if (b.capture_version >= 2 && input.checklist_signed !== true)
+      fail(400, "Confirme que o checklist está preenchido e assinado.");
     const codes = input.serials?.length ? serials(input.serials).sort() : [];
     if (codes.length > 20) fail(400, "Limite de 20 equipamentos por serviço.");
     const r = await rule(db, order.service);
-    await verifyEvidence(db, b, r, codes);
+    await verifyEvidence(db, b, r, codes, order);
     const notes = d.string(input.notes || "", "Relato do serviço", 6000);
+    const executedOn =
+      input.executed_on || b.executed_on || order.executed_on || d.today();
+    require("./financial-calendar").date(executedOn);
+    if (executedOn > d.today()) fail(400, "Execução não pode ter data futura.");
+    await require("./finance-engine").capture(db, order, executedOn);
     const updated = await o.update(
       db,
       "zc_orders",
       "id",
       order.id,
-      { status: "AGUARDANDO VALIDAÇÃO", updated_at: d.now() },
+      {
+        status: "AGUARDANDO CONFERÊNCIA",
+        executed_on: executedOn,
+        execution_finished_at: order.execution_finished_at || d.now(),
+        updated_at: d.now(),
+      },
       true,
     );
     await o.update(
@@ -261,6 +367,7 @@ async function submit(pool, userId, id, input) {
       id,
       {
         state: "submitted",
+        checklist_signed: input.checklist_signed === true,
         submitted_at: d.now(),
         notes,
         imeis: JSON.stringify(codes),
@@ -269,6 +376,7 @@ async function submit(pool, userId, id, input) {
       },
       true,
     );
+    await require("./notifications").orderEvent(db, updated, "submitted");
     await d.audit(db, String(userId), "portal_submitted", "batch", id, {
       order_id: order.id,
       serials: codes,
@@ -297,6 +405,14 @@ async function approve(pool, cfg, id, input, actor) {
       fail(409, "Técnico ou veículo não corresponde à OS.");
     if (["CONCLUÍDO", "CANCELADO"].includes(order.status))
       fail(409, "Serviço encerrado.");
+    if (
+      b.capture_version >= 2 &&
+      (!b.checklist_signed || input.checklist_reviewed !== true)
+    )
+      fail(
+        400,
+        "Confira se o checklist anexado está preenchido e assinado antes de aprovar.",
+      );
     const reason = d.string(input.reason, "Conferência", 1000, true);
     if (reason.length < 5) fail(400, "Descreva a conferência.");
     const codes =
@@ -306,7 +422,7 @@ async function approve(pool, cfg, id, input, actor) {
           : []
         : [...b.imeis].sort();
     const r = await rule(db, order.service);
-    await verifyEvidence(db, b, r, codes);
+    await verifyEvidence(db, b, r, codes, order);
     const tech = await d.one(
       db,
       "SELECT * FROM zc_technicians WHERE id=$1 AND active=true",
@@ -368,6 +484,11 @@ async function approve(pool, cfg, id, input, actor) {
         order_id: order.id,
         serials: codes,
       });
+      await require("./notifications").orderEvent(
+        db,
+        { ...order, version: order.version + 1 },
+        "approved",
+      );
       return { ok: true, status: "AGUARDANDO ESTOQUE" };
     }
     if (codes.length)
@@ -386,6 +507,11 @@ async function approve(pool, cfg, id, input, actor) {
     await o.complete(db, order.id, actor, reason, cfg, id, {
       confirmedSubmission: id,
     });
+    await require("./notifications").orderEvent(
+      db,
+      { ...order, version: order.version + 1 },
+      "approved",
+    );
     await d.audit(db, actor, "portal_approved", "batch", id, {
       order_id: order.id,
     });
@@ -438,6 +564,12 @@ async function reject(pool, id, input, actor) {
         updated_at: d.now(),
       },
       true,
+    );
+    await require("./notifications").orderEvent(
+      db,
+      { ...order, version: order.version + 1 },
+      "correction",
+      { reason },
     );
     await d.audit(db, actor, "portal_correction_requested", "batch", id, {
       reason,
@@ -512,4 +644,5 @@ module.exports = {
   reject,
   confirmStock,
   kinds,
+  requiredEquipment,
 };

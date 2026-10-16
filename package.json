@@ -1,6 +1,6 @@
 {
   "name": "zencontrol-platform",
-  "version": "6.2.0",
+  "version": "6.4.0",
   "private": true,
   "workspaces": [
     "apps/api",
@@ -26,9 +26,13 @@
     "demo": "npm run demo --workspace apps/api",
     "db:purge": "npm run db:purge --workspace apps/api --",
     "stock:dev": "npm run dev --workspace integrations/estoque-pro",
-    "stock:migrate": "npm run migrate --workspace integrations/estoque-pro"
+    "stock:migrate": "npm run migrate --workspace integrations/estoque-pro",
+    "homologation": "node scripts/homologation.cjs",
+    "homologation:build": "node scripts/homologation-build.cjs",
+    "homologation:ui": "node scripts/homologation-ui.cjs"
   },
   "devDependencies": {
+    "playwright": "1.62.1",
     "prettier": "^3.9.10"
   }
 }

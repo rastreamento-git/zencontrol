@@ -124,6 +124,8 @@ async function validate(db, input, old = null) {
       [
         "AGUARDANDO ESTOQUE",
         "AGUARDANDO VALIDAÇÃO",
+        "EXECUÇÃO FINALIZADA",
+        "AGUARDANDO CONFERÊNCIA",
         "CORREÇÃO SOLICITADA",
       ].includes(input.status) &&
       old?.status !== input.status
@@ -160,6 +162,7 @@ async function create(pool, input, actor) {
       created_by: actor,
       updated_at: d.now(),
     });
+    await require("./notifications").orderEvent(db, o, "created");
     await d.audit(db, actor, "created", "order", o.id);
     if (input.additional) {
       if (!["Tag Extra", "Rastreador Extra"].includes(input.additional))
@@ -180,6 +183,7 @@ async function create(pool, input, actor) {
         created_by: actor,
         updated_at: d.now(),
       });
+      await require("./notifications").orderEvent(db, extra, "created");
       await d.audit(db, actor, "created", "order", extra.id, {
         parent_id: o.id,
       });
@@ -211,6 +215,18 @@ async function edit(pool, id, input, actor) {
     )
       fail(409, "Uma OS concluída exige reabertura pela administração.");
     const data = await validate(db, input, old);
+    if (
+      ((data.technician_id !== undefined &&
+        data.technician_id !== old.technician_id) ||
+        (data.service !== undefined && data.service !== old.service)) &&
+      (await d.one(db, "SELECT 1 FROM zc_financial_ledger WHERE order_id=$1", [
+        id,
+      ]))
+    )
+      fail(
+        409,
+        "Esta execução já tem composição financeira. Preserve o histórico e crie outra OS para alterar técnico ou serviço.",
+      );
     const changes = Object.fromEntries(
       Object.entries(data).filter(([k, v]) =>
         k === "document_data" ? JSON.stringify(old[k]) !== v : old[k] !== v,
@@ -225,6 +241,23 @@ async function edit(pool, id, input, actor) {
       { ...data, updated_at: d.now() },
       true,
     );
+    if (result.status === "CANCELADO")
+      await db.query(
+        "UPDATE zc_financial_ledger SET state='cancelled' WHERE order_id=$1",
+        [id],
+      );
+    await require("./notifications").orderEvent(
+      db,
+      result,
+      result.status === "CANCELADO" ? "cancelled" : "updated",
+    );
+    if (old.technician_id && old.technician_id !== result.technician_id)
+      await require("./notifications").orderEvent(
+        db,
+        { ...old, version: result.version },
+        "updated",
+        { removed: true },
+      );
     await d.audit(db, actor, "updated", "order", id, {
       ...changes,
       ...(changes.document_data
@@ -304,6 +337,8 @@ async function complete(
     },
     true,
   );
+  await require("./finance-engine").makeEligible(db, updated);
+  await require("./notifications").orderEvent(db, updated, "completed");
   await d.audit(db, actor, "completed", "order", id, {
     reason,
     batch_id: batchId,
@@ -319,6 +354,15 @@ async function complete(
   return updated;
 }
 async function dispatch(pool, id, input, actor, cfg) {
+  const current = await get(pool, id);
+  if (current.workflow_mode === "controlled") {
+    if (!current.technician_id) fail(400, "Atribua um técnico ao serviço.");
+    return transaction(pool, async (db) => {
+      await require("./notifications").orderEvent(db, current, "created");
+      await d.audit(db, actor, "assigned_internally", "order", id);
+      return null;
+    });
+  }
   if (!cfg.INTEGRATIONS_ENABLED)
     fail(409, "Integrações desativadas no servidor.");
   return transaction(pool, async (db) => {
@@ -380,14 +424,21 @@ async function financial(db, tid, start, end) {
       "SELECT * FROM zc_order_extras WHERE order_id=$1",
       [o.id],
     );
+    const ledger = await d.one(
+      db,
+      "SELECT * FROM zc_financial_ledger WHERE order_id=$1",
+      [o.id],
+    );
     orders.push({
       id: o.id,
       vehicle: o.vehicle,
       service: o.service,
       completed_at: o.completed_at,
-      base_cents: t[key],
-      extras,
-      total_cents: t[key] + extras.reduce((a, x) => a + x.amount_cents, 0),
+      base_cents: ledger?.base_cents ?? t[key],
+      extras: ledger?.extras ?? extras,
+      total_cents:
+        ledger?.total_cents ??
+        t[key] + extras.reduce((a, x) => a + x.amount_cents, 0),
     });
   }
   return {

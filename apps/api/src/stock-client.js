@@ -79,6 +79,9 @@ class StockClient {
   items(technicianId) {
     return this.request("/technicians/" + technicianId + "/items");
   }
+  history(id, page = 1) {
+    return this.request(`/technicians/${id}/history?page=${page}`);
+  }
   async install(payload, key) {
     const r = await this.request("/installations", payload, key);
     if (

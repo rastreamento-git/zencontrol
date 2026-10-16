@@ -75,6 +75,27 @@ test("adapter authenticates its own secret and limits available inventory by tec
     load.data.items.map((e) => e.codigo_serial),
     ["zero-001", "zero-002"],
   );
+  const history = await request("/technicians/" + tid + "/history?page=1");
+  assert.equal(history.status, 200);
+  assert.equal(history.data.limit, 50);
+  assert.ok(history.data.items.some((e) => e.codigo_serial === "zero-001"));
+  assert.ok(history.data.items.every((e) => e.codigo_serial !== "zero-003"));
+  assert.equal(
+    (
+      await request(
+        "/technicians/" + tid + "/history?page=1",
+        null,
+        null,
+        "wrong-secret",
+      )
+    ).status,
+    401,
+  );
+  assert.equal(
+    (await request("/technicians/" + tid + "/history?page=0")).status,
+    400,
+  );
+  assert.equal(load.data.items[0].status, "TECNICO");
   const isolated = createApp(pool, {
     NODE_ENV: "test",
     APP_PASSWORD: "test-only-password-123456",
@@ -170,4 +191,53 @@ test("atomic installation, business refusal and concurrent retries preserve one 
     ).rows[0].quantidade,
     1,
   );
+});
+
+test("reused serial keeps each historical installation linked to its own OS without duplicate history rows", async () => {
+  const { receive, evaluate } = require("../src/inventory");
+  const code = "zero-002",
+    payload = {
+      source_system: "history-test",
+      order_id: "OS-HISTORY-ONE",
+      submission_id: "submission-history-one",
+      technician_id: tid,
+      serials: [code],
+      operator: "Teste histórico",
+    };
+  assert.equal(
+    (await request("/installations", payload, "history:installation:one"))
+      .status,
+    200,
+  );
+  await receive(pool, { seriais: [code] });
+  await evaluate(pool, { codigo_serial: code, aprovado: true });
+  await move(pool, "transferir", {
+    produto_id: pid,
+    tecnico_id: tid,
+    seriais: [code],
+  });
+  assert.equal(
+    (
+      await request(
+        "/installations",
+        {
+          ...payload,
+          order_id: "OS-HISTORY-TWO",
+          submission_id: "submission-history-two",
+        },
+        "history:installation:two",
+      )
+    ).status,
+    200,
+  );
+  const events = (
+    await request("/technicians/" + tid + "/history")
+  ).data.items.filter(
+    (e) => e.codigo_serial === code && e.status_novo === "INSTALADO",
+  );
+  assert.equal(events.length, 2);
+  assert.deepEqual(events.map((e) => e.order_id).sort(), [
+    "OS-HISTORY-ONE",
+    "OS-HISTORY-TWO",
+  ]);
 });

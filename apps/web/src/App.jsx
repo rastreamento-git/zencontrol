@@ -1,3 +1,4 @@
+import { NoticeBell, FinancePanel } from "./components/Ecosystem";
 import { useEffect, useRef, useState } from "react";
 import {
   Activity,
@@ -271,17 +272,15 @@ export default function App() {
                 month: "long",
               })}
             </span>
-            <button
-              className="icon-button notification-button is-enabled"
-              aria-label="Fila de envios e avisos"
-              title="Fila de envios e avisos"
-              onClick={() => navigate("queue")}
-            >
-              <Bell size={20} />
-              {overview?.validations > 0 && (
-                <span className="notification-dot" />
-              )}
-            </button>
+            <NoticeBell
+              onOpen={(n) => {
+                if (n.detail.order_id) {
+                  setOrder({ id: n.detail.order_id });
+                  navigate("batches");
+                } else
+                  navigate(n.target === "requests" ? "finance" : "batches");
+              }}
+            />
             {admin && (
               <button
                 className="icon-button"
@@ -350,7 +349,7 @@ export default function App() {
             ) : tab === "batches" ? (
               <Batches {...props} />
             ) : tab === "finance" ? (
-              <Finance {...props} />
+              <FinancePanel />
             ) : tab === "history" ? (
               <HistoryPage {...props} />
             ) : tab === "settings" ? (

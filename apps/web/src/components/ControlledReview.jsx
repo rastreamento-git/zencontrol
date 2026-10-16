@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { CheckCheck, Send, Undo2, RefreshCw } from "lucide-react";
 import LeitorSeriais from "@zen/ui/components/LeitorSeriais";
 import { api, errorMessage } from "@zen/ui/lib/api";
 import { notify, confirmAction } from "@zen/ui/lib/feedback";
-import { EvidencePhoto, photoLabels } from "../portal/TechnicianPortal";
+import { EvidencePhoto, photoLabels } from "@zen/ui/components/ServiceEvidence";
 import { Badge } from "./common";
 function Classification({ file, batch, reload, disabled }) {
   const [kind, setKind] = useState(file.kind),
@@ -73,6 +73,16 @@ function Classification({ file, batch, reload, disabled }) {
   );
 }
 export default function ControlledReview({ batch, reload, onSaved }) {
+  useEffect(() => {
+    if (
+      batch.current_order?.id &&
+      ["submitted", "ready", "needs_review"].includes(batch.state)
+    )
+      api
+        .post("/orders/" + batch.current_order.id + "/conference")
+        .catch(() => {});
+  }, [batch.id]);
+  const [checklistReviewed, setChecklistReviewed] = useState(false);
   const [codes, setCodes] = useState(batch.imeis || []),
     [reason, setReason] = useState(""),
     [confirmed, setConfirmed] = useState(false),
@@ -125,13 +135,16 @@ export default function ControlledReview({ batch, reload, onSaved }) {
       <div className="zc-evidence-grid">
         {batch.files.map((f) => (
           <EvidencePhoto key={f.id} file={f} prefix="">
-            <Classification
-              key={f.id + ":" + f.kind + ":" + f.serial_code}
-              file={f}
-              batch={batch}
-              reload={reload}
-              disabled={!reviewable || busy}
-            />
+            {(batch.capture_version < 2 ||
+              !["label", "checklist"].includes(f.kind)) && (
+              <Classification
+                key={f.id + ":" + f.kind + ":" + f.serial_code}
+                file={f}
+                batch={batch}
+                reload={reload}
+                disabled={!reviewable || busy}
+              />
+            )}
           </EvidencePhoto>
         ))}
       </div>
@@ -192,6 +205,17 @@ export default function ControlledReview({ batch, reload, onSaved }) {
           />
         </label>
       )}
+      {reviewable && batch.capture_version >= 2 && (
+        <label className="zc-checkbox">
+          <input
+            type="checkbox"
+            checked={checklistReviewed}
+            disabled={busy}
+            onChange={(e) => setChecklistReviewed(e.target.checked)}
+          />
+          Abri o checklist e conferi o preenchimento e a assinatura.
+        </label>
+      )}
       {reviewable && (
         <label className="zc-checkbox">
           <input
@@ -236,7 +260,12 @@ export default function ControlledReview({ batch, reload, onSaved }) {
           <button
             type="button"
             className="primary-button"
-            disabled={busy || !confirmed || reason.trim().length < 5}
+            disabled={
+              busy ||
+              !confirmed ||
+              reason.trim().length < 5 ||
+              (batch.capture_version >= 2 && !checklistReviewed)
+            }
             onClick={() =>
               act(async () => {
                 const r = await api.post("/batches/" + batch.id + "/approve", {
@@ -244,6 +273,7 @@ export default function ControlledReview({ batch, reload, onSaved }) {
                   order_version: batch.current_order.version,
                   reason,
                   serials: codes,
+                  checklist_reviewed: checklistReviewed,
                 });
                 notify(
                   r.data.status === "AGUARDANDO ESTOQUE"

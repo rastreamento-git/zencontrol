@@ -464,14 +464,16 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
             )}
             {!["CONCLUÍDO", "CANCELADO"].includes(order.status) && (
               <>
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={() => setAction("dispatch")}
-                >
-                  <Send size={15} />
-                  Encaminhar ao técnico
-                </button>
+                {order.workflow_mode !== "controlled" && (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => setAction("dispatch")}
+                  >
+                    <Send size={15} />
+                    Encaminhar ao técnico
+                  </button>
+                )}
                 <button
                   type="button"
                   className="secondary-button"
@@ -883,6 +885,7 @@ export function Technicians({ user, revision, refresh }) {
     revision,
   );
   const admin = user.papel === "admin";
+  const [access, setAccess] = useState(null);
   const { data, loading, error } = useLoad("/technicians", revision);
   const [showInactive, setShowInactive] = useState(false),
     [edit, setEdit] = useState(null),
@@ -902,7 +905,7 @@ export function Technicians({ user, revision, refresh }) {
     <>
       <Intro
         title="Sua equipe, conectada."
-        subtitle="Organize os canais de envio e retorno dos técnicos."
+        subtitle="Distribua serviços e gerencie o acesso individual ao ZenField."
       >
         <button
           className="secondary-button"
@@ -952,8 +955,31 @@ export function Technicians({ user, revision, refresh }) {
               </p>
               <p>
                 <Send size={14} />
-                {t.send_group_name || t.send_group || "Envio no privado"}
+                ZenField · notificações internas
               </p>
+              {admin && t.active && (
+                <button
+                  className="secondary-button"
+                  onClick={async () => {
+                    if (
+                      !(await confirmAction(
+                        "Gerar novo código de ativação? As sessões deste acesso serão encerradas.",
+                      ))
+                    )
+                      return;
+                    try {
+                      const { data } = await api.post(
+                        "/technicians/" + t.id + "/activation",
+                      );
+                      setAccess(data);
+                    } catch (e) {
+                      notify(errorMessage(e), "error");
+                    }
+                  }}
+                >
+                  Gerar código de acesso ZenField
+                </button>
+              )}
               <div className="zc-tech-footer">
                 <span>
                   {admin ? (
@@ -987,6 +1013,42 @@ export function Technicians({ user, revision, refresh }) {
           ))}
         </div>
       )}
+      {access && (
+        <Modal
+          title="Acesso individual ao ZenField"
+          onClose={() => setAccess(null)}
+        >
+          <div className="eco-card">
+            <p>
+              Entregue estes dados ao técnico por um canal administrativo
+              verificado.
+            </p>
+            <p>
+              Login: <strong>{access.login}</strong>
+            </p>
+            <p>
+              Senha provisória: <strong>{access.temporary_password}</strong>
+            </p>
+            <p>
+              Código de uso único:{" "}
+              <strong style={{ overflowWrap: "anywhere" }}>
+                {access.code}
+              </strong>
+            </p>
+            <p>
+              Válido até {new Date(access.expires_at).toLocaleString("pt-BR")}.
+              O código só é mostrado nesta emissão.
+            </p>
+            <p>
+              No ZenField, marque “Primeiro acesso ou redefinição” e cadastre
+              uma nova senha de pelo menos 12 caracteres.
+            </p>
+            <button className="primary-button" onClick={() => setAccess(null)}>
+              Concluir
+            </button>
+          </div>
+        </Modal>
+      )}
       {edit && (
         <FormModal
           title={edit.id ? "Editar técnico" : "Cadastrar técnico"}
@@ -994,7 +1056,7 @@ export function Technicians({ user, revision, refresh }) {
           initial={{ active: true, ...edit }}
           fields={[
             { name: "name", label: "Nome", required: true, full: true },
-            { name: "phone", label: "WhatsApp com DDI e DDD" },
+            { name: "phone", label: "Telefone com DDI e DDD" },
             {
               name: "stock_technician_id",
               label: "Cadastro correspondente no Estoque Pro",
@@ -1017,10 +1079,6 @@ export function Technicians({ user, revision, refresh }) {
             },
             { name: "tags", label: "Habilidades / tags" },
             { name: "address", label: "Endereço / região base", full: true },
-            { name: "receive_group", label: "JID do grupo de retorno" },
-            { name: "receive_group_name", label: "Nome do grupo de retorno" },
-            { name: "send_group", label: "JID do grupo de envio" },
-            { name: "send_group_name", label: "Nome do grupo de envio" },
             ...prices.map((k, i) => ({
               name: k,
               label: [
@@ -1042,10 +1100,6 @@ export function Technicians({ user, revision, refresh }) {
                 "stock_technician_id",
                 "tags",
                 "address",
-                "receive_group",
-                "receive_group_name",
-                "send_group",
-                "send_group_name",
                 "active",
                 ...prices,
               ]
@@ -1057,7 +1111,10 @@ export function Technicians({ user, revision, refresh }) {
                 ...payload,
                 version: edit.version,
               });
-            else await api.post("/technicians", payload);
+            else {
+              const { data } = await api.post("/technicians", payload);
+              setAccess(data.access);
+            }
             setEdit(null);
             refresh();
             notify("Cadastro do técnico salvo.");

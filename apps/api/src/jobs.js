@@ -117,7 +117,9 @@ async function execute(pool, cfg, job, wpp, sga) {
       });
     await wpp.document(
       tech.send_group || tech.phone,
-      await orderPdf(order, p.masked, { portalUrl: cfg.PUBLIC_URL }),
+      await orderPdf(order, p.masked, {
+        portalUrl: cfg.TECHNICIAN_PORTAL_URL || cfg.PUBLIC_URL,
+      }),
       order.id + ".pdf",
       `NOVA ORDEM DE SERVIÇO\nOS: ${order.id}\nServiço: ${order.service}\nPlaca ou Chassi: ${order.vehicle}`,
     );
@@ -332,7 +334,9 @@ async function execute(pool, cfg, job, wpp, sga) {
     if (!files.length || files.length !== b.expected_count)
       throw Object.assign(Error("Fotos pendentes."), { status: 400 });
     const photos = await Promise.all(
-      files.map((f) => createMediaStore(cfg).read(f.path)),
+      files
+        .filter((f) => f.mime.startsWith("image/"))
+        .map((f) => createMediaStore(cfg).read(f.path)),
     );
     await sga.upload(order.sga_id, photos, b.reviewed_by);
     await transaction(pool, async (db) => {

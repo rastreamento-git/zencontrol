@@ -45,8 +45,20 @@ test("backup remoto inclui originais, restaura no bucket e remove arquivos tempo
       sha256: hash(edited),
       state: "ready",
     });
+    const checklist = Buffer.from("%PDF-checklist-fixture");
+    await store.put("abc-333.pdf", checklist);
+    await o.insert(pool, "zc_evidence", {
+      id: "cloud-checklist",
+      batch_id: "cloud-batch",
+      message_id: "test-checklist",
+      path: "abc-333.pdf",
+      mime: "application/pdf",
+      sha256: hash(checklist),
+      state: "ready",
+      kind: "checklist",
+    });
     backup = await prepareBackup(pool, cloud);
-    assert.equal(backup.files.length, 2);
+    assert.equal(backup.files.length, 3);
     assert.equal(
       JSON.parse(backup.manifest).media["abc-111.jpg"],
       hash(original),
@@ -68,6 +80,7 @@ test("backup remoto inclui originais, restaura no bucket e remove arquivos tempo
     await restoreBackup(pool, cloud, target, true);
     assert.deepEqual(await store.read("abc-111.jpg"), original);
     assert.deepEqual(await store.read("def-222.jpg"), edited);
+    assert.deepEqual(await store.read("abc-333.pdf"), checklist);
     remote.state.failDownload = true;
     await assert.rejects(prepareBackup(pool, cloud), /foto referenciada/);
   } finally {

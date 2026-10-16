@@ -5,6 +5,8 @@ const assert = require("node:assert/strict"),
   path = require("node:path");
 const { once } = require("node:events");
 const sharp = require("sharp");
+const { photo } = require("./helpers/equipment-photo.cjs");
+const { PDFDocument } = require("pdf-lib");
 const { mockSupabase, config: mediaConfig } = require("./helpers/supabase.cjs");
 const remote = mockSupabase();
 const { testDatabase } = require("./helpers/database.cjs");
@@ -101,8 +103,8 @@ async function submission(o, codes = ["123456789012345"], service = "install") {
     201,
   );
   for (const kind of service === "install"
-    ? ["vehicle", "label", "installed"]
-    : ["vehicle", "service"]) {
+    ? ["vehicle", "label", "installed", "inspection", "checklist"]
+    : ["vehicle", "service", "inspection", "checklist"]) {
     const r = await ok(
       "/api/technician/batches/" + b.id + "/photos",
       "POST",
@@ -110,7 +112,7 @@ async function submission(o, codes = ["123456789012345"], service = "install") {
         version: b.version,
         kind,
         serial_code: kind === "label" ? codes[0] : "",
-        image: jpg,
+        image: kind === "label" ? await photo(codes[0]) : jpg,
       },
       ta,
       201,
@@ -125,6 +127,7 @@ async function submission(o, codes = ["123456789012345"], service = "install") {
       serials: codes,
       notes: "Atendimento finalizado, conferido.",
       confirmed: true,
+      checklist_signed: true,
     },
     ta,
   );
@@ -139,6 +142,7 @@ async function approve(b) {
       order_version: b.current_order.version,
       serials: b.imeis,
       reason: "Fotos e códigos conferidos na central.",
+      checklist_reviewed: true,
     },
     operator,
   );
@@ -198,6 +202,7 @@ before(async () => {
     STOCK_API_URL: sbase,
     STOCK_API_SECRET: secret,
     STOCK_SOURCE_SYSTEM: "zencontrol-test",
+    TECHNICIAN_PORTAL_URL: "https://portal-tecnico.example.test",
   });
   const app = createApp(pool, cfg);
   await app.locals.ready();
@@ -402,17 +407,33 @@ test("submission requires confirmation, required photos and a label bound to eac
       await req(
         "/api/technician/batches/" + b.id + "/submit",
         "POST",
-        { version: b.version, serials: ["123456789012345"], confirmed: true },
+        {
+          version: b.version,
+          serials: ["wrong-code"],
+          confirmed: true,
+          checklist_signed: true,
+        },
         ta,
       )
     ).status,
     400,
   );
-  for (const kind of ["vehicle", "label", "installed"]) {
+  await serials(["123456789012345"]);
+  for (const kind of [
+    "vehicle",
+    "label",
+    "installed",
+    "inspection",
+    "checklist",
+  ]) {
     const p = await ok(
       "/api/technician/batches/" + b.id + "/photos",
       "POST",
-      { version: b.version, kind, image: jpg },
+      {
+        version: b.version,
+        kind,
+        image: kind === "label" ? await photo("123456789012345") : jpg,
+      },
       ta,
       201,
     );
@@ -438,17 +459,28 @@ test("submission requires confirmation, required photos and a label bound to eac
     await ok("/api/technician/orders/" + a.id, "GET", undefined, ta)
   ).submissions[0].files;
   const label = files.find((f) => f.kind === "label");
-  await ok(
-    "/api/technician/photos/" + label.id,
-    "PATCH",
-    { version: b.version, serial_code: "123456789012345" },
-    ta,
+  assert.equal(label.serial_code, "123456789012345");
+  assert.equal(label.equipment_type, "RASTREADOR");
+  assert.equal(
+    (
+      await req(
+        "/api/technician/photos/" + label.id,
+        "PATCH",
+        { version: b.version, serial_code: "another-code" },
+        ta,
+      )
+    ).status,
+    409,
   );
-  b.version++;
   await ok(
     "/api/technician/batches/" + b.id + "/submit",
     "POST",
-    { version: b.version, serials: ["123456789012345"], confirmed: true },
+    {
+      version: b.version,
+      serials: ["123456789012345"],
+      confirmed: true,
+      checklist_signed: true,
+    },
     ta,
   );
   assert.equal(
@@ -468,7 +500,7 @@ test("submission requires confirmation, required photos and a label bound to eac
   );
   assert.equal(
     (await ok("/api/orders/" + a.id)).status,
-    "AGUARDANDO VALIDAÇÃO",
+    "AGUARDANDO CONFERÊNCIA",
   );
   assert.equal(
     (
@@ -537,9 +569,13 @@ test("central approval stays pending until the genuine stock receipt and uses th
 });
 test("wrong technician load causes an atomic refusal and correction remains possible", async () => {
   const code = "123456789012347";
-  await serials([code], stockB);
+  await serials([code]);
   const a = await order(),
     b = await submission(a, [code]);
+  await spool.query(
+    "UPDATE equipamentos_seriais SET tecnico_id=$1 WHERE codigo_serial=$2",
+    [stockB, code],
+  );
   await approve(b);
   await runOne(pool, cfg);
   const pending = await ok("/api/orders/" + a.id);
@@ -636,7 +672,7 @@ test("non-installation service requires the central but never calls stock instal
     b = await submission(a, [], "none");
   assert.equal(
     (await ok("/api/orders/" + a.id)).status,
-    "AGUARDANDO VALIDAÇÃO",
+    "AGUARDANDO CONFERÊNCIA",
   );
   await approve(b);
   assert.equal((await ok("/api/orders/" + a.id)).status, "CONCLUÍDO");
@@ -788,4 +824,468 @@ test("technician downloads only the assigned masked OS, even with an integral qu
       .status,
     404,
   );
+});
+
+test("unreadable or wrong-load equipment photo cannot be replaced by a typed IMEI and creates no evidence", async () => {
+  const a = await order();
+  const b = await ok(
+    "/api/technician/orders/" + a.id + "/draft",
+    "POST",
+    { version: a.version },
+    ta,
+    201,
+  );
+  const objectsBefore = remote.state.objects.size;
+  for (const image of [jpg, await photo("not-in-load", "QRCode")]) {
+    const r = await req(
+      "/api/technician/batches/" + b.id + "/photos",
+      "POST",
+      {
+        version: b.version,
+        kind: "label",
+        image,
+        serial_code: "123456789012345",
+      },
+      ta,
+    );
+    assert.equal(r.status, 400);
+    assert.match(r.data.error, /ilegível|não corresponde/);
+  }
+  const own = await ok("/api/technician/orders/" + a.id, "GET", undefined, ta);
+  assert.equal(own.submissions[0].version, b.version);
+  assert.equal(own.submissions[0].files.length, 0);
+  assert.equal(remote.state.objects.size, objectsBefore);
+});
+
+test("QR photograph automatically identifies a TAG and binds its serial without scanning or typing", async () => {
+  const model = (
+    await spool.query(
+      "INSERT INTO produtos(nome,categoria) VALUES('TAG de teste portal','TAG') RETURNING id",
+    )
+  ).rows[0].id;
+  await serials(["TAG-PORTAL-0001"], stockA, model);
+  const a = await order();
+  const b = await ok(
+    "/api/technician/orders/" + a.id + "/draft",
+    "POST",
+    { version: a.version },
+    ta,
+    201,
+  );
+  const result = await ok(
+    "/api/technician/batches/" + b.id + "/photos",
+    "POST",
+    {
+      version: b.version,
+      kind: "label",
+      image: await photo(
+        JSON.stringify({ serial: "TAG-PORTAL-0001" }),
+        "QRCode",
+      ),
+    },
+    ta,
+    201,
+  );
+  assert.equal(result.equipment_type, "TAG");
+  assert.equal(result.serial_code, "TAG-PORTAL-0001");
+  const detail = await ok(
+    "/api/technician/orders/" + a.id,
+    "GET",
+    undefined,
+    ta,
+  );
+  assert.equal(detail.submissions[0].files[0].serial_code, result.serial_code);
+  assert.ok(detail.document.customer);
+  assert.equal(detail.document.service, a.service);
+});
+
+test("signed checklist PDF is private and required before submission and central payment release", async () => {
+  const a = await order("Manutenção");
+  const b = await ok(
+    "/api/technician/orders/" + a.id + "/draft",
+    "POST",
+    { version: a.version },
+    ta,
+    201,
+  );
+  for (const kind of ["vehicle", "service", "inspection"]) {
+    const r = await ok(
+      "/api/technician/batches/" + b.id + "/photos",
+      "POST",
+      { version: b.version, kind, image: jpg },
+      ta,
+      201,
+    );
+    b.version = r.version;
+  }
+  const submitBody = () => ({
+    version: b.version,
+    serials: [],
+    confirmed: true,
+    checklist_signed: true,
+  });
+  const pending = await req(
+    "/api/technician/batches/" + b.id + "/submit",
+    "POST",
+    submitBody(),
+    ta,
+  );
+  assert.equal(pending.status, 400);
+  assert.match(pending.data.error, /checklist/i);
+  const invalid = await req(
+    "/api/technician/batches/" + b.id + "/photos",
+    "POST",
+    {
+      version: b.version,
+      kind: "checklist",
+      image:
+        "data:application/pdf;base64," +
+        Buffer.from("%PDF-invalid").toString("base64"),
+    },
+    ta,
+  );
+  assert.equal(invalid.status, 400);
+  const pdf = await PDFDocument.create();
+  pdf.addPage();
+  const pdfBytes = Buffer.from(await pdf.save());
+  const file = await ok(
+    "/api/technician/batches/" + b.id + "/photos",
+    "POST",
+    {
+      version: b.version,
+      kind: "checklist",
+      image: "data:application/pdf;base64," + pdfBytes.toString("base64"),
+    },
+    ta,
+    201,
+  );
+  b.version = file.version;
+  const downloaded = await ok(
+    "/api/technician/evidence/" + file.id,
+    "GET",
+    undefined,
+    ta,
+  );
+  assert.deepEqual(downloaded, pdfBytes);
+  assert.equal(
+    (await req("/api/technician/evidence/" + file.id, "GET", undefined, tb))
+      .status,
+    404,
+  );
+  assert.equal(
+    (
+      await req(
+        "/api/technician/batches/" + b.id + "/submit",
+        "POST",
+        { ...submitBody(), checklist_signed: false },
+        ta,
+      )
+    ).status,
+    400,
+  );
+  await ok(
+    "/api/technician/batches/" + b.id + "/submit",
+    "POST",
+    submitBody(),
+    ta,
+  );
+  const finance =
+    "/api/finance/preview?technician_id=" +
+    tida +
+    "&start=2020-01-01&end=2099-12-31";
+  assert.ok(!(await ok(finance)).orders.some((row) => row.id === a.id));
+  const review = await ok("/api/batches/" + b.id);
+  const centralBody = {
+    version: review.version,
+    order_version: review.current_order.version,
+    reason: "Arquivo e assinatura conferidos.",
+    serials: [],
+  };
+  assert.equal(
+    (
+      await req(
+        "/api/batches/" + b.id + "/approve",
+        "POST",
+        centralBody,
+        operator,
+      )
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await req(
+        "/api/evidence/" + file.id + "/classify",
+        "PATCH",
+        { version: review.version, kind: "other" },
+        operator,
+      )
+    ).status,
+    409,
+  );
+  await ok(
+    "/api/batches/" + b.id + "/approve",
+    "POST",
+    { ...centralBody, checklist_reviewed: true },
+    operator,
+  );
+  assert.ok((await ok(finance)).orders.some((row) => row.id === a.id));
+});
+
+test("new OS requiring tracker and TAG cannot be submitted with just one equipment type", async () => {
+  const tracker = "required-tracker-001",
+    tag = "required-tag-001";
+  const model = (
+    await spool.query(
+      "INSERT INTO produtos(nome,categoria) VALUES('TAG obrigatória','TAG') RETURNING id",
+    )
+  ).rows[0].id;
+  await serials([tracker]);
+  await serials([tag], stockA, model);
+  const a = await order();
+  await ok("/api/orders/" + a.id, "PATCH", {
+    version: a.version,
+    document_data: { equipment: ["tracker", "tag"] },
+  });
+  const updated = await ok(
+    "/api/technician/orders/" + a.id,
+    "GET",
+    undefined,
+    ta,
+  );
+  const b = await ok(
+    "/api/technician/orders/" + a.id + "/draft",
+    "POST",
+    { version: updated.order.version },
+    ta,
+    201,
+  );
+  for (const kind of [
+    "vehicle",
+    "installed",
+    "inspection",
+    "checklist",
+    "label",
+  ]) {
+    const r = await ok(
+      "/api/technician/batches/" + b.id + "/photos",
+      "POST",
+      {
+        version: b.version,
+        kind,
+        image: kind === "label" ? await photo(tracker) : jpg,
+      },
+      ta,
+      201,
+    );
+    b.version = r.version;
+  }
+  const payload = {
+    version: b.version,
+    serials: [tracker],
+    confirmed: true,
+    checklist_signed: true,
+  };
+  const refused = await req(
+    "/api/technician/batches/" + b.id + "/submit",
+    "POST",
+    payload,
+    ta,
+  );
+  assert.equal(refused.status, 400);
+  assert.match(refused.data.error, /TAG/);
+  const added = await ok(
+    "/api/technician/batches/" + b.id + "/photos",
+    "POST",
+    { version: b.version, kind: "label", image: await photo(tag, "QRCode") },
+    ta,
+    201,
+  );
+  await ok(
+    "/api/technician/batches/" + b.id + "/submit",
+    "POST",
+    { ...payload, version: added.version, serials: [tracker, tag] },
+    ta,
+  );
+});
+
+test("pre-upgrade submissions retain their original evidence requirements", async () => {
+  const a = await order("Manutenção");
+  const b = await ok(
+    "/api/technician/orders/" + a.id + "/draft",
+    "POST",
+    { version: a.version },
+    ta,
+    201,
+  );
+  // A previously created batch has capture_version=1 after migration 004.
+  await pool.query("UPDATE zc_batches SET capture_version=1 WHERE id=$1", [
+    b.id,
+  ]);
+  for (const kind of ["vehicle", "service"]) {
+    const added = await ok(
+      "/api/technician/batches/" + b.id + "/photos",
+      "POST",
+      { version: b.version, kind, image: jpg },
+      ta,
+      201,
+    );
+    b.version = added.version;
+  }
+  await ok(
+    "/api/technician/batches/" + b.id + "/submit",
+    "POST",
+    { version: b.version, serials: [], confirmed: true },
+    ta,
+  );
+  const review = await ok("/api/batches/" + b.id);
+  await ok(
+    "/api/batches/" + b.id + "/approve",
+    "POST",
+    {
+      version: review.version,
+      order_version: review.current_order.version,
+      serials: [],
+      reason: "Conferência de registro anterior.",
+    },
+    operator,
+  );
+  assert.equal((await ok("/api/orders/" + a.id)).status, "CONCLUÍDO");
+});
+
+test("separate portal login accepts only technician accounts and central accepts only staff", async () => {
+  const technicianAtCentral = await req(
+    "/api/auth/login",
+    "POST",
+    { login: "ana", password, audience: "central" },
+    null,
+  );
+  assert.equal(technicianAtCentral.status, 403);
+  assert.equal(technicianAtCentral.data.token, undefined);
+  const staffAtPortal = await req(
+    "/api/auth/login",
+    "POST",
+    { login: "central", password, audience: "technician" },
+    null,
+  );
+  assert.equal(staffAtPortal.status, 403);
+  assert.equal(staffAtPortal.data.token, undefined);
+  const technicianLogin = await ok(
+    "/api/auth/login",
+    "POST",
+    { login: "ana", password, audience: "technician" },
+    null,
+  );
+  assert.equal(technicianLogin.user.papel, "tecnico");
+  assert.equal(
+    (
+      await req(
+        "/api/finance/settlements",
+        "GET",
+        undefined,
+        technicianLogin.token,
+      )
+    ).status,
+    403,
+  );
+});
+
+test("configured portal origin supports cross-origin authenticated uploads and old entry redirects to it", async () => {
+  const target = "https://portal-tecnico.example.test";
+  const allowed = await fetch(base + "/api/technician/orders", {
+    headers: { Origin: target, Authorization: "Bearer " + ta },
+  });
+  assert.equal(allowed.status, 200);
+  assert.equal(allowed.headers.get("access-control-allow-origin"), target);
+  const preflight = await fetch(base + "/api/technician/batches/any/photos", {
+    method: "OPTIONS",
+    headers: {
+      Origin: target,
+      "Access-Control-Request-Method": "POST",
+      "Access-Control-Request-Headers": "authorization,content-type",
+    },
+  });
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers.get("access-control-allow-origin"), target);
+  const unknown = await fetch(base + "/api/technician/orders", {
+    headers: {
+      Origin: "https://not-allowed.example.test",
+      Authorization: "Bearer " + ta,
+    },
+  });
+  assert.equal(unknown.status, 403);
+  const redirect = await fetch(base + "/tecnico", { redirect: "manual" });
+  assert.equal(redirect.status, 302);
+  assert.equal(redirect.headers.get("location"), target);
+});
+
+test("C/D: real photo submissions persist central/technician alerts, frozen remuneration and official stock history", async () => {
+  const centralInbox = await ok("/api/notifications?limit=100");
+  const pending = centralInbox.items.find(
+    (n) => n.title === "Novo serviço aguardando conferência.",
+  );
+  assert.ok(pending);
+  const before = (
+    await ok("/api/notifications?limit=100", "GET", undefined, operator)
+  ).unread;
+  await ok("/api/notifications/" + pending.id + "/read", "POST", {}, admin);
+  assert.equal(
+    (await ok("/api/notifications?limit=100", "GET", undefined, operator))
+      .unread,
+    before,
+  );
+  const techInbox = await ok(
+    "/api/notifications?limit=100",
+    "GET",
+    undefined,
+    ta,
+  );
+  assert.ok(techInbox.items.some((n) => n.title === "Serviço concluído"));
+  assert.ok(techInbox.items.some((n) => n.title === "Correção solicitada"));
+  const finance = await ok("/api/technician/finance", "GET", undefined, ta);
+  assert.ok(
+    finance.ledger.some((l) => l.state === "approved" && l.eligible_on),
+  );
+  const history = await ok(
+    "/api/technician/stock/history",
+    "GET",
+    undefined,
+    ta,
+  );
+  assert.ok(
+    history.items.some((e) => e.status_novo === "INSTALADO" && e.order_id),
+  );
+  assert.ok(history.items.every((e) => e.codigo_serial !== "load-bruno-only"));
+  const refreshed = await ok(
+    "/api/notifications?limit=100",
+    "GET",
+    undefined,
+    ta,
+  );
+  assert.ok(
+    refreshed.items.some(
+      (n) => n.title === "Equipamento recebido na sua carga",
+    ),
+  );
+});
+
+test("J: health check returns 503 during a database outage without leaking configuration", async () => {
+  const offline = createApp(
+    {
+      query: async () => {
+        throw Error("private-connection-details");
+      },
+    },
+    cfg,
+  ).listen(0, "127.0.0.1");
+  await once(offline, "listening");
+  try {
+    const r = await fetch(
+      "http://127.0.0.1:" + offline.address().port + "/healthz",
+    );
+    assert.equal(r.status, 503);
+    assert.deepEqual(await r.json(), { status: "unavailable" });
+  } finally {
+    await new Promise((resolve) => offline.close(resolve));
+  }
 });

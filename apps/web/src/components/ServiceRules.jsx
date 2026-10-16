@@ -2,7 +2,7 @@ import { useState } from "react";
 import { api, errorMessage } from "@zen/ui/lib/api";
 import { notify } from "@zen/ui/lib/feedback";
 import { Panel, useLoad, Loading } from "./common";
-import { photoLabels } from "../portal/TechnicianPortal";
+import { photoLabels } from "@zen/ui/components/ServiceEvidence";
 function Rule({ rule, onSaved }) {
   const [photos, setPhotos] = useState(rule.required_photos),
     [busy, setBusy] = useState(false),
@@ -43,47 +43,50 @@ function Rule({ rule, onSaved }) {
         </button>
       </div>
       <div className="portal-rule-photos">
-        {Object.entries(photoLabels).map(([kind, label]) => {
-          const entry = photos.find((p) => p.kind === kind);
-          return (
-            <label key={kind}>
-              <input
-                type="checkbox"
-                checked={!!entry}
-                disabled={
-                  busy || (kind === "label" && rule.stock_action === "install")
-                }
-                onChange={(e) =>
-                  setPhotos((list) =>
-                    e.target.checked
-                      ? [...list, { kind, label, min: 1 }]
-                      : list.filter((p) => p.kind !== kind),
-                  )
-                }
-              />
-              <span>{label}</span>
-              {entry && (
+        {Object.entries(photoLabels)
+          .filter(([kind]) => kind !== "checklist")
+          .map(([kind, label]) => {
+            const entry = photos.find((p) => p.kind === kind);
+            return (
+              <label key={kind}>
                 <input
-                  type="number"
-                  min="1"
-                  max="10"
-                  aria-label={"Quantidade de fotos: " + label}
-                  value={entry.min}
-                  disabled={busy}
+                  type="checkbox"
+                  checked={!!entry}
+                  disabled={
+                    busy ||
+                    (kind === "label" && rule.stock_action === "install")
+                  }
                   onChange={(e) =>
                     setPhotos((list) =>
-                      list.map((p) =>
-                        p.kind === kind
-                          ? { ...p, min: Number(e.target.value) }
-                          : p,
-                      ),
+                      e.target.checked
+                        ? [...list, { kind, label, min: 1 }]
+                        : list.filter((p) => p.kind !== kind),
                     )
                   }
                 />
-              )}
-            </label>
-          );
-        })}
+                <span>{label}</span>
+                {entry && (
+                  <input
+                    type="number"
+                    min="1"
+                    max="10"
+                    aria-label={"Quantidade de fotos: " + label}
+                    value={entry.min}
+                    disabled={busy}
+                    onChange={(e) =>
+                      setPhotos((list) =>
+                        list.map((p) =>
+                          p.kind === kind
+                            ? { ...p, min: Number(e.target.value) }
+                            : p,
+                        ),
+                      )
+                    }
+                  />
+                )}
+              </label>
+            );
+          })}
       </div>
       {error && <p className="form-error">{error}</p>}
     </section>
@@ -94,7 +97,7 @@ export default function ServiceRules({ revision, refresh }) {
   return (
     <Panel
       title="Evidências exigidas por serviço"
-      subtitle="A etiqueta é obrigatória para cada IMEI instalado. A central sempre confirma o atendimento."
+      subtitle="A etiqueta é obrigatória por equipamento instalado. Novos registros também exigem vistoria e checklist assinado, com conferência da central."
     >
       <div className="zc-panel-padding">
         {loading || error ? (

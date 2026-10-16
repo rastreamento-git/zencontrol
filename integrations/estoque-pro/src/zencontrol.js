@@ -46,11 +46,28 @@ function configureZenControl(app, pool, env) {
     res.json({
       items: (
         await pool.query(
-          "SELECT e.codigo_serial,e.produto_id,e.tecnico_id,p.nome produto,p.categoria FROM equipamentos_seriais e JOIN produtos p ON p.id=e.produto_id WHERE e.tecnico_id=$1 AND e.status='TECNICO' AND NOT e.arquivado ORDER BY p.nome,e.codigo_serial",
+          "SELECT e.codigo_serial,e.produto_id,e.tecnico_id,e.status,e.data_atualizacao,p.nome produto,p.categoria FROM equipamentos_seriais e JOIN produtos p ON p.id=e.produto_id WHERE e.tecnico_id=$1 AND e.status='TECNICO' AND NOT e.arquivado ORDER BY p.nome,e.codigo_serial",
           [tid],
         )
       ).rows,
     });
+  });
+  app.get(base + "/technicians/:id/history", authorize, async (req, res) => {
+    const tid = integer(req.params.id, "Técnico"),
+      page = integer(req.query.page || 1, "Página");
+    if (
+      !(
+        await pool.query("SELECT 1 FROM tecnicos WHERE id=$1 AND ativo=true", [
+          tid,
+        ])
+      ).rowCount
+    )
+      fail(404, "Técnico ativo não encontrado.");
+    const result = await pool.query(
+      "SELECT e.id,e.codigo_serial,e.status_anterior,e.status_novo,e.data,m.tipo,p.nome modelo,p.categoria,NULLIF(e.zen_order_id,'') order_id FROM eventos_seriais e LEFT JOIN movimentacoes m ON m.id=e.movimentacao_id LEFT JOIN produtos p ON p.id=e.produto_id WHERE e.tecnico_id=$1 ORDER BY e.data DESC,e.id DESC LIMIT 50 OFFSET $2",
+      [tid, (page - 1) * 50],
+    );
+    res.json({ items: result.rows, page, limit: 50 });
   });
   app.post(base + "/installations", authorize, async (req, res) => {
     const body = req.body || {},
@@ -133,6 +150,12 @@ function configureZenControl(app, pool, env) {
                 .filter((e) => e.produto_id === id)
                 .map((e) => e.codigo_serial),
             });
+          // Link only the installation events just written while serial rows are locked.
+          // Joining receipts by serial would misattribute a later reinstallation to an older OS.
+          await client.query(
+            "UPDATE eventos_seriais SET zen_source=$1,zen_order_id=$2 WHERE id IN(SELECT max(id) FROM eventos_seriais WHERE codigo_serial=ANY($3::text[]) AND status_novo='INSTALADO' GROUP BY codigo_serial)",
+            [payload.source_system, payload.order_id, payload.serials],
+          );
           const result = {
             success: true,
             receipt_id: receiptId,

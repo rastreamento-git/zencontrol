@@ -33,9 +33,32 @@ function configuration(env = process.env) {
   }
   if (!/^[a-zA-Z0-9_-]{1,80}$/.test(env.STOCK_SOURCE_SYSTEM || "zencontrol"))
     throw Error("STOCK_SOURCE_SYSTEM inválido.");
+  if (env.TECHNICIAN_PORTAL_URL) {
+    let url;
+    try {
+      url = new URL(env.TECHNICIAN_PORTAL_URL);
+    } catch {}
+    if (
+      !url ||
+      (url.protocol !== "https:" &&
+        !(
+          url.protocol === "http:" &&
+          ["localhost", "127.0.0.1"].includes(url.hostname)
+        )) ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash ||
+      url.pathname !== "/"
+    )
+      throw Error(
+        "TECHNICIAN_PORTAL_URL deve ser a URL HTTPS da raiz do portal (HTTP permitido apenas em localhost).",
+      );
+  }
   validateMediaConfig(env);
   return {
     ...env,
+    TECHNICIAN_PORTAL_URL: (env.TECHNICIAN_PORTAL_URL || "").replace(/\/$/, ""),
     ROOT,
     DATA_DIR: path.resolve(ROOT, env.ZEN_DATA_DIR || "data"),
     INTEGRATIONS_ENABLED: yes(env.INTEGRATIONS_ENABLED),
