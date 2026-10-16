@@ -9,9 +9,12 @@ function databaseConfig(env = process.env) {
   const mode = env.DATABASE_SSL || "verify-full";
   if (!["disable", "require", "verify-full"].includes(mode))
     throw new Error("DATABASE_SSL deve ser disable, require ou verify-full.");
+  const max = Number(env.DATABASE_POOL_MAX || 3);
+  if (!Number.isInteger(max) || max < 1 || max > 20)
+    throw new Error("DATABASE_POOL_MAX deve ser um inteiro entre 1 e 20.");
   const options = {
     connectionString: url.toString(),
-    max: 10,
+    max,
     connectionTimeoutMillis: 10000,
     idleTimeoutMillis: 30000,
     options:

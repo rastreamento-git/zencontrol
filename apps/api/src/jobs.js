@@ -1,5 +1,4 @@
-const fs = require("node:fs/promises");
-const path = require("node:path");
+const { createMediaStore } = require("./media-store");
 const { createHash } = require("node:crypto");
 const sharp = require("sharp");
 const { transaction } = require("./database");
@@ -184,8 +183,7 @@ async function execute(pool, cfg, job, wpp, sga) {
     ]);
     if (!batch)
       throw Object.assign(Error("Lote indisponível."), { status: 404 });
-    const root = path.join(cfg.DATA_DIR, "media");
-    await fs.mkdir(root, { recursive: true });
+    const media = createMediaStore(cfg);
     let failed = 0;
     for (const item of await d.rows(
       pool,
@@ -194,7 +192,7 @@ async function execute(pool, cfg, job, wpp, sga) {
     )) {
       if (item.state === "ready") {
         try {
-          await fs.access(path.join(root, item.path));
+          await media.read(item.path);
           continue;
         } catch {}
       }
@@ -216,8 +214,7 @@ async function execute(pool, cfg, job, wpp, sga) {
           "-" +
           createHash("sha256").update(bytes).digest("hex").slice(0, 12) +
           ".jpg";
-        await fs.writeFile(path.join(root, name + ".tmp"), bytes);
-        await fs.rename(path.join(root, name + ".tmp"), path.join(root, name));
+        await media.put(name, bytes);
         await pool.query(
           "UPDATE zc_evidence SET state='ready',path=$1,mime='image/jpeg',sha256=$2 WHERE id=$3",
           [name, createHash("sha256").update(bytes).digest("hex"), item.id],
@@ -335,7 +332,7 @@ async function execute(pool, cfg, job, wpp, sga) {
     if (!files.length || files.length !== b.expected_count)
       throw Object.assign(Error("Fotos pendentes."), { status: 400 });
     const photos = await Promise.all(
-      files.map((f) => fs.readFile(path.join(cfg.DATA_DIR, "media", f.path))),
+      files.map((f) => createMediaStore(cfg).read(f.path)),
     );
     await sga.upload(order.sga_id, photos, b.reviewed_by);
     await transaction(pool, async (db) => {

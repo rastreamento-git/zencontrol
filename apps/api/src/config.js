@@ -1,5 +1,6 @@
 const path = require("node:path");
 const ROOT = path.resolve(__dirname, "../../..");
+const { validateMediaConfig } = require("./media-store");
 require("dotenv").config({ path: path.join(ROOT, ".env"), quiet: true });
 const yes = (v) =>
   ["1", "true", "yes", "sim"].includes(String(v).toLowerCase());
@@ -32,6 +33,7 @@ function configuration(env = process.env) {
   }
   if (!/^[a-zA-Z0-9_-]{1,80}$/.test(env.STOCK_SOURCE_SYSTEM || "zencontrol"))
     throw Error("STOCK_SOURCE_SYSTEM inválido.");
+  validateMediaConfig(env);
   return {
     ...env,
     ROOT,

@@ -1,5 +1,7 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const os = require("node:os");
+const { createMediaStore, photoName } = require("./media-store");
 const { createHash } = require("node:crypto");
 const { transaction } = require("./database");
 const { fail } = require("./errors");
@@ -21,7 +23,6 @@ const tables = [
   "zc_migration_runs",
 ];
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
-const photoName = /^[-a-f0-9]+\.jpg$/;
 async function prepareBackup(pool, cfg) {
   const snapshot = await transaction(pool, async (db) => {
     const data = {};
@@ -40,42 +41,61 @@ async function prepareBackup(pool, cfg) {
   const database = Buffer.from(JSON.stringify(snapshot));
   const files = [],
     media = {};
-  for (const name of new Set(
-    snapshot.data.zc_evidence
-      .flatMap((e) => [e.path, e.original_path])
-      .filter(Boolean),
-  )) {
-    if (!photoName.test(name))
-      fail(
-        409,
-        "Uma foto possui referência inválida. Corrija antes de gerar o backup.",
+  const store = createMediaStore(cfg);
+  // Stage remote objects on temporary disk, one image at a time. Do not retain
+  // the whole photo archive in RAM on a 512 MB instance.
+  const staging =
+    store.provider === "supabase"
+      ? await fs.mkdtemp(path.join(os.tmpdir(), "zencontrol-backup-"))
+      : null;
+  const cleanup = async () => {
+    if (staging) await fs.rm(staging, { recursive: true, force: true });
+  };
+  try {
+    for (const name of new Set(
+      snapshot.data.zc_evidence
+        .flatMap((e) => [e.path, e.original_path])
+        .filter(Boolean),
+    )) {
+      if (!photoName.test(name))
+        fail(
+          409,
+          "Uma foto possui referência inválida. Corrija antes de gerar o backup.",
+        );
+      const local = path.join(
+        staging || path.join(cfg.DATA_DIR, "media"),
+        name,
       );
-    const local = path.join(cfg.DATA_DIR, "media", name);
-    let bytes;
-    try {
-      bytes = await fs.readFile(local);
-    } catch {
-      fail(
-        409,
-        "Uma foto referenciada está ausente. Restaure o arquivo antes de gerar o backup.",
-      );
+      let bytes;
+      try {
+        bytes = await store.read(name);
+      } catch {
+        fail(
+          409,
+          "Uma foto referenciada está ausente. Restaure o arquivo antes de gerar o backup.",
+        );
+      }
+      if (staging) await fs.writeFile(local, bytes, { flag: "wx" });
+      media[name] = sha(bytes);
+      files.push({ local, name: "media/" + name });
     }
-    media[name] = sha(bytes);
-    files.push({ local, name: "media/" + name });
+    const manifest = Buffer.from(
+      JSON.stringify(
+        {
+          format: "zencontrol-backup",
+          version: 1,
+          databaseSha256: sha(database),
+          media,
+        },
+        null,
+        2,
+      ),
+    );
+    return { database, manifest, files, cleanup };
+  } catch (error) {
+    await cleanup();
+    throw error;
   }
-  const manifest = Buffer.from(
-    JSON.stringify(
-      {
-        format: "zencontrol-backup",
-        version: 1,
-        databaseSha256: sha(database),
-        media,
-      },
-      null,
-      2,
-    ),
-  );
-  return { database, manifest, files };
 }
 async function readSafe(root, relative, max) {
   const target = path.resolve(root, relative);
@@ -125,7 +145,7 @@ async function restoreBackup(pool, cfg, source, apply = false) {
     const bytes = await readSafe(root, "media/" + name, 16 * 1024 * 1024);
     if (sha(bytes) !== checksum)
       fail(400, "Uma foto do backup falhou na verificação de integridade.");
-    media.set(name, bytes);
+    media.set(name, checksum);
   }
   if (!Array.isArray(snapshot.data.zc_evidence))
     fail(400, "Fotos em formato inválido.");
@@ -140,6 +160,8 @@ async function restoreBackup(pool, cfg, source, apply = false) {
     accounts:
       "Contas atuais preservadas; não fazem parte do backup operacional.",
   };
+  const store = createMediaStore(cfg);
+  if (apply) await store.ready();
   try {
     await transaction(pool, async (tx) => {
       for (const table of tables)
@@ -264,18 +286,11 @@ async function restoreBackup(pool, cfg, source, apply = false) {
       }
       if (!apply)
         throw Object.assign(Error("Simulação"), { dryReport: report });
-      await fs.mkdir(path.join(cfg.DATA_DIR, "media"), { recursive: true });
-      for (const [name, bytes] of media) {
-        const target = path.join(cfg.DATA_DIR, "media", name);
-        try {
-          await fs.writeFile(target, bytes, { flag: "wx" });
-        } catch (e) {
-          if (
-            e.code !== "EEXIST" ||
-            sha(await fs.readFile(target)) !== sha(bytes)
-          )
-            throw e;
-        }
+      for (const [name, checksum] of media) {
+        const bytes = await readSafe(root, "media/" + name, 16 * 1024 * 1024);
+        if (sha(bytes) !== checksum)
+          fail(400, "Uma foto do backup foi alterada durante a restauração.");
+        await store.put(name, bytes);
       }
       await d.audit(
         tx,

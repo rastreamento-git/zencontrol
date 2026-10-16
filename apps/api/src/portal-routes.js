@@ -1,5 +1,4 @@
-const fs = require("node:fs/promises"),
-  path = require("node:path");
+const { createMediaStore } = require("./media-store");
 const { transaction } = require("./database");
 const { fail, integer, serials } = require("./errors");
 const d = require("./domain"),
@@ -238,7 +237,7 @@ function configurePortal(app, pool, cfg, auth) {
     res
       .type("jpeg")
       .set("Cache-Control", "no-store")
-      .send(await fs.readFile(path.join(cfg.DATA_DIR, "media", item.path)));
+      .send(await createMediaStore(cfg).read(item.path));
   });
   // Every remaining central-management endpoint is forbidden to technicians.
   app.use("/api", (req, res, next) => {

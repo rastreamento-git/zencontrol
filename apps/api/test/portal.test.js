@@ -5,6 +5,8 @@ const assert = require("node:assert/strict"),
   path = require("node:path");
 const { once } = require("node:events");
 const sharp = require("sharp");
+const { mockSupabase, config: mediaConfig } = require("./helpers/supabase.cjs");
+const remote = mockSupabase();
 const { testDatabase } = require("./helpers/database.cjs");
 const { migrate } = require("../scripts/migrate");
 const {
@@ -185,6 +187,7 @@ before(async () => {
     )
   ).rows[0].id;
   cfg = configuration({
+    ...mediaConfig,
     NODE_ENV: "test",
     APP_PASSWORD: password,
     SESSION_SECRET: secret,
@@ -246,11 +249,89 @@ before(async () => {
     ).toString("base64");
 });
 after(async () => {
+  remote.restore();
   if (server) await new Promise((r) => server.close(r));
   if (ss) await new Promise((r) => ss.close(r));
   if (db) await db.close();
   if (sdb) await sdb.close();
   if (folder) await fs.rm(folder, { recursive: true, force: true });
+});
+test("foto remota sobrevive à perda do disco e continua restrita ao técnico responsável", async () => {
+  const item = await order();
+  const draft = await ok(
+    "/api/technician/orders/" + item.id + "/draft",
+    "POST",
+    { version: item.version },
+    ta,
+    201,
+  );
+  const photo = await ok(
+    "/api/technician/batches/" + draft.id + "/photos",
+    "POST",
+    {
+      version: draft.version,
+      kind: "vehicle",
+      image: jpg,
+    },
+    ta,
+    201,
+  );
+  await fs.rm(folder, { recursive: true, force: true });
+  const route = "/api/technician/evidence/" + photo.id;
+  const own = await req(route, "GET", undefined, ta);
+  assert.equal(own.status, 200);
+  assert.ok(Buffer.isBuffer(own.data));
+  assert.equal((await req(route, "GET", undefined, tb)).status, 404);
+  assert.equal((await req("/api/evidence/" + photo.id)).status, 200);
+});
+test("falha no upload remoto não deixa foto pronta nem altera a versão do envio", async () => {
+  const item = await order();
+  const draft = await ok(
+    "/api/technician/orders/" + item.id + "/draft",
+    "POST",
+    { version: item.version },
+    ta,
+    201,
+  );
+  remote.state.failUpload = true;
+  try {
+    const response = await req(
+      "/api/technician/batches/" + draft.id + "/photos",
+      "POST",
+      {
+        version: draft.version,
+        kind: "vehicle",
+        image: jpg,
+      },
+      ta,
+    );
+    assert.equal(response.status, 503);
+    assert.equal(
+      JSON.stringify(response.data).includes(mediaConfig.SUPABASE_SECRET_KEY),
+      false,
+    );
+    assert.equal(
+      Number(
+        (
+          await pool.query(
+            "SELECT count(*) n FROM zc_evidence WHERE batch_id=$1",
+            [draft.id],
+          )
+        ).rows[0].n,
+      ),
+      0,
+    );
+    assert.equal(
+      (
+        await pool.query("SELECT version FROM zc_batches WHERE id=$1", [
+          draft.id,
+        ])
+      ).rows[0].version,
+      draft.version,
+    );
+  } finally {
+    remote.state.failUpload = false;
+  }
 });
 test("new orders cannot opt out of approval; technician role is isolated by assignment", async () => {
   const a = await order(),

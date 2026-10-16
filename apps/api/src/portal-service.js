@@ -1,7 +1,6 @@
 const { randomUUID, createHash } = require("node:crypto");
-const fs = require("node:fs/promises"),
-  path = require("node:path"),
-  sharp = require("sharp");
+const sharp = require("sharp");
+const { createMediaStore } = require("./media-store");
 const { transaction } = require("./database");
 const { fail, integer, serials } = require("./errors");
 const d = require("./domain"),
@@ -186,10 +185,7 @@ async function upload(pool, cfg, userId, id, input) {
     const eid = randomUUID(),
       sha = createHash("sha256").update(bytes).digest("hex"),
       name = eid + "-" + sha.slice(0, 12) + ".jpg";
-    await fs.mkdir(path.join(cfg.DATA_DIR, "media"), { recursive: true });
-    await fs.writeFile(path.join(cfg.DATA_DIR, "media", name), bytes, {
-      flag: "wx",
-    });
+    await createMediaStore(cfg).put(name, bytes);
     await o.insert(db, "zc_evidence", {
       id: eid,
       batch_id: id,

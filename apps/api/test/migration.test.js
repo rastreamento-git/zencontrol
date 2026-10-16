@@ -13,6 +13,68 @@ const d = require("../src/domain"),
   o = require("../src/orders");
 let db, pool, root, cfg, source, originalRow;
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
+test("backup remoto inclui originais, restaura no bucket e remove arquivos temporários", async () => {
+  const { mockSupabase, config } = require("./helpers/supabase.cjs");
+  const { createMediaStore } = require("../src/media-store");
+  const remote = mockSupabase();
+  const cloud = { ...cfg, ...config };
+  let backup;
+  try {
+    await migration(pool, cfg, source, true);
+    const item = await d.one(pool, "SELECT * FROM zc_orders LIMIT 1");
+    await o.insert(pool, "zc_batches", {
+      id: "cloud-batch",
+      order_id: item.id,
+      technician_id: item.technician_id,
+      sender: "test",
+      state: "review",
+      created_at: d.now(),
+    });
+    const original = Buffer.from("original photo"),
+      edited = Buffer.from("edited photo");
+    const store = createMediaStore(cloud);
+    await store.put("abc-111.jpg", original);
+    await store.put("def-222.jpg", edited);
+    await o.insert(pool, "zc_evidence", {
+      id: "cloud-photo",
+      batch_id: "cloud-batch",
+      message_id: "test",
+      path: "def-222.jpg",
+      original_path: "abc-111.jpg",
+      mime: "image/jpeg",
+      sha256: hash(edited),
+      state: "ready",
+    });
+    backup = await prepareBackup(pool, cloud);
+    assert.equal(backup.files.length, 2);
+    assert.equal(
+      JSON.parse(backup.manifest).media["abc-111.jpg"],
+      hash(original),
+    );
+    const target = path.join(root, "cloud-backup");
+    await fs.mkdir(path.join(target, "media"), { recursive: true });
+    await fs.writeFile(path.join(target, "database.json"), backup.database);
+    await fs.writeFile(path.join(target, "manifest.json"), backup.manifest);
+    for (const file of backup.files)
+      await fs.copyFile(file.local, path.join(target, file.name));
+    await backup.cleanup();
+    await assert.rejects(fs.access(backup.files[0].local), { code: "ENOENT" });
+    await pool.query(
+      "TRUNCATE " + tables.join(",") + " RESTART IDENTITY CASCADE",
+    );
+    remote.objects.clear();
+    await restoreBackup(pool, cloud, target);
+    assert.equal(remote.objects.size, 0);
+    await restoreBackup(pool, cloud, target, true);
+    assert.deepEqual(await store.read("abc-111.jpg"), original);
+    assert.deepEqual(await store.read("def-222.jpg"), edited);
+    remote.state.failDownload = true;
+    await assert.rejects(prepareBackup(pool, cloud), /foto referenciada/);
+  } finally {
+    await backup?.cleanup();
+    remote.restore();
+  }
+});
 before(async () => {
   root = await fs.mkdtemp(path.join(os.tmpdir(), "zencontrol-migration-"));
   source = path.join(root, "original");
