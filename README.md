@@ -1,6 +1,6 @@
 # ZenControl · plataforma de atendimento
 
-ZenControl 6 reúne agenda, ordens de serviço, conferência da central, financeiro e portal dos técnicos. React 19, Vite, Express 5, Node.js 24 e PostgreSQL. A identidade visual, autenticação, componentes e leitor de etiquetas seguem a base do Estoque Pro.
+ZenControl 6.1 reúne agenda, ordens de serviço, conferência da central, financeiro e portal dos técnicos. React 19, Vite, Express 5, Node.js 24 e PostgreSQL. A identidade visual, autenticação, componentes e leitor de etiquetas seguem a base do Estoque Pro.
 
 **Fluxo:** o técnico registra fotos e IMEIs → a central confere → o Estoque Pro confirma a instalação → a OS é concluída. O envio do técnico nunca conclui o serviço sozinho.
 
@@ -19,6 +19,16 @@ ZenControl 6 reúne agenda, ordens de serviço, conferência da central, finance
 | `.github/workflows` | Verificação automática em PostgreSQL e build do frontend |
 
 O ZenControl tem banco próprio. O estoque existente continua no banco do Estoque Pro. A comunicação usa API autenticada entre os servidores; o navegador não recebe a chave de integração e o ZenControl não grava diretamente no banco do inventário.
+
+## Ordem de serviço no modelo independente
+
+O PDF usa os quatro blocos do gerador independente: associado, veículo, detalhes do atendimento e instruções/observações. Serviço, data/horário e técnico vêm automaticamente da OS salva; o técnico não precisa preenchê-los outra vez. Campos complementares e equipamentos previstos ficam persistidos no banco. **Salvar e gerar PDF** usa os dados atuais do formulário e salva antes de emitir.
+
+A versão padrão oculta CPF/CNPJ, RG, Renavam e parte do nome. A versão integral é exclusiva da administração. O técnico pode baixar a versão protegida apenas das OS atribuídas a ele. A emissão e o envio por WhatsApp usam o mesmo modelo e não dependem de uma consulta à Hinova naquele momento.
+
+A consulta SGA aceita código, placa ou chassi, complementa a ficha por ID e preenche dados do associado/veículo. Configure as credenciais `HINOVA_*` no ambiente do servidor e `INTEGRATIONS_ENABLED=true` para consultá-la. Serviço, agendamento e atribuição técnica são preservados durante essa consulta. As credenciais de arquivos de referência não fazem parte do repositório.
+
+Detalhes em [documentos de OS](docs/ORDEM_DE_SERVICO.md). Ao atualizar uma instalação existente, execute `npm run migrate` para adicionar o campo complementar, conforme o pre-deploy já configurado.
 
 ## Subir localmente
 

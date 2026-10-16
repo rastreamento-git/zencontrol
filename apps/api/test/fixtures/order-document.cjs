@@ -1,0 +1,30 @@
+// Entirely fictitious data, including invalid placeholder identity documents.
+module.exports = {
+  id: "OS-MODELO-TESTE",
+  customer_name: "Associado Fictício de Demonstração",
+  contact: "(00) 00000-0000",
+  vehicle: "QAT1A23",
+  chassis: "CHASSIFICTICIO0001",
+  service: "Instalação",
+  technician_id: 1,
+  technician_name: "Técnico de Demonstração",
+  scheduled_at: "2026-10-20T14:30",
+  location: "Local de atendimento fictício, 200, Centro",
+  notes:
+    "Conferir comunicação, sinal e funcionamento após instalar. Registrar fotos legíveis do veículo, da etiqueta e do equipamento.",
+  fipe_value: "R$ 45.000,00",
+  workflow_mode: "controlled",
+  document_data: {
+    cpf_cnpj: "000.000.000-00",
+    rg: "00.000.000-0",
+    customer_address: "Endereço do associado fictício, 100, Centro",
+    renavam: "00000000000",
+    brand: "Marca de exemplo",
+    model: "Modelo de demonstração",
+    year: "2025/2026",
+    vehicle_type: "Automóvel",
+    category: "Particular",
+    equipment: ["tracker", "tag"],
+    technician_brings_equipment: true,
+  },
+};

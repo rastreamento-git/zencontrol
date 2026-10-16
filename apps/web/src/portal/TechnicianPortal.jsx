@@ -5,6 +5,7 @@ import {
   Camera,
   CheckCheck,
   ClipboardList,
+  Download,
   LogOut,
   MapPin,
   RefreshCw,
@@ -18,7 +19,14 @@ import { useSession } from "@zen/ui/lib/session";
 import { notify, confirmAction } from "@zen/ui/lib/feedback";
 import LeitorSeriais from "@zen/ui/components/LeitorSeriais";
 import AppFooter from "@zen/ui/components/AppFooter";
-import { Badge, Loading, Empty, format, FormModal } from "../components/common";
+import {
+  Badge,
+  Loading,
+  Empty,
+  format,
+  FormModal,
+  download,
+} from "../components/common";
 export const photoLabels = {
   vehicle: "Veículo e identificação",
   label: "Etiqueta do equipamento",
@@ -205,6 +213,20 @@ function Service({ id, onBack, onChanged }) {
             <dd>{order.location || "A confirmar"}</dd>
           </div>
         </dl>
+        <button
+          type="button"
+          className="secondary-button"
+          disabled={busy}
+          onClick={() =>
+            download(
+              "/technician/orders/" + encodeURIComponent(order.id) + "/pdf",
+              order.id + ".pdf",
+            ).catch((e) => setError(errorMessage(e)))
+          }
+        >
+          <Download size={16} />
+          Baixar ordem de serviço
+        </button>
         {order.notes && <p className="zc-comments">{order.notes}</p>}
       </section>
       {error && (

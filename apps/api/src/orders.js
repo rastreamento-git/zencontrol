@@ -2,6 +2,7 @@ const { randomUUID } = require("node:crypto");
 const { transaction } = require("./database");
 const { fail } = require("./errors");
 const d = require("./domain");
+const { normalizeDocumentData } = require("./order-document");
 const textFields = {
   customer_name: 200,
   contact: 100,
@@ -18,6 +19,8 @@ const textFields = {
   vehicle: 40,
   service: 120,
   scheduled_at: 30,
+  sga_classification: 200,
+  sga_status: 200,
 };
 async function get(db, id) {
   const o = await d.one(
@@ -128,6 +131,10 @@ async function validate(db, input, old = null) {
       fail(400, "Esta situação é definida pelo fluxo de envio e conferência.");
     out.status = input.status;
   }
+  if (input.document_data !== undefined)
+    out.document_data = JSON.stringify(
+      normalizeDocumentData(input.document_data, old?.document_data || {}),
+    );
   const merged = { ...old, ...out };
   if (!old) {
     for (const key of ["vehicle", "service", "customer_name"])
@@ -163,6 +170,12 @@ async function create(pool, input, actor) {
         id: o.id + "_EXTRA",
         service: data.service + " (Adicional)",
         notes: "Ref: " + input.additional,
+        document_data: JSON.stringify({
+          ...JSON.parse(data.document_data || "{}"),
+          equipment: [
+            input.additional === "Tag Extra" ? "tag" : "tracker_extra",
+          ],
+        }),
         created_date: o.created_date,
         created_by: actor,
         updated_at: d.now(),
@@ -199,7 +212,9 @@ async function edit(pool, id, input, actor) {
       fail(409, "Uma OS concluída exige reabertura pela administração.");
     const data = await validate(db, input, old);
     const changes = Object.fromEntries(
-      Object.entries(data).filter(([k, v]) => old[k] !== v),
+      Object.entries(data).filter(([k, v]) =>
+        k === "document_data" ? JSON.stringify(old[k]) !== v : old[k] !== v,
+      ),
     );
     if (!Object.keys(changes).length) return old;
     const result = await update(
@@ -210,7 +225,16 @@ async function edit(pool, id, input, actor) {
       { ...data, updated_at: d.now() },
       true,
     );
-    await d.audit(db, actor, "updated", "order", id, changes);
+    await d.audit(db, actor, "updated", "order", id, {
+      ...changes,
+      ...(changes.document_data
+        ? {
+            document_data: {
+              updated_fields: Object.keys(JSON.parse(changes.document_data)),
+            },
+          }
+        : {}),
+    });
     return result;
   });
 }

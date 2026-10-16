@@ -1,4 +1,12 @@
-# Validação da entrega 6.0.0
+# Validação das entregas
+
+## 6.1.0 - documento de OS
+
+Em 16/10/2026, passaram 67 testes do ZenControl e 31 do adaptador Estoque Pro (98 no conjunto), com dados fictícios e bancos isolados. A emissão em PDF foi renderizada e inspecionada em A4, incluindo continuação de observações longas, ocultação de documentos, fontes incorporadas e preenchimento pelo agendamento. A análise estática e o build de produção passaram.
+
+No Chromium 153, o formulário foi validado em desktop e celular. Uma consulta SGA local simulada preencheu os dados do associado/veículo, preservando serviço, técnico e horário; Salvar e gerar PDF persistiu a OS antes de emitir, e o técnico responsável baixou a versão protegida pelo portal. Nenhum erro JavaScript ou transbordamento horizontal foi encontrado nesse fluxo. A consulta real à Hinova não foi executada.
+
+## 6.0.0 - integração e portal
 
 Em 15/10/2026, a suíte local passou com 57 testes do ZenControl e 31 do backend Estoque Pro (88 no total), usando SQL PostgreSQL em PGlite, duas bases isoladas na integração e apenas dados fictícios. Uma verificação adicional cobriu a reatribuição de OS com rascunho aberto: o novo responsável consegue iniciar seu próprio envio e o anterior perde o acesso. Nenhum banco de produção foi conectado ou alterado.
 

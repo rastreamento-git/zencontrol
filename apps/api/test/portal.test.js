@@ -683,3 +683,28 @@ test("stock installation groups models while preserving a single atomic receipt"
     2,
   );
 });
+
+test("technician downloads only the assigned masked OS, even with an integral query", async () => {
+  const { readPdf } = require("./helpers/pdf.cjs"),
+    fixture = require("./fixtures/order-document.cjs");
+  const a = await order();
+  await ok("/api/orders/" + a.id, "PATCH", {
+    version: a.version,
+    document_data: fixture.document_data,
+  });
+  const pdf = await ok(
+    "/api/technician/orders/" + a.id + "/pdf?integral=1",
+    "GET",
+    undefined,
+    ta,
+  );
+  const parsed = await readPdf(pdf);
+  assert.ok(parsed.text.includes("DADOS DO ASSOCIADO"));
+  assert.ok(!parsed.text.includes(fixture.document_data.cpf_cnpj));
+  assert.ok(parsed.text.includes("portal do técnico"));
+  assert.equal(
+    (await req("/api/technician/orders/" + a.id + "/pdf", "GET", undefined, tb))
+      .status,
+    404,
+  );
+});

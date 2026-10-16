@@ -6,6 +6,7 @@ const d = require("./domain"),
   o = require("./orders"),
   portal = require("./portal-service");
 const { StockClient } = require("./stock-client");
+const { orderPdf } = require("./pdf");
 const safeBatch = (b) =>
   Object.fromEntries(
     [
@@ -71,6 +72,13 @@ function configurePortal(app, pool, cfg, auth) {
       rule: await portal.rule(pool, order.service),
       submissions: history,
     });
+  });
+  app.get(prefix + "/orders/:id/pdf", async (req, res) => {
+    const { order } = await portal.ownOrder(pool, req.user.id, req.params.id);
+    res
+      .type("pdf")
+      .attachment(order.id + ".pdf")
+      .send(await orderPdf(order, true, { portalUrl: cfg.PUBLIC_URL }));
   });
   app.get(prefix + "/stock", async (req, res) => {
     const t = await portal.technician(pool, req.user.id);

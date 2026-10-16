@@ -216,6 +216,9 @@ test("migração 4.0 mantém IDs e prepara sequências para os próximos cadastr
 });
 async function backupFixture() {
   await migration(pool, cfg, source, true);
+  await pool.query("UPDATE zc_orders SET document_data=$1::jsonb", [
+    JSON.stringify(require("./fixtures/order-document.cjs").document_data),
+  ]);
   const backup = await prepareBackup(pool, cfg),
     target = path.join(root, "backup-" + Date.now());
   await fs.mkdir(target);
@@ -240,6 +243,10 @@ test("backup operacional inclui integridade, exclui contas e restaura de forma a
   );
   const restored = await restoreBackup(pool, cfg, target, true);
   assert.equal(restored.dry_run, false);
+  assert.deepEqual(
+    (await d.one(pool, "SELECT document_data FROM zc_orders")).document_data,
+    require("./fixtures/order-document.cjs").document_data,
+  );
   assert.deepEqual(
     (await d.one(pool, "SELECT raw_legacy FROM zc_orders")).raw_legacy,
     originalRow,

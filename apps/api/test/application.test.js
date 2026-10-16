@@ -238,7 +238,7 @@ test("migrações são idempotentes e rollback não deixa gravações parciais",
   await migrate(pool);
   assert.equal(
     Number((await d.one(pool, "SELECT count(*) n FROM schema_migrations")).n),
-    2,
+    3,
   );
   await assert.rejects(
     transaction(pool, async (tx) => {
@@ -444,6 +444,69 @@ test("PDF exige autenticação e usa documento PDF válido", async () => {
   const r = await request("/api/orders/" + row.id + "/pdf");
   assert.equal(r.status, 200);
   assert.equal(r.bytes.subarray(0, 5).toString(), "%PDF-");
+});
+test("documento complementar é persistido, mascara dados e restringe a versão integral", async () => {
+  const fixture = require("./fixtures/order-document.cjs"),
+    { readPdf } = require("./helpers/pdf.cjs");
+  const row = await create({
+    document_data: fixture.document_data,
+    technician_name: "Técnico forjado",
+    scheduled_at: "2026-10-20T14:30",
+  });
+  const saved = await fresh(row.id);
+  assert.equal(saved.document_data.cpf_cnpj, fixture.document_data.cpf_cnpj);
+  assert.equal(saved.technician_name, tech.name);
+  const pdf = await readPdf(
+    (
+      await request(
+        "/api/orders/" +
+          row.id +
+          "/pdf?technician_name=Forjado&service=Forjado&scheduled_at=1900-01-01",
+      )
+    ).bytes,
+  );
+  assert.ok(pdf.text.includes(tech.name));
+  assert.ok(pdf.text.includes("20/10/2026 às 14:30"));
+  assert.ok(!pdf.text.includes("Forjado"));
+  assert.ok(!pdf.text.includes(fixture.document_data.cpf_cnpj));
+  const full = await readPdf(
+    (await request("/api/orders/" + row.id + "/pdf?integral=1")).bytes,
+  );
+  assert.ok(full.text.includes(fixture.document_data.cpf_cnpj));
+  const limited = await readPdf(
+    (
+      await request(
+        "/api/orders/" + row.id + "/pdf?integral=1",
+        "GET",
+        undefined,
+        operatorToken,
+      )
+    ).bytes,
+  );
+  assert.ok(!limited.text.includes(fixture.document_data.cpf_cnpj));
+  assert.equal(
+    (
+      await request(
+        "/api/orders/" + row.id + "/dispatch",
+        "POST",
+        { version: saved.version, masked: false },
+        operatorToken,
+      )
+    ).status,
+    403,
+  );
+  const bad = await request("/api/orders/" + row.id, "PATCH", {
+    version: saved.version,
+    document_data: { service: "Retirada" },
+  });
+  assert.equal(bad.status, 400);
+  assert.equal((await fresh(row.id)).version, saved.version);
+  const same = await request("/api/orders/" + row.id, "PATCH", {
+    version: saved.version,
+    document_data: saved.document_data,
+  });
+  assert.equal(same.status, 200);
+  assert.equal(same.data.version, saved.version);
 });
 test("envios entram em fila e somente a confirmação marca a OS", async () => {
   const row = await create();

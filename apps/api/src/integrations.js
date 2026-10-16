@@ -126,11 +126,11 @@ class SGAClient {
       throw new IntegrationError("O SGA recusou a autenticação.");
     return p.token_usuario;
   }
-  async request(endpoint, payload, mutation = false) {
+  async request(endpoint, payload, mutation = false, token) {
     const p = await http(
       this.cfg.HINOVA_API_URL + endpoint,
       payload,
-      { Authorization: "Bearer " + (await this.token()) },
+      { Authorization: "Bearer " + (token || (await this.token())) },
       mutation,
     );
     if (
@@ -142,33 +142,108 @@ class SGAClient {
       throw new IntegrationError("O SGA recusou a operação.", mutation);
     return p;
   }
-  async lookup(term) {
-    const key = require("./domain").vehicle(term);
-    if (key.length < 7) throw new IntegrationError("Informe placa ou chassi.");
-    const list = await this.request(
-      "/veiculo/buscar/" + key + "/" + (key.length > 10 ? "chassi" : "placa"),
-    );
-    if (!Array.isArray(list) || !list.length)
-      throw new IntegrationError("Veículo não encontrado.");
-    const v = list[0];
-    return {
-      vehicle: String(v.placa || v.chassi || key),
-      chassis: String(v.chassi || ""),
-      sga_id: String(v.codigo_veiculo || ""),
-      customer_name: String(v.nome || ""),
-      contact:
-        String(v.ddd_celular || v.ddd || "") +
-        String(v.telefone_celular || v.telefone || ""),
-      volunteer: String(v.nome_voluntario || ""),
-      fipe_value: String(v.valor_fipe || ""),
-      fipe_risk: String(v.tipo || ""),
-      sga_classification: String(v.classificacao || ""),
-      sga_status: String(v.descricao_situacao || ""),
-      location: ["logradouro", "numero", "bairro", "cidade", "estado", "cep"]
-        .map((k) => v[k] || "")
-        .filter(Boolean)
-        .join(", "),
+  async lookup(input) {
+    const query = typeof input === "string" ? { term: input } : input || {};
+    const d = require("./domain"),
+      { mapSgaVehicle } = require("./order-document");
+    const id = String(query.sga_id || "").trim(),
+      term = String(query.term || "").trim();
+    const routes = [];
+    if (id) {
+      if (!/^\d{1,20}$/.test(id))
+        throw new IntegrationError("Código SGA inválido.");
+      routes.push("/veiculo/buscar/" + id + "/id");
+    }
+    if (term) {
+      const key = d.vehicle(term);
+      if (/^\d{1,20}$/.test(term))
+        routes.push("/veiculo/buscar/" + term + "/id");
+      else if (key.length >= 7 && key.length <= 30)
+        routes.push(
+          "/veiculo/buscar/" +
+            key +
+            "/" +
+            (key.length > 10 ? "chassi" : "placa"),
+        );
+      else
+        throw new IntegrationError(
+          "Informe código SGA, placa ou chassi válido.",
+        );
+    }
+    if (query.chassis) {
+      const key = d.vehicle(query.chassis);
+      if (key.length < 7 || key.length > 30)
+        throw new IntegrationError("Chassi inválido.");
+      routes.push("/veiculo/buscar/" + key + "/chassi");
+    }
+    if (!routes.length)
+      throw new IntegrationError("Informe código SGA, placa ou chassi.");
+    const token = await this.token();
+    const nonempty = (value) =>
+      Object.fromEntries(
+        Object.entries(value).filter(
+          ([, v]) => v !== null && v !== undefined && String(v).trim() !== "",
+        ),
+      );
+    const record = (data) => {
+      const value = Array.isArray(data) ? data[0] : data;
+      return value &&
+        typeof value === "object" &&
+        !Array.isArray(value) &&
+        Object.keys(value).length
+        ? nonempty(value)
+        : null;
     };
+    let vehicle = null,
+      used = "";
+    for (const route of new Set(routes)) {
+      try {
+        vehicle = record(await this.request(route, undefined, false, token));
+        if (vehicle) {
+          used = route;
+          break;
+        }
+      } catch (error) {
+        if (!(error instanceof IntegrationError)) throw error;
+      }
+    }
+    if (!vehicle)
+      throw new IntegrationError(
+        "Veículo não encontrado ou consulta indisponível.",
+      );
+    const code = String(vehicle.codigo_veiculo || "");
+    if (/^\d{1,20}$/.test(code) && used !== "/veiculo/buscar/" + code + "/id") {
+      try {
+        const full = record(
+          await this.request(
+            "/veiculo/buscar/" + code + "/id",
+            undefined,
+            false,
+            token,
+          ),
+        );
+        if (full) vehicle = { ...vehicle, ...full };
+      } catch (error) {
+        if (!(error instanceof IntegrationError)) throw error;
+      }
+    }
+    const volunteer = String(vehicle.codigo_voluntario || "");
+    if (/^\d{1,20}$/.test(volunteer)) {
+      try {
+        const full = record(
+          await this.request(
+            "/buscar/voluntario/" + volunteer,
+            undefined,
+            false,
+            token,
+          ),
+        );
+        if (full?.nome) vehicle.voluntario_real = full.nome;
+      } catch (error) {
+        if (!(error instanceof IntegrationError)) throw error;
+      }
+    }
+    return mapSgaVehicle(vehicle);
   }
   classification(id, code) {
     return this.request(

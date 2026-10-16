@@ -60,7 +60,7 @@ function createApp(pool, env = process.env) {
   app.use(express.json({ limit: "512kb" }));
   app.get("/healthz", async (req, res) => {
     await pool.query("SELECT 1");
-    res.json({ status: "ok", version: "6.0.0" });
+    res.json({ status: "ok", version: "6.1.0" });
   });
   configureWebhook(app, pool, cfg);
   app.use("/api", (req, res, next) => {
@@ -87,7 +87,7 @@ function createApp(pool, env = process.env) {
       statuses: d.statuses,
       services: d.services,
       today: d.today(),
-      version: "6.0.0",
+      version: "6.1.0",
     }),
   );
   app.get("/api/overview", async (req, res) => {
@@ -277,6 +277,8 @@ function createApp(pool, env = process.env) {
   });
   app.post("/api/orders/:id/dispatch", async (req, res) => {
     if (req.body.masked === false && req.user.papel !== "admin")
+      fail(403, "A versão integral da OS exige administrador.");
+    if (req.body.masked === false && req.user.papel !== "admin")
       fail(403, "Envio integral exige administração.");
     res.status(202).json({
       job_id: await o.dispatch(pool, req.params.id, req.body, actor(req), cfg),
@@ -291,6 +293,7 @@ function createApp(pool, env = process.env) {
         await orderPdf(
           order,
           req.query.integral !== "1" || req.user.papel !== "admin",
+          { portalUrl: cfg.PUBLIC_URL },
         ),
       );
   });
@@ -1013,7 +1016,13 @@ function createApp(pool, env = process.env) {
     }),
   );
   app.post("/api/sga/lookup", async (req, res) =>
-    res.json(await new SGAClient(cfg).lookup(req.body.term)),
+    res.json(
+      await new SGAClient(cfg).lookup({
+        term: req.body.term,
+        sga_id: req.body.sga_id,
+        chassis: req.body.chassis,
+      }),
+    ),
   );
   app.post("/api/archive-month", admin, async (req, res) => {
     const month = req.body.month;

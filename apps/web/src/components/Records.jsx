@@ -264,6 +264,49 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
   }, [id]);
   const change = (e) =>
     setValues((v) => ({ ...v, [e.target.name]: e.target.value }));
+  const documentData = values.document_data || {};
+  const changeDocument = (key, value) =>
+    setValues((v) => ({
+      ...v,
+      document_data: { ...v.document_data, [key]: value },
+    }));
+  const documentField = (label, key, opts = {}) => (
+    <Field
+      key={key}
+      label={label}
+      name={"document_" + key}
+      value={documentData[key]}
+      onChange={(e) => changeDocument(key, e.target.value)}
+      {...opts}
+    />
+  );
+  const technician = techs.find(
+    (t) => String(t.id) === String(values.technician_id),
+  );
+  const dirty =
+    !!order &&
+    [
+      "vehicle",
+      "customer_name",
+      "service",
+      "status",
+      "technician_id",
+      "scheduled_at",
+      "contact",
+      "chassis",
+      "sga_id",
+      "fipe_value",
+      "fipe_risk",
+      "volunteer",
+      "imei",
+      "term",
+      "location",
+      "shift",
+      "notes",
+      "document_data",
+    ].some(
+      (k) => JSON.stringify(values[k] ?? "") !== JSON.stringify(order[k] ?? ""),
+    );
   async function reload() {
     if (!id) return;
     const { data } = await api.get("/orders/" + encodeURIComponent(id));
@@ -273,6 +316,7 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
   }
   async function save(e) {
     e.preventDefault();
+    const generate = e.nativeEvent?.submitter?.value === "pdf";
     setBusy(true);
     setError("");
     try {
@@ -295,17 +339,43 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
         "location",
         "shift",
         "notes",
+        "document_data",
+        "sga_classification",
+        "sga_status",
       ];
       const data = Object.fromEntries(
         fields
           .filter((k) => values[k] !== undefined)
           .map((k) => [k, values[k]]),
       );
+      let savedId = id;
       if (id) {
         data.version = order.version;
         await api.patch("/orders/" + encodeURIComponent(id), data);
-      } else await api.post("/orders", data);
-      notify(id ? "Ordem de serviço atualizada." : "Ordem de serviço criada.");
+      } else savedId = (await api.post("/orders", data)).data.id;
+      let generated = false;
+      if (generate) {
+        try {
+          await download(
+            "/orders/" + encodeURIComponent(savedId) + "/pdf",
+            savedId + ".pdf",
+          );
+          generated = true;
+        } catch (error) {
+          notify(
+            "A OS foi salva. Abra o registro para tentar baixar o PDF novamente: " +
+              errorMessage(error),
+            "error",
+          );
+        }
+      }
+      notify(
+        generated
+          ? "OS salva e PDF gerado com os dados do agendamento."
+          : id
+            ? "Ordem de serviço atualizada."
+            : "Ordem de serviço criada.",
+      );
       refresh();
       onClose();
     } catch (err) {
@@ -317,8 +387,17 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
   async function lookup() {
     setBusy(true);
     try {
-      const { data } = await api.post("/sga/lookup", { term: values.vehicle });
-      setValues((v) => ({ ...v, ...data }));
+      const { data } = await api.post("/sga/lookup", {
+        term: values.vehicle,
+        sga_id: values.sga_id,
+        chassis: values.chassis,
+      });
+      setValues((v) => ({
+        ...v,
+        ...data,
+        location: v.location || data.location,
+        document_data: { ...v.document_data, ...data.document_data },
+      }));
       notify("Cadastro consultado. Confira os campos antes de salvar.");
     } catch (e) {
       setError(errorMessage(e));
@@ -352,6 +431,12 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
             <button
               type="button"
               className="secondary-button"
+              disabled={busy || dirty}
+              title={
+                dirty
+                  ? "Salve as alterações ou use Salvar e gerar PDF."
+                  : "Documento com os dados salvos da OS."
+              }
               onClick={() =>
                 download(
                   "/orders/" + encodeURIComponent(id) + "/pdf",
@@ -362,6 +447,21 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
               <Download size={15} />
               PDF da OS
             </button>
+            {admin && (
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={busy || dirty}
+                onClick={() =>
+                  download(
+                    "/orders/" + encodeURIComponent(id) + "/pdf?integral=1",
+                    id + "-integral.pdf",
+                  ).catch((e) => setError(errorMessage(e)))
+                }
+              >
+                PDF integral
+              </button>
+            )}
             {!["CONCLUÍDO", "CANCELADO"].includes(order.status) && (
               <>
                 <button
@@ -436,7 +536,18 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
             </div>
             {field("Associado", "customer_name", { required: true })}
             {field("Contato", "contact")}
+            {documentField("CPF / CNPJ", "cpf_cnpj")}
+            {documentField("RG", "rg")}
+            {documentField("Endereço do associado", "customer_address", {
+              full: true,
+            })}
             {field("Chassi", "chassis")}
+            {documentField("Renavam", "renavam")}
+            {documentField("Marca", "brand")}
+            {documentField("Modelo", "model")}
+            {documentField("Ano de fabricação/modelo", "year")}
+            {documentField("Tipo de veículo", "vehicle_type")}
+            {documentField("Categoria", "category")}
             {field("Código do veículo SGA", "sga_id")}
             {field("Valor FIPE", "fipe_value")}
             {field("Tipo / risco FIPE", "fipe_risk")}
@@ -453,7 +564,7 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
                 .map((s) => [s, s]),
             })}
             {!id &&
-              field("Equipamento adicional", "additional", {
+              field("Criar OS adicional", "additional", {
                 options: [
                   ["", "Nenhum"],
                   ["Tag Extra", "Tag extra"],
@@ -487,9 +598,64 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
             })}
             {field("Termo", "term")}
             {field("Local de atendimento", "location", { full: true })}
+            <div className="zc-full zc-document-equipment">
+              <span>Equipamentos previstos no atendimento</span>
+              <div>
+                {[
+                  ["tracker", "Rastreador"],
+                  ["tracker_extra", "Rastreador extra"],
+                  ["tag", "Tag"],
+                ].map(([key, label]) => (
+                  <label className="zc-checkbox" key={key}>
+                    <input
+                      type="checkbox"
+                      checked={(documentData.equipment || []).includes(key)}
+                      onChange={(e) =>
+                        changeDocument(
+                          "equipment",
+                          e.target.checked
+                            ? [...(documentData.equipment || []), key]
+                            : (documentData.equipment || []).filter(
+                                (v) => v !== key,
+                              ),
+                        )
+                      }
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+              <label className="zc-checkbox">
+                <input
+                  type="checkbox"
+                  checked={documentData.technician_brings_equipment !== false}
+                  onChange={(e) =>
+                    changeDocument(
+                      "technician_brings_equipment",
+                      e.target.checked,
+                    )
+                  }
+                />
+                O técnico deverá levar os equipamentos
+              </label>
+            </div>
             {field("Observações", "notes", { type: "textarea", full: true })}
           </div>
         </fieldset>
+        <div className="zc-notice zc-document-notice">
+          <b>Preenchimento automático do PDF</b>
+          <span>
+            {values.service || "Serviço pendente"} ·{" "}
+            {technician?.name || "Técnico pendente"} ·{" "}
+            {values.scheduled_at
+              ? format(values.scheduled_at, true)
+              : "Agendamento pendente"}
+          </span>
+          <small>
+            O documento usa os dados salvos desta OS. CPF/CNPJ, RG, Renavam e
+            parte do nome ficam ocultos na versão padrão.
+          </small>
+        </div>
         {order?.completed_at && (
           <div className="zc-notice">
             Concluída em {format(order.completed_at)} por{" "}
@@ -581,6 +747,15 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
             Cancelar
           </button>
           <button
+            className="secondary-button"
+            type="submit"
+            name="intent"
+            value="pdf"
+            disabled={busy || (!!id && !order)}
+          >
+            Salvar e gerar PDF
+          </button>
+          <button
             className="primary-button"
             disabled={busy || (!!id && !order)}
           >
@@ -614,13 +789,16 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
           initial={action === "dispatch" ? { masked: true } : {}}
           fields={
             action === "dispatch"
-              ? [
-                  {
-                    name: "masked",
-                    label: "Abreviar o nome do associado no PDF",
-                    type: "checkbox",
-                  },
-                ]
+              ? admin
+                ? [
+                    {
+                      name: "masked",
+                      label:
+                        "Ocultar CPF/CNPJ, RG, Renavam e parte do nome no PDF",
+                      type: "checkbox",
+                    },
+                  ]
+                : []
               : action === "extra"
                 ? [
                     { name: "type", label: "Tipo", required: true },

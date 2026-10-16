@@ -51,48 +51,7 @@ function document(title, subtitle, sections) {
     doc.end();
   });
 }
-function orderPdf(o, masked = true) {
-  const parts = o.customer_name.split(/\s+/);
-  const name = masked
-    ? parts[0] +
-      " " +
-      parts
-        .slice(1)
-        .map((p) => p[0] + ".")
-        .join(" ")
-    : o.customer_name;
-  return document("Ordem de serviço", o.id, [
-    [
-      "Atendimento",
-      [
-        ["Serviço", o.service],
-        ["Placa ou chassi", o.vehicle],
-        ["Chassi", o.chassis],
-        ["Técnico", o.technician_name],
-        ["Agendamento", o.scheduled_at.replace("T", " ")],
-        ["Associado", name],
-        ["Contato", o.contact],
-        ["Local", o.location],
-        ["Observações", o.notes],
-      ],
-    ],
-    [
-      "Retorno",
-      [
-        [
-          "Instruções",
-          `Encaminhe OS: ${o.id}, Placa ou Chassi: ${o.vehicle}, as fotos e os comentários. Finalize com . ou #.# para o hub.`,
-        ],
-        [
-          "Privacidade",
-          masked
-            ? "Nome abreviado. Contato e local são necessários ao atendimento."
-            : "Documento integral: compartilhe somente com o técnico responsável.",
-        ],
-      ],
-    ],
-  ]);
-}
+const { orderPdf } = require("./order-pdf");
 function settlementPdf(p) {
   return document(
     "Fechamento de serviços",
