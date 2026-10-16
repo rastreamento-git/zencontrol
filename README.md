@@ -1,22 +1,22 @@
 # ZenControl · plataforma de atendimento
 
-ZenControl 6.1 reúne agenda, ordens de serviço, conferência da central, financeiro e portal dos técnicos. React 19, Vite, Express 5, Node.js 24 e PostgreSQL. A identidade visual, autenticação, componentes e leitor de etiquetas seguem a base do Estoque Pro.
+ZenControl 6.2 reúne agenda, ordens de serviço, conferência da central, financeiro e portal dos técnicos. React 19, Vite, Express 5, Node.js 24 e PostgreSQL. A identidade visual, autenticação, componentes e leitor de etiquetas seguem a base do Estoque Pro.
 
 **Fluxo:** o técnico registra fotos e IMEIs → a central confere → o Estoque Pro confirma a instalação → a OS é concluída. O envio do técnico nunca conclui o serviço sozinho.
 
 ## Organização
 
-| Caminho | Responsabilidade |
-| --- | --- |
-| `apps/web/src/components` | Agenda, gestão e conferência da central |
-| `apps/web/src/portal` | Portal responsivo dos técnicos, câmera e evidências |
-| `apps/api/src` | API, autorização, regras, fila e integração |
-| `apps/api/migrations` | Schema PostgreSQL versionado do ZenControl |
-| `packages/ui` | Tema e componentes compartilhados; leitor original do Estoque Pro |
-| `packages/server` | Base de autenticação, transações e validação |
+| Caminho                    | Responsabilidade                                                         |
+| -------------------------- | ------------------------------------------------------------------------ |
+| `apps/web/src/components`  | Agenda, gestão e conferência da central                                  |
+| `apps/web/src/portal`      | Portal responsivo dos técnicos, câmera e evidências                      |
+| `apps/api/src`             | API, autorização, regras, fila e integração                              |
+| `apps/api/migrations`      | Schema PostgreSQL versionado do ZenControl                               |
+| `packages/ui`              | Tema e componentes compartilhados; leitor original do Estoque Pro        |
+| `packages/server`          | Base de autenticação, transações e validação                             |
 | `integrations/estoque-pro` | Backend do inventário com o adaptador de instalação; referência testável |
-| `docs` | Regras, implantação e contrato entre os sistemas |
-| `.github/workflows` | Verificação automática em PostgreSQL e build do frontend |
+| `docs`                     | Regras, implantação e contrato entre os sistemas                         |
+| `.github/workflows`        | Verificação automática em PostgreSQL e build do frontend                 |
 
 O ZenControl tem banco próprio. O estoque existente continua no banco do Estoque Pro. A comunicação usa API autenticada entre os servidores; o navegador não recebe a chave de integração e o ZenControl não grava diretamente no banco do inventário.
 
@@ -28,7 +28,11 @@ A versão padrão oculta CPF/CNPJ, RG, Renavam e parte do nome. A versão integr
 
 A consulta SGA aceita código, placa ou chassi, complementa a ficha por ID e preenche dados do associado/veículo. Configure as credenciais `HINOVA_*` no ambiente do servidor e `INTEGRATIONS_ENABLED=true` para consultá-la. Serviço, agendamento e atribuição técnica são preservados durante essa consulta. As credenciais de arquivos de referência não fazem parte do repositório.
 
-Detalhes em [documentos de OS](docs/ORDEM_DE_SERVICO.md). Ao atualizar uma instalação existente, execute `npm run migrate` para adicionar o campo complementar, conforme o pre-deploy já configurado.
+Detalhes em [documentos de OS](docs/ORDEM_DE_SERVICO.md). Ao atualizar uma instalação existente, execute `npm run migrate` para adicionar o campo complementar, antes de iniciar a aplicação.
+
+## Hospedar no Render Free
+
+A versão 6.2 aceita fotos em bucket privado no Supabase, preservando a autorização da central e dos técnicos. Configure `MEDIA_STORAGE=supabase`, `SUPABASE_URL`, `SUPABASE_SECRET_KEY` e `SUPABASE_STORAGE_BUCKET=zencontrol-evidencias` somente no backend. O `render.yaml` usa plano Free, sem disco, e executa as migrações no comando de início. O PostgreSQL permanece no Aiven. Confira o [passo a passo e limites](docs/IMPLANTACAO.md) antes de habilitar serviços reais.
 
 ## Subir localmente
 

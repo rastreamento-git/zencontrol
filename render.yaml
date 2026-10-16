@@ -3,18 +3,13 @@ services:
   - type: web
     name: zencontrol
     runtime: node
-    plan: starter
+    plan: free
     numInstances: 1
     buildCommand: npm ci --include=dev && npm run build
-    preDeployCommand: npm run migrate
-    startCommand: npm start
+    startCommand: npm run migrate && npm start
     healthCheckPath: /healthz
     maxShutdownDelaySeconds: 120
     autoDeployTrigger: "off"
-    disk:
-      name: zencontrol-data
-      mountPath: /var/data/zencontrol
-      sizeGB: 1
     envVars:
       - key: NODE_VERSION
         value: "24"
@@ -25,7 +20,17 @@ services:
       - key: TRUST_PROXY
         value: "1"
       - key: ZEN_DATA_DIR
-        value: /var/data/zencontrol
+        value: /tmp/zencontrol
+      - key: MEDIA_STORAGE
+        value: supabase
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: zencontrol-evidencias
+      - key: DATABASE_POOL_MAX
+        value: "3"
       - key: ZEN_RUN_WORKER
         value: "true"
       - key: APP_ADMIN_USER

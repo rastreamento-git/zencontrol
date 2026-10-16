@@ -74,6 +74,11 @@ async function filePlan(cfg) {
   return plan;
 }
 async function purge(pool, cfg, { apply = false } = {}) {
+  if (cfg.MEDIA_STORAGE === "supabase")
+    fail(
+      409,
+      "A limpeza automática não está disponível com fotos no Supabase. Nenhum dado foi apagado. Exporte o backup e planeje a limpeza do banco e do bucket em conjunto.",
+    );
   // The explicit zc_* table list and these two folders form the entire scope.
   const files = await filePlan(cfg);
   const report = await transaction(pool, async (db) => {

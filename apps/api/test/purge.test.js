@@ -83,6 +83,13 @@ test("simulação mostra o alcance sem apagar registros ou arquivos", async () =
     "foto de exemplo",
   );
 });
+test("limpeza com mídia remota é recusada antes de alterar o banco", async () => {
+  await assert.rejects(
+    purge(pool, { ...cfg, MEDIA_STORAGE: "supabase" }, { apply: true }),
+    /Nenhum dado foi apagado/,
+  );
+  assert.equal((await o.get(pool, order.id)).vehicle, "TES1234");
+});
 test("limpeza esvazia tabelas e fotos do ZenControl e preserva inventário e acessos", async () => {
   const result = await purge(pool, cfg, { apply: true });
   assert.equal(result.database_purged, true);

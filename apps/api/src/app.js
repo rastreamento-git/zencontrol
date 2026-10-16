@@ -2,8 +2,8 @@ const express = require("express"),
   cors = require("cors"),
   helmet = require("helmet");
 const { randomUUID, createHash } = require("node:crypto");
-const fs = require("node:fs/promises"),
-  path = require("node:path");
+const path = require("node:path");
+const { createMediaStore } = require("./media-store");
 const sharp = require("sharp");
 const { configureAuth, hashPassword, username, publicUser } = require("./auth");
 const { transaction } = require("./database");
@@ -60,7 +60,11 @@ function createApp(pool, env = process.env) {
   app.use(express.json({ limit: "512kb" }));
   app.get("/healthz", async (req, res) => {
     await pool.query("SELECT 1");
-    res.json({ status: "ok", version: "6.1.0" });
+    res.json({
+      status: "ok",
+      version: "6.2.0",
+      media_storage: cfg.MEDIA_STORAGE || "local",
+    });
   });
   configureWebhook(app, pool, cfg);
   app.use("/api", (req, res, next) => {
@@ -73,7 +77,10 @@ function createApp(pool, env = process.env) {
     next();
   });
   const auth = configureAuth(app, cfg, pool);
-  app.locals.ready = auth.ready;
+  app.locals.ready = async () => {
+    await createMediaStore(cfg).ready();
+    await auth.ready();
+  };
   app.locals.config = cfg;
   configurePortal(app, pool, cfg, auth);
   const admin = auth.requireAdmin;
@@ -87,7 +94,7 @@ function createApp(pool, env = process.env) {
       statuses: d.statuses,
       services: d.services,
       today: d.today(),
-      version: "6.1.0",
+      version: "6.2.0",
     }),
   );
   app.get("/api/overview", async (req, res) => {
@@ -576,7 +583,7 @@ function createApp(pool, env = process.env) {
     res
       .set("Cache-Control", "no-store")
       .type(item.mime)
-      .send(await fs.readFile(path.join(cfg.DATA_DIR, "media", item.path)));
+      .send(await createMediaStore(cfg).read(item.path));
   });
   app.post("/api/evidence/:id/edit", async (req, res) => {
     if (
@@ -626,8 +633,7 @@ function createApp(pool, env = process.env) {
       )
         fail(409, "Aguarde o download.");
       const name = randomUUID() + ".jpg";
-      await fs.mkdir(path.join(cfg.DATA_DIR, "media"), { recursive: true });
-      await fs.writeFile(path.join(cfg.DATA_DIR, "media", name), bytes);
+      await createMediaStore(cfg).put(name, bytes);
       await db.query(
         "UPDATE zc_evidence SET path=$1,original_path=$2,sha256=$3 WHERE id=$4",
         [
@@ -1113,8 +1119,11 @@ function createApp(pool, env = process.env) {
       );
   });
   app.get("/api/backup", admin, async (req, res) => {
-    const { database, manifest, files } =
+    const { database, manifest, files, cleanup } =
       await require("./backup").prepareBackup(pool, cfg);
+    res.once("close", () => {
+      cleanup().catch(() => {});
+    });
     const archive = require("archiver")("zip", { zlib: { level: 6 } });
     archive.on("error", (e) => res.destroy(e));
     res.attachment("ZenControl-backup-" + d.today() + ".zip").type("zip");
@@ -1122,7 +1131,11 @@ function createApp(pool, env = process.env) {
     archive.append(database, { name: "database.json" });
     archive.append(manifest, { name: "manifest.json" });
     for (const file of files) archive.file(file.local, { name: file.name });
-    await archive.finalize();
+    try {
+      await archive.finalize();
+    } finally {
+      await cleanup();
+    }
   });
   app.post("/api/sql", (req, res) =>
     fail(410, "Endpoint SQL removido. Use as APIs específicas."),
