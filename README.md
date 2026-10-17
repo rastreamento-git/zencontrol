@@ -1,22 +1,24 @@
+> **ZenControl 6.4 — branch de homologação.** Use o [guia local do ecossistema](https://github.com/rastreamento-git/zencontrol/blob/feat/ecossistema-homologacao/HOMOLOGACAO.md). Requer API ZenControl 6.4. Não executar deploy/migrações em produção nesta etapa.
+
 # ZenControl · plataforma de atendimento
 
-ZenControl 6.2 reúne agenda, ordens de serviço, conferência da central, financeiro e portal dos técnicos. React 19, Vite, Express 5, Node.js 24 e PostgreSQL. A identidade visual, autenticação, componentes e leitor de etiquetas seguem a base do Estoque Pro.
+ZenControl 6.3 reúne agenda, ordens de serviço, conferência da central, financeiro e API para o Portal do Técnico independente. React 19, Vite, Express 5, Node.js 24 e PostgreSQL. A identidade visual, autenticação, componentes e leitor de etiquetas seguem a base do Estoque Pro.
 
 **Fluxo:** o técnico registra fotos e IMEIs → a central confere → o Estoque Pro confirma a instalação → a OS é concluída. O envio do técnico nunca conclui o serviço sozinho.
 
 ## Organização
 
-| Caminho                    | Responsabilidade                                                         |
-| -------------------------- | ------------------------------------------------------------------------ |
-| `apps/web/src/components`  | Agenda, gestão e conferência da central                                  |
-| `apps/web/src/portal`      | Portal responsivo dos técnicos, câmera e evidências                      |
-| `apps/api/src`             | API, autorização, regras, fila e integração                              |
-| `apps/api/migrations`      | Schema PostgreSQL versionado do ZenControl                               |
-| `packages/ui`              | Tema e componentes compartilhados; leitor original do Estoque Pro        |
-| `packages/server`          | Base de autenticação, transações e validação                             |
-| `integrations/estoque-pro` | Backend do inventário com o adaptador de instalação; referência testável |
-| `docs`                     | Regras, implantação e contrato entre os sistemas                         |
-| `.github/workflows`        | Verificação automática em PostgreSQL e build do frontend                 |
+| Caminho                          | Responsabilidade                                                         |
+| -------------------------------- | ------------------------------------------------------------------------ |
+| `apps/web/src/components`        | Agenda, gestão e conferência da central                                  |
+| `ZenField (repositório próprio)` | Aplicativo separado dos técnicos, com build e endereço próprios          |
+| `apps/api/src`                   | API, autorização, regras, fila e integração                              |
+| `apps/api/migrations`            | Schema PostgreSQL versionado do ZenControl                               |
+| `packages/ui`                    | Tema e componentes compartilhados; leitor original do Estoque Pro        |
+| `packages/server`                | Base de autenticação, transações e validação                             |
+| `integrations/estoque-pro`       | Backend do inventário com o adaptador de instalação; referência testável |
+| `docs`                           | Regras, implantação e contrato entre os sistemas                         |
+| `.github/workflows`              | Verificação automática em PostgreSQL e build do frontend                 |
 
 O ZenControl tem banco próprio. O estoque existente continua no banco do Estoque Pro. A comunicação usa API autenticada entre os servidores; o navegador não recebe a chave de integração e o ZenControl não grava diretamente no banco do inventário.
 
@@ -52,7 +54,7 @@ Consulte o usuário e a senha inicial no `.env` gerado. Ative `ZEN_RUN_WORKER=tr
 npm start
 ```
 
-Abra `http://127.0.0.1:3000`. O mesmo endereço mostra a central para administrador/operador e o portal para uma conta com perfil **Técnico**. Em desenvolvimento, `npm run dev:web` serve o frontend e usa a API local. Para executar todos os containers: `docker compose up --build -d`; nesse modo, o Compose já inicia um worker separado com o mesmo volume de fotos.
+Abra `http://127.0.0.1:3000`. A central é exclusiva para administrador/operador. O ZenField fica em seu próprio repositório e é iniciado/publicado conforme o README dele. Em desenvolvimento, `npm run dev:web` serve o frontend e usa a API local. Para executar todos os containers: `docker compose up --build -d`; nesse modo, o Compose já inicia um worker separado com o mesmo volume de fotos.
 
 As migrações criam uma base operacional vazia e as regras de evidência. Não importam os arquivos antigos, não conectam ao inventário sem configuração e não executam limpeza de outro banco. `npm run demo` é opcional e cria dados explicitamente fictícios apenas em uma base vazia; não faz parte da implantação.
 
@@ -89,3 +91,7 @@ npm run build
 Os testes executam SQL PostgreSQL real através de PGlite localmente. Com `TEST_DATABASE_URL`, usam um servidor PostgreSQL isolado por schema. O CI executa esse segundo modo. A suíte inclui o backend do inventário, aprovação, autorização, evidências, recusa atômica e recuperação de resposta perdida sem baixa duplicada.
 
 Credenciais, fotos de clientes, bancos antigos e dados de produção não pertencem ao repositório. A criação de uma instância de banco na hospedagem e a configuração dos segredos são etapas de implantação; o código e as migrações não provisionam uma conta de nuvem.
+
+## Portal do técnico
+
+O ZenField tem repositório, dependências, login, build e hospedagem próprios; a central permanece em `apps/web`. Configure `VITE_API_URL` no portal e `TECHNICIAN_PORTAL_URL` no backend. O caminho antigo `/tecnico` redireciona para o endereço próprio quando configurado. Fotos das etiquetas identificam automaticamente o código e o tipo do aparelho na carga do técnico. Novos envios exigem fotos da vistoria e checklist assinado; a central aprova antes da conclusão e do fechamento financeiro. Confira [operação, limites e ativação](docs/PORTAL_TECNICO.md).

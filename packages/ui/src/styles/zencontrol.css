@@ -1231,3 +1231,124 @@
   font-size: 12px;
   color: var(--ep-muted);
 }
+
+/* Large, explicit capture controls for field work on phones. */
+.portal-file-buttons {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 14px 0;
+}
+.portal-file-buttons label {
+  min-height: 48px;
+  cursor: pointer;
+  position: relative;
+}
+.portal-file-buttons input[type="file"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+}
+.portal-file-buttons label:focus-within {
+  outline: 3px solid #60a5fa;
+  outline-offset: 3px;
+}
+.portal-capture-group {
+  padding: 18px 0;
+  border-top: 1px solid var(--border-color, #dbe3ee);
+}
+.portal-capture-group h3 {
+  margin: 0 0 6px;
+  font-size: 17px;
+}
+.portal-capture-group p {
+  margin: 0;
+}
+.portal-document-file {
+  min-height: 150px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  color: #2563eb;
+  background: #eff6ff;
+}
+.portal-full-order {
+  grid-column: 1 / -1;
+  padding: 16px 0;
+  border-top: 1px solid var(--border-color, #dbe3ee);
+}
+.portal-full-order summary {
+  cursor: pointer;
+  font-weight: 700;
+  min-height: 44px;
+}
+.portal-full-order .zc-comments {
+  white-space: pre-wrap;
+}
+.portal-photo-caption code {
+  overflow-wrap: anywhere;
+}
+.portal-progress {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 0;
+}
+.portal-progress span {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 14px;
+}
+.portal-progress b {
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+.portal-service .error-banner {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+.portal-service .zc-checkbox {
+  min-height: 52px;
+  align-items: center;
+  line-height: 1.5;
+}
+.portal-service .zc-checkbox input {
+  min-width: 22px;
+  min-height: 22px;
+}
+@media (max-width: 600px) {
+  .portal-file-buttons {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+  .portal-file-buttons label {
+    justify-content: center;
+  }
+  .portal-submit-actions {
+    flex-direction: column;
+  }
+  .portal-submit-actions button {
+    width: 100%;
+    min-height: 50px;
+    white-space: normal;
+  }
+  .portal-full-order dl {
+    grid-template-columns: 1fr;
+  }
+  .portal-progress {
+    gap: 10px 14px;
+  }
+}

@@ -3,20 +3,36 @@ import { Box } from "lucide-react";
 import { api, errorMessage, saveToken } from "../lib/api";
 import { SessionContext } from "../lib/session";
 import AppFooter from "./AppFooter";
-export default function AuthGate({ children }) {
+export default function AuthGate({ children, audience = "central" }) {
+  const technicianEntry = audience === "technician";
   const [status, setStatus] = useState("loading");
   const [error, setError] = useState("");
   const [user, setUser] = useState(null);
-  const [login, setLogin] = useState("admin");
+  const [login, setLogin] = useState(technicianEntry ? "" : "admin");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  function applySession(data) {
+    if (data.user && (data.user.papel === "tecnico") !== technicianEntry) {
+      saveToken(null);
+      setUser(null);
+      setStatus("login");
+      setError(
+        technicianEntry
+          ? "Use uma conta de técnico para entrar neste portal."
+          : "Esta conta é de técnico. Entre pelo Portal do Técnico.",
+      );
+      return false;
+    }
+    setUser(data.user);
+    setStatus(data.authenticated === false ? "login" : "ready");
+    return true;
+  }
   async function check() {
     setStatus("loading");
     setError("");
     try {
       const { data } = await api.get("/auth/session");
-      setUser(data.user);
-      setStatus(data.authenticated ? "ready" : "login");
+      applySession(data);
     } catch (e) {
       setError(errorMessage(e));
       setStatus("error");
@@ -43,11 +59,13 @@ export default function AuthGate({ children }) {
     setBusy(true);
     setError("");
     try {
-      const { data } = await api.post("/auth/login", { login, password });
-      saveToken(data.token);
-      setUser(data.user);
+      const { data } = await api.post("/auth/login", {
+        login,
+        password,
+        audience,
+      });
+      if (applySession(data)) saveToken(data.token);
       setPassword("");
-      setStatus("ready");
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -68,13 +86,25 @@ export default function AuthGate({ children }) {
             </span>
             <div>
               <h1 id="auth-title">
-                Zen<span>Control</span>
+                {technicianEntry ? (
+                  <>
+                    Zen<span>Field</span>
+                  </>
+                ) : (
+                  <>
+                    Zen<span>Control</span>
+                  </>
+                )}
               </h1>
-              <p>Agendamentos e equipe técnica</p>
+              <p>
+                {technicianEntry
+                  ? "Portal do técnico"
+                  : "Agendamentos e equipe técnica"}
+              </p>
             </div>
           </div>
           {status === "loading" ? (
-            <p role="status">Conectando ao ZenControl…</p>
+            <p role="status">Conectando…</p>
           ) : status === "error" ? (
             <>
               <p role="alert" className="text-red-700 mb-4">
@@ -87,13 +117,16 @@ export default function AuthGate({ children }) {
           ) : (
             <form onSubmit={submitLogin} className="auth-form">
               <p className="auth-description">
-                Entre para acompanhar os agendamentos e os atendimentos.
+                {technicianEntry
+                  ? "Entre com seu usuário e senha para ver os serviços, enviar fotos e acompanhar a confirmação da central."
+                  : "Entre para acompanhar os agendamentos e os atendimentos."}
               </p>
               <label htmlFor="login">Usuário</label>
               <input
                 id="login"
                 name="username"
                 autoComplete="username"
+                autoFocus={technicianEntry}
                 required
                 value={login}
                 onChange={(e) => setLogin(e.target.value)}
@@ -104,7 +137,7 @@ export default function AuthGate({ children }) {
                 type="password"
                 autoComplete="current-password"
                 required
-                autoFocus
+                autoFocus={!technicianEntry}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
@@ -120,7 +153,7 @@ export default function AuthGate({ children }) {
           )}
         </section>
       </div>
-      <AppFooter />
+      <AppFooter product={technicianEntry ? "ZenField" : "ZenControl"} />
     </main>
   );
 }

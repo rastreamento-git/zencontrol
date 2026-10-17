@@ -6,6 +6,8 @@ const statuses = [
   "AGENDADO",
   "EM EXECUÇÃO",
   "AGUARDANDO VALIDAÇÃO",
+  "EXECUÇÃO FINALIZADA",
+  "AGUARDANDO CONFERÊNCIA",
   "CONCLUÍDO",
   "CANCELADO",
   "REAGENDAR",

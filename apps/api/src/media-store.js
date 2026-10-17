@@ -4,7 +4,7 @@ const { createHash } = require("node:crypto");
 const { fail } = require("./errors");
 
 const stores = new WeakMap();
-const photoName = /^[-a-f0-9]+\.jpg$/;
+const photoName = /^[-a-f0-9]+\.(?:jpg|pdf)$/;
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 function validateMediaConfig(cfg) {
   const provider = cfg.MEDIA_STORAGE || "local";
@@ -112,7 +112,7 @@ function createMediaStore(cfg) {
         if (!Buffer.isBuffer(bytes) || bytes.length > 16 * 1024 * 1024)
           fail(400, "Foto acima do limite de armazenamento.");
         const { error } = await bucket.upload(name, bytes, {
-          contentType: "image/jpeg",
+          contentType: name.endsWith(".pdf") ? "application/pdf" : "image/jpeg",
           cacheControl: "0",
           upsert: false,
         });
