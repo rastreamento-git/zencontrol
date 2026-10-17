@@ -38,28 +38,23 @@ run(
   ["ci", "--include=dev"],
   path.join(parent, "inventario-v2/invent-back"),
 );
+run(
+  npm,
+  [
+    "install",
+    "--prefix",
+    path.join(parent, "runtime"),
+    "--no-save",
+    "--package-lock=false",
+    "embedded-postgres@18.4.0-beta.17",
+  ],
+  root,
+);
 run(npm, ["run", "build"], root, { VITE_API_URL: "" });
 require("./online-demo.cjs").banner(path.join(root, "apps/web/dist"));
 
 require("./demo-fixtures.cjs")
   .generate(path.join(parent, "fixtures"))
-  .then(async () => {
-    // Initialize PostgreSQL during the build, so initdb's temporary WASM heap
-    // never needs to fit inside the 512 MiB runtime instance.
-    const dir = path.join(root, ".homologation-online-demo");
-    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-    const db = await require("./local-database.cjs").localDatabase(
-      path.join(dir, "online-demo"),
-      {
-        postgresqlconf: [
-          "shared_buffers=16MB",
-          "work_mem=1MB",
-          "maintenance_work_mem=8MB",
-        ],
-      },
-    );
-    await db.close();
-  })
   .catch((error) => {
     console.error(error.message);
     process.exitCode = 1;

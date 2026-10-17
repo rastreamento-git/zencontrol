@@ -73,11 +73,9 @@ function proxy(port, strip = "") {
     upstream.setTimeout(90000, () => upstream.destroy());
     upstream.on("error", () => {
       if (res.headersSent) return res.destroy();
-      res
-        .status(503)
-        .json({
-          error: "Demonstração temporariamente indisponível. Tente novamente.",
-        });
+      res.status(503).json({
+        error: "Demonstração temporariamente indisponível. Tente novamente.",
+      });
     });
     req.on("aborted", () => upstream.destroy());
     req.pipe(upstream);
@@ -128,6 +126,110 @@ function banner(directory) {
   fs.writeFileSync(file, html);
 }
 
-module.exports = { configuration, gateway, banner };
+async function database(directory, secret) {
+  const fs = require("node:fs/promises");
+  const { pathToFileURL } = require("node:url");
+  const { createHmac } = require("node:crypto");
+  const { Pool } = require("pg");
+  // A native server avoids the WASM compiler's >512 MiB transient peak.
+  // Do not create OS accounts or change host permissions.
+  if (process.getuid?.() === 0)
+    throw Error(
+      "A demonstração PostgreSQL exige um processo sem privilégios root.",
+    );
+  const modulePath = require.resolve("embedded-postgres", {
+    paths: [path.join(__dirname, "../.homologation-build/runtime")],
+  });
+  const EmbeddedPostgres = (await import(pathToFileURL(modulePath).href))
+    .default;
+  const password = createHmac("sha256", secret)
+    .update("postgres-demo")
+    .digest("hex");
+  const databaseDir = path.join(directory, "native-postgres");
+  const server = new EmbeddedPostgres({
+    databaseDir,
+    user: "zen_demo",
+    password,
+    port: 54321,
+    authMethod: "scram-sha-256",
+    persistent: true,
+    createPostgresUser: false,
+    initdbFlags: ["--encoding=UTF8", "--locale=C"],
+    postgresFlags: [
+      "-h",
+      "127.0.0.1",
+      "-c",
+      "shared_buffers=16MB",
+      "-c",
+      "max_connections=20",
+      "-c",
+      "work_mem=1MB",
+      "-c",
+      "maintenance_work_mem=8MB",
+      "-c",
+      "max_worker_processes=2",
+      "-c",
+      "max_parallel_workers=0",
+    ],
+    onLog: () => {},
+    onError: () => console.error("Falha no PostgreSQL temporário."),
+  });
+  try {
+    await fs.access(path.join(databaseDir, "PG_VERSION"));
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    const mask = process.umask(0o077);
+    try {
+      await server.initialise();
+    } finally {
+      process.umask(mask);
+    }
+  }
+  await server.start();
+  const admin = server.getPgClient("postgres", "127.0.0.1");
+  const pools = [];
+  try {
+    await admin.connect();
+    for (const name of ["zencontrol_demo", "stock_demo"]) {
+      if (
+        !(
+          await admin.query("SELECT 1 FROM pg_database WHERE datname=$1", [
+            name,
+          ])
+        ).rowCount
+      )
+        await admin.query(`CREATE DATABASE "${name}"`);
+      const pool = new Pool({
+        host: "127.0.0.1",
+        port: 54321,
+        user: "zen_demo",
+        password,
+        database: name,
+        max: 3,
+        ssl: false,
+        connectionTimeoutMillis: 10000,
+        options:
+          "-c timezone=America/Sao_Paulo -c statement_timeout=15000 -c lock_timeout=10000",
+      });
+      pool.on("error", () =>
+        console.error("Falha em conexão local da demonstração."),
+      );
+      pools.push(pool);
+    }
+  } catch (error) {
+    await Promise.all(pools.map((pool) => pool.end()));
+    await server.stop();
+    throw error;
+  } finally {
+    await admin.end();
+  }
+  return {
+    central: { pool: pools[0], close: () => pools[0].end() },
+    stock: { pool: pools[1], close: () => pools[1].end() },
+    close: () => server.stop(),
+  };
+}
+
+module.exports = { configuration, gateway, banner, database };
 if (require.main === module && process.argv[2] === "banner")
   banner(process.argv[3]);

@@ -14,10 +14,12 @@ const onlineConfig = online
   : null;
 if (instance && !/^[a-zA-Z0-9_-]{1,64}$/.test(instance))
   throw Error("Nome de instância inválido.");
-const dataDir = path.join(
-  root,
-  ".homologation" + (instance ? "-" + instance : ""),
-);
+const dataDir = online
+  ? path.join(
+      require("node:os").tmpdir(),
+      "zen-homologation-" + (instance || "online-demo"),
+    )
+  : path.join(root, ".homologation" + (instance ? "-" + instance : ""));
 const { localDatabase } = require("./local-database.cjs");
 const { transaction } = require("../apps/api/src/database"),
   { migrate } = require("../apps/api/scripts/migrate"),
@@ -51,10 +53,6 @@ async function main() {
   await fs.access(path.join(inventory, "invent-back/src/zencontrol.js"));
   if (!online) await fs.access(path.join(field, "dist/index.html"));
   await fs.access(path.join(root, "apps/web/dist/index.html"));
-  if (online) {
-    // initdb is deliberately restricted to the build environment.
-    await fs.access(path.join(dataDir, "online-demo/PG_VERSION"));
-  }
   await fs.mkdir(dataDir, { recursive: true, mode: 0o700 });
   const pidFile = path.join(dataDir, "running.pid");
   try {
@@ -89,20 +87,13 @@ async function main() {
   const scopedSecret = (purpose) =>
     createHmac("sha256", credentials.secret).update(purpose).digest("hex");
   const sharedDb = online
-    ? await localDatabase(path.join(dataDir, "online-demo"), {
-        postgresqlconf: [
-          "shared_buffers=16MB",
-          "work_mem=1MB",
-          "maintenance_work_mem=8MB",
-        ],
-      })
+    ? await require("./online-demo.cjs").database(dataDir, credentials.secret)
     : null;
-  const scoped = require("./local-database.cjs").schemaDatabase;
   const db = online
-      ? await scoped(sharedDb, "central_demo")
+      ? sharedDb.central
       : await localDatabase(path.join(dataDir, "zencontrol")),
     stockDb = online
-      ? await scoped(sharedDb, "stock_demo")
+      ? sharedDb.stock
       : await localDatabase(path.join(dataDir, "estoque-pro"));
   const stockModule = require(path.join(inventory, "invent-back/src/app")),
     stockMigrate = require(
@@ -352,6 +343,9 @@ async function main() {
     );
     console.log(
       "A senha de teste fica somente em ONLINE_DEMO_PASSWORD no Render.",
+    );
+    console.log(
+      "Pico RSS: " + Math.ceil(process.resourceUsage().maxRSS / 1024) + " MiB",
     );
     console.log(
       "RSS inicial: " +

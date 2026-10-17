@@ -2,11 +2,11 @@
 
 Este modo publica uma demonstração descartável, com dados fictícios. **Não substitui um ambiente persistente.** Nenhum banco Aiven ou bucket Supabase é usado. A configuração recusa credenciais externas. Não há SGA, WhatsApp nem pagamento bancário.
 
-Uma instância Render **Free** executa as duas APIs e um banco PostgreSQL WASM com schemas separados para central e estoque. ZenField e Estoque Pro têm Static Sites e sessões independentes. O gateway expõe somente a API do estoque sob `/stock-api`, a central na raiz e arquivos fictícios sob `/demo-files`. Os demais listeners são locais. Os frontends e o backend usam a branch `feat/ecossistema-homologacao`, sem merge em `main`.
+Uma instância Render **Free** executa as duas APIs e PostgreSQL nativo com dois bancos separados para central e estoque. ZenField e Estoque Pro têm Static Sites e sessões independentes. O gateway expõe somente a API do estoque sob `/stock-api`, a central na raiz e arquivos fictícios sob `/demo-files`. Os demais listeners são locais. Os frontends e o backend usam a branch `feat/ecossistema-homologacao`, sem merge em `main`.
 
 **Perda de dados:** reinício, novo deploy ou suspensão por inatividade do Render apagam os registros e imagens temporários e recriam os exemplos. A senha administrativa continua a mesma variável privada, mas as ativações individuais são recriadas. Obtenha novo código na central. Baixe o backup operacional autenticado antes de encerrar uma rodada. A cópia integral de disco do guia local não fica disponível remotamente.
 
-Cada operação seleciona o schema correto ao obter a conexão; o banco WASM serializa conexões; esse modo não é ensaio de carga nem teste PostgreSQL multiconexão. Uma instância Free tem memória limitada: use poucos usuários e fotos de teste pequenas. Fotos continuam limitadas e privadas pelas mesmas APIs autenticadas. Não se afirma disponibilidade contínua ou custo ilimitado: há franquias de horas, tráfego e builds compartilhadas no workspace.
+Os dois bancos são acessíveis somente por loopback e usam pools separados; esse modo não é ensaio de carga. O demonstrador local original continua usando WASM. Uma instância Free tem memória limitada: use poucos usuários e fotos de teste pequenas. Fotos continuam limitadas e privadas pelas mesmas APIs autenticadas. Não se afirma disponibilidade contínua ou custo ilimitado: há franquias de horas, tráfego e builds compartilhadas no workspace.
 
 ## Serviço da central e APIs
 
@@ -24,7 +24,7 @@ Variáveis: `NODE_VERSION=24`, `NODE_ENV=production`, `SKIP_INSTALL_DEPS=true`, 
 
 O build baixa apenas o código público oficial do inventário, fixado no commit `27417a75742e95138304623a9799aa7d41e5bc34`. Não inclui credenciais nos bundles, logs ou arquivos versionados. A senha fica em `ONLINE_DEMO_PASSWORD` no Environment do novo serviço. Login: `admin`.
 
-O build inicializa o template PostgreSQL e gera as etiquetas antes de empacotar o serviço. A inicialização recusa um template ausente, evitando executar `initdb` dentro da memória limitada do runtime. Após essa preparação, a medição local de memória inicial foi de aproximadamente 278 MiB; o uso real do Render deve ser acompanhado durante a leitura de fotos.
+O build instala `embedded-postgres@18.4.0-beta.17`, com binários nativos, em uma pasta privada de runtime e gera as etiquetas. O PostgreSQL inicia sem privilégios root, aceita conexões apenas em `127.0.0.1:54321`, usa SCRAM e não cria usuários no sistema operacional. As duas APIs usam bancos distintos. O runtime WASM anterior foi recusado pelo limite de 512 MiB do Render, por isso não é usado online. O consumo deve ser acompanhado durante os testes de fotos.
 
 ## Frontends independentes
 
