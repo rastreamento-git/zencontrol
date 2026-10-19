@@ -63,6 +63,7 @@ function publicUser(row) {
 }
 function configureAuth(app, env, pool) {
   const enabled = Boolean(env.APP_PASSWORD);
+  const federation = require("./identity").identity(env, pool, publicUser);
   if (
     env.NODE_ENV === "production" &&
     (!enabled || env.APP_PASSWORD.length < 12)
@@ -94,6 +95,7 @@ function configureAuth(app, env, pool) {
       .update(payload)
       .digest("base64url");
   async function valid(req) {
+    if (federation.enabled) return federation.valid(req);
     if (!enabled)
       return {
         id: null,
@@ -131,6 +133,42 @@ function configureAuth(app, env, pool) {
     const row = rows[0];
     return row && data.version === row.versao_sessao ? publicUser(row) : null;
   }
+  app.get("/api/auth/config", (req, res) =>
+    res.json({
+      unified_login: federation.enabled,
+      login_url: federation.enabled ? env.ZEN_LOGIN_URL : "",
+    }),
+  );
+  app.post(
+    "/api/auth/sso/exchange",
+    rateLimit({
+      windowMs: 60000,
+      limit: 30,
+      standardHeaders: "draft-8",
+      legacyHeaders: false,
+    }),
+    async (req, res) => {
+      if (!federation.enabled) fail(503, "Acesso único não configurado.");
+      res.json(await federation.exchange(req.body));
+    },
+  );
+  app.post("/api/auth/logout", async (req, res) => {
+    if (federation.enabled) {
+      try {
+        await federation.logout(req);
+      } catch (error) {
+        if (![401, 403].includes(error.status)) throw error;
+      }
+    } else {
+      const user = await valid(req);
+      if (user?.id)
+        await pool.query(
+          "UPDATE usuarios SET versao_sessao=versao_sessao+1 WHERE id=$1",
+          [user.id],
+        );
+    }
+    res.json({ ok: true });
+  });
   app.get("/api/auth/session", async (req, res) => {
     await ready();
     const user = await valid(req);
@@ -146,6 +184,7 @@ function configureAuth(app, env, pool) {
       message: { error: "Muitas tentativas. Aguarde 15 minutos." },
     }),
     async (req, res) => {
+      if (federation.enabled) fail(409, "Entre pelo acesso único ZEN.");
       if (!enabled)
         return res.json({
           enabled: false,
@@ -207,6 +246,7 @@ function configureAuth(app, env, pool) {
     next();
   }
   async function reauthenticate(req) {
+    if (federation.enabled) return federation.reauthenticate(req);
     if (!enabled)
       fail(403, "Configure acesso por senha para usar ações administrativas.");
     const { rows } = await pool.query(
@@ -216,7 +256,13 @@ function configureAuth(app, env, pool) {
     if (!(await checkPassword(req.body?.password, rows[0]?.senha_hash)))
       fail(400, "A senha atual não confere.");
   }
-  return { ready, requireAdmin, reauthenticate, enabled };
+  return {
+    ready,
+    requireAdmin,
+    reauthenticate,
+    enabled,
+    federated: federation.enabled,
+  };
 }
 module.exports = {
   configureAuth,

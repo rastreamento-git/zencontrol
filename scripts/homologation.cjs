@@ -116,6 +116,10 @@ async function main() {
       SESSION_SECRET: scopedSecret("stock-session"),
       ZENCONTROL_INTEGRATION_SECRET: scopedSecret("stock-integration"),
       CORS_ORIGINS: online ? onlineConfig.stockOrigin : "http://127.0.0.1:4321",
+      ZEN_IDENTITY_API_URL: "http://127.0.0.1:4317",
+      ZEN_LOGIN_URL: online
+        ? onlineConfig.centralOrigin
+        : "http://127.0.0.1:4320",
       ...(online ? { TRUST_PROXY: "1" } : {}),
     }),
     4318,
@@ -132,10 +136,18 @@ async function main() {
       ? onlineConfig.fieldOrigin
       : "http://127.0.0.1:4319",
     CORS_ORIGINS: online
-      ? [onlineConfig.publicOrigin, onlineConfig.centralOrigin, onlineConfig.fieldOrigin].join(",")
+      ? [
+          onlineConfig.publicOrigin,
+          onlineConfig.centralOrigin,
+          onlineConfig.fieldOrigin,
+        ].join(",")
       : "http://127.0.0.1:4319,http://127.0.0.1:4320,http://127.0.0.1:4321",
     ...(online ? { TRUST_PROXY: "1" } : {}),
     ZEN_DATA_DIR: path.join(dataDir, "media-data"),
+    SSO_LOGIN_URL: online
+      ? onlineConfig.centralOrigin
+      : "http://127.0.0.1:4320",
+    SSO_STOCK_URL: online ? onlineConfig.stockOrigin : "http://127.0.0.1:4321",
     STOCK_ENABLED: "true",
     STOCK_API_URL: "http://127.0.0.1:4318",
     STOCK_API_SECRET: scopedSecret("stock-integration"),

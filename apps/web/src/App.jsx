@@ -1,3 +1,4 @@
+import AppLinks from "@zen/ui/components/AppLinks";
 import { NoticeBell, FinancePanel } from "./components/Ecosystem";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -191,6 +192,7 @@ export default function App() {
                 ))}
             </div>
           ))}
+          <AppLinks />
         </nav>
         <div className="sidebar-footer">
           <span className="avatar">{initials(user.nome)}</span>
@@ -211,7 +213,13 @@ export default function App() {
             title="Sair"
             aria-label="Sair"
             disabled={busy}
-            onClick={() => {
+            onClick={async () => {
+              try {
+                await api.post("/auth/logout", {});
+              } catch (e) {
+                notify(errorMessage(e), "error");
+                return;
+              }
               saveToken(null);
               window.dispatchEvent(
                 new CustomEvent("invent:unauthorized", {

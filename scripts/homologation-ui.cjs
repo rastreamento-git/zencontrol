@@ -84,7 +84,7 @@ async function main() {
     errors.push(e.message);
     console.error("UI error: " + e.message);
   });
-  await page.goto("http://127.0.0.1:4319");
+  await page.goto("http://127.0.0.1:4320");
   await page.getByLabel("Usuário", { exact: true }).fill(access.login);
   await page.getByLabel("Senha de acesso").fill("zen123");
   await page.getByLabel("Primeiro acesso ou redefinição").check();

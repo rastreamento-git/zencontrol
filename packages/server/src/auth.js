@@ -280,7 +280,7 @@ function configureAuth(app, env, pool) {
       const audience = req.body.audience;
       if (
         audience !== undefined &&
-        !["central", "technician"].includes(audience)
+        !["central", "technician", "ecosystem"].includes(audience)
       )
         fail(400, "Área de acesso inválida.");
       if (audience === "technician" && row.papel !== "tecnico")
@@ -288,24 +288,32 @@ function configureAuth(app, env, pool) {
       if (audience === "central" && row.papel === "tecnico")
         fail(403, "Esta conta é de técnico. Entre pelo Portal do Técnico.");
       await logAuth(row.id, "login_succeeded");
-      const exp = Date.now() + 8 * 60 * 60000;
-      const payload = Buffer.from(
-        JSON.stringify({
-          exp,
-          uid: row.id,
-          version: row.versao_sessao,
-          jti: randomUUID(),
-        }),
-      ).toString("base64url");
       res.json({
         enabled: true,
-        token: `${payload}.${sign(payload)}`,
-        expiresAt: exp,
+        ...issueToken(row),
         api_version: "6.4.0",
         user: publicUser(row),
       });
     },
   );
+  function issueToken(row) {
+    const exp = Date.now() + 8 * 60 * 60000;
+    const payload = Buffer.from(
+      JSON.stringify({
+        exp,
+        uid: row.id,
+        version: row.versao_sessao,
+        jti: randomUUID(),
+      }),
+    ).toString("base64url");
+    return { token: `${payload}.${sign(payload)}`, expiresAt: exp };
+  }
+  require("./sso").configureSso(app, env, pool, {
+    valid,
+    issueToken,
+    publicUser,
+    checkPassword,
+  });
   app.use("/api", async (req, res, next) => {
     const user = await valid(req);
     if (!user)

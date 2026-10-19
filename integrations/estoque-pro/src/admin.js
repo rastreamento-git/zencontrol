@@ -104,6 +104,14 @@ async function verifyCurrent(client, expected) {
 }
 function configureAdmin(app, pool, auth) {
   app.use("/api/admin", auth.requireAdmin);
+  app.use("/api/admin/users", (req, res, next) => {
+    if (auth.federated)
+      fail(
+        409,
+        "Gerencie as contas ZEN em ZenControl → Usuários. O perfil vale também para o Estoque Pro.",
+      );
+    next();
+  });
   app.get("/api/admin/users", async (req, res) =>
     res.json(
       (await pool.query("SELECT * FROM usuarios ORDER BY nome,id")).rows.map(

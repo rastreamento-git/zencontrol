@@ -238,7 +238,7 @@ test("migrações são idempotentes e rollback não deixa gravações parciais",
   await migrate(pool);
   assert.equal(
     Number((await d.one(pool, "SELECT count(*) n FROM schema_migrations")).n),
-    5,
+    6,
   );
   await assert.rejects(
     transaction(pool, async (tx) => {
