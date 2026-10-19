@@ -37,12 +37,21 @@ async function batch(db, id) {
   if (!b) fail(404, "Envio não encontrado.");
   return b;
 }
-async function rule(db, service) {
+async function rule(db, service, order = null) {
   const key = d.services.find((s) => service.startsWith(s));
   const r = await d.one(db, "SELECT * FROM zc_service_rules WHERE service=$1", [
     key || service,
   ]);
   if (!r) fail(409, "Defina as regras deste serviço antes de continuar.");
+  if (order?.tracker_waiver_authorized)
+    return {
+      ...r,
+      stock_action: "none",
+      min_serials: 0,
+      required_photos: r.required_photos.filter(
+        (p) => !["label", "installed"].includes(p.kind),
+      ),
+    };
   return r;
 }
 const snapshot = (order) => ({
@@ -50,6 +59,7 @@ const snapshot = (order) => ({
   vehicle: order.vehicle,
   chassis: order.chassis,
   service: order.service,
+  tracker_waiver_authorized: order.tracker_waiver_authorized,
   technician_id: order.technician_id,
   customer_name: order.customer_name,
   scheduled_at: order.scheduled_at,
@@ -70,6 +80,7 @@ const publicOrder = (order) =>
       "version",
       "stock_sync_state",
       "workflow_mode",
+      "tracker_waiver_authorized",
       "executed_on",
       "execution_finished_at",
       "conference_started_at",
@@ -253,7 +264,9 @@ async function upload(pool, cfg, userId, id, input) {
   });
 }
 function requiredEquipment(order) {
-  const selected = order.document_data?.equipment || [];
+  const selected = order.tracker_waiver_authorized
+    ? []
+    : order.document_data?.equipment || [];
   return {
     RASTREADOR:
       Number(selected.includes("tracker")) +
@@ -262,6 +275,11 @@ function requiredEquipment(order) {
   };
 }
 async function verifyEvidence(db, b, r, codes, order) {
+  if (order.tracker_waiver_authorized && codes.length)
+    fail(
+      400,
+      "OS com dispensa de rastreador não registra instalação de equipamentos.",
+    );
   const files = await d.rows(
     db,
     "SELECT * FROM zc_evidence WHERE batch_id=$1",
@@ -339,7 +357,7 @@ async function submit(pool, userId, id, input) {
       fail(400, "Confirme que o checklist está preenchido e assinado.");
     const codes = input.serials?.length ? serials(input.serials).sort() : [];
     if (codes.length > 20) fail(400, "Limite de 20 equipamentos por serviço.");
-    const r = await rule(db, order.service);
+    const r = await rule(db, order.service, order);
     await verifyEvidence(db, b, r, codes, order);
     const notes = d.string(input.notes || "", "Relato do serviço", 6000);
     const executedOn =
@@ -421,7 +439,7 @@ async function approve(pool, cfg, id, input, actor) {
           ? serials(input.serials).sort()
           : []
         : [...b.imeis].sort();
-    const r = await rule(db, order.service);
+    const r = await rule(db, order.service, order);
     await verifyEvidence(db, b, r, codes, order);
     const tech = await d.one(
       db,

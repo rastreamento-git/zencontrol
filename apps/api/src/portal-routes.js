@@ -118,7 +118,7 @@ function configurePortal(app, pool, cfg, auth) {
         portalUrl: cfg.TECHNICIAN_PORTAL_URL || cfg.PUBLIC_URL,
       }),
       required_equipment: portal.requiredEquipment(order),
-      rule: await portal.rule(pool, order.service),
+      rule: await portal.rule(pool, order.service, order),
       submissions: history,
     });
   });

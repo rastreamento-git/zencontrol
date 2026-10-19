@@ -641,12 +641,13 @@ function createApp(pool, env = process.env) {
       "SELECT id,state,mime,sha256,kind,serial_code,equipment_type,equipment_model FROM zc_evidence WHERE batch_id=$1",
       [batch.id],
     );
-    batch.rule = batch.order_id
-      ? await portal.rule(pool, (await o.get(pool, batch.order_id)).service)
+    const currentOrder = batch.order_id
+      ? await o.get(pool, batch.order_id)
       : null;
-    batch.current_order = batch.order_id
-      ? d.publicOrder(await o.get(pool, batch.order_id))
+    batch.rule = currentOrder
+      ? await portal.rule(pool, currentOrder.service, currentOrder)
       : null;
+    batch.current_order = currentOrder ? d.publicOrder(currentOrder) : null;
     res.json(batch);
   });
   app.get("/api/evidence/:id", async (req, res) => {

@@ -120,3 +120,16 @@ test("document validation rejects execution metadata, unknown keys and invalid e
   assert.equal(updated.cpf_cnpj, fixture.document_data.cpf_cnpj);
   assert.equal(updated.brand, "Marca corrigida");
 });
+test("PDF apresenta dispensa autorizada e exclusão financeira sem instruir instalação", async () => {
+  const pdf = await readPdf(
+    await orderPdf({
+      ...fixture,
+      tracker_waiver_authorized: true,
+      workflow_mode: "controlled",
+    }),
+  );
+  assert.match(pdf.text, /DISPENSA DE RASTREADOR AUTORIZADA/);
+  assert.match(pdf.text, /não integra a remuneração do técnico/);
+  assert.match(pdf.text, /não registra instalação no Estoque Pro/);
+  assert.ok(!pdf.text.includes("DEVERÁ LEVAR"));
+});

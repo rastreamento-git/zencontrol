@@ -72,6 +72,7 @@ async function addRate(db, tid, proposal, actor) {
 }
 async function capture(db, order, executedOn) {
   cal.date(executedOn);
+  if (order.tracker_waiver_authorized) return null;
   const existing = await d.one(
     db,
     "SELECT * FROM zc_financial_ledger WHERE order_id=$1",
@@ -119,7 +120,8 @@ async function capture(db, order, executedOn) {
   ).rows[0];
 }
 async function makeEligible(db, order) {
-  if (order.workflow_mode !== "controlled") return;
+  if (order.workflow_mode !== "controlled" || order.tracker_waiver_authorized)
+    return;
   await capture(
     db,
     order,
@@ -160,7 +162,7 @@ async function preview(db, tid, start, end) {
   if (!t) fail(404, "Técnico não encontrado.");
   const orders = await d.rows(
     db,
-    "SELECT l.*,o.vehicle,o.service FROM zc_financial_ledger l JOIN zc_orders o ON o.id=l.order_id WHERE l.technician_id=$1 AND l.state='approved' AND l.eligible_on<=$2 AND l.executed_on<=$2 AND o.status='CONCLUÍDO' AND o.deleted_at='' AND NOT EXISTS(SELECT 1 FROM zc_settlement_orders s WHERE s.order_id=l.order_id) ORDER BY l.executed_on,l.order_id",
+    "SELECT l.*,o.vehicle,o.service FROM zc_financial_ledger l JOIN zc_orders o ON o.id=l.order_id WHERE o.tracker_waiver_authorized=false AND l.technician_id=$1 AND l.state='approved' AND l.eligible_on<=$2 AND l.executed_on<=$2 AND o.status='CONCLUÍDO' AND o.deleted_at='' AND NOT EXISTS(SELECT 1 FROM zc_settlement_orders s WHERE s.order_id=l.order_id) ORDER BY l.executed_on,l.order_id",
     [tid, end],
   );
   for (const item of orders) {
@@ -180,7 +182,7 @@ async function preview(db, tid, start, end) {
   }
   const carry = await d.rows(
     db,
-    "SELECT a.*,l.technician_id FROM zc_adjustments a JOIN zc_financial_ledger l ON l.order_id=a.order_id WHERE l.technician_id=$1 AND a.settlement_id IS NULL AND EXISTS(SELECT 1 FROM zc_settlement_orders s WHERE s.order_id=a.order_id) ORDER BY a.created_at,a.id",
+    "SELECT a.*,l.technician_id FROM zc_adjustments a JOIN zc_financial_ledger l ON l.order_id=a.order_id JOIN zc_orders o ON o.id=l.order_id WHERE o.tracker_waiver_authorized=false AND l.technician_id=$1 AND a.settlement_id IS NULL AND EXISTS(SELECT 1 FROM zc_settlement_orders s WHERE s.order_id=a.order_id) ORDER BY a.created_at,a.id",
     [tid],
   );
   const total =
@@ -404,7 +406,7 @@ async function summary(db, tid) {
   const cycle = await policyFor(db, tid);
   const ledger = await d.rows(
     db,
-    "SELECT l.*,o.vehicle,o.service,o.status,s.settlement_id,COALESCE((SELECT sum(a.amount_cents)::int FROM zc_adjustments a WHERE a.order_id=l.order_id),0) adjustment_cents FROM zc_financial_ledger l JOIN zc_orders o ON o.id=l.order_id LEFT JOIN zc_settlement_orders s ON s.order_id=l.order_id WHERE l.technician_id=$1 ORDER BY l.executed_on DESC,l.order_id LIMIT 1000",
+    "SELECT l.*,o.vehicle,o.service,o.status,s.settlement_id,COALESCE((SELECT sum(a.amount_cents)::int FROM zc_adjustments a WHERE a.order_id=l.order_id),0) adjustment_cents FROM zc_financial_ledger l JOIN zc_orders o ON o.id=l.order_id LEFT JOIN zc_settlement_orders s ON s.order_id=l.order_id WHERE o.tracker_waiver_authorized=false AND l.technician_id=$1 ORDER BY l.executed_on DESC,l.order_id LIMIT 1000",
     [tid],
   );
   const settlements = await d.rows(
@@ -423,18 +425,18 @@ async function summary(db, tid) {
   }
   const adjustments = await d.rows(
     db,
-    "SELECT a.* FROM zc_adjustments a JOIN zc_financial_ledger l ON l.order_id=a.order_id WHERE l.technician_id=$1 ORDER BY created_at DESC LIMIT 200",
+    "SELECT a.* FROM zc_adjustments a JOIN zc_financial_ledger l ON l.order_id=a.order_id JOIN zc_orders o ON o.id=l.order_id WHERE o.tracker_waiver_authorized=false AND l.technician_id=$1 ORDER BY a.created_at DESC LIMIT 200",
     [tid],
   );
   // Totals cover the entire account, independently of display limits above.
   const base = await d.one(
     db,
-    "SELECT COALESCE(sum(l.total_cents) FILTER(WHERE l.state='awaiting_approval'),0) estimated,COALESCE(sum(l.total_cents) FILTER(WHERE l.state='approved' AND o.status='CONCLUÍDO'),0) confirmed FROM zc_financial_ledger l JOIN zc_orders o ON o.id=l.order_id WHERE l.technician_id=$1 AND o.deleted_at='' AND o.status<>'CANCELADO' AND NOT EXISTS(SELECT 1 FROM zc_settlement_orders s WHERE s.order_id=l.order_id)",
+    "SELECT COALESCE(sum(l.total_cents) FILTER(WHERE l.state='awaiting_approval'),0) estimated,COALESCE(sum(l.total_cents) FILTER(WHERE l.state='approved' AND o.status='CONCLUÍDO'),0) confirmed FROM zc_financial_ledger l JOIN zc_orders o ON o.id=l.order_id WHERE o.tracker_waiver_authorized=false AND l.technician_id=$1 AND o.deleted_at='' AND o.status<>'CANCELADO' AND NOT EXISTS(SELECT 1 FROM zc_settlement_orders s WHERE s.order_id=l.order_id)",
     [tid],
   );
   const extra = await d.one(
     db,
-    "SELECT COALESCE(sum(a.amount_cents) FILTER(WHERE l.state='awaiting_approval'),0) estimated,COALESCE(sum(a.amount_cents) FILTER(WHERE l.state='approved' AND o.status='CONCLUÍDO'),0) confirmed FROM zc_adjustments a JOIN zc_financial_ledger l ON l.order_id=a.order_id JOIN zc_orders o ON o.id=l.order_id WHERE l.technician_id=$1 AND a.settlement_id IS NULL AND o.deleted_at='' AND o.status<>'CANCELADO'",
+    "SELECT COALESCE(sum(a.amount_cents) FILTER(WHERE l.state='awaiting_approval'),0) estimated,COALESCE(sum(a.amount_cents) FILTER(WHERE l.state='approved' AND o.status='CONCLUÍDO'),0) confirmed FROM zc_adjustments a JOIN zc_financial_ledger l ON l.order_id=a.order_id JOIN zc_orders o ON o.id=l.order_id WHERE o.tracker_waiver_authorized=false AND l.technician_id=$1 AND a.settlement_id IS NULL AND o.deleted_at='' AND o.status<>'CANCELADO'",
     [tid],
   );
   const balances = await d.one(

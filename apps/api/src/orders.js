@@ -133,6 +133,11 @@ async function validate(db, input, old = null) {
       fail(400, "Esta situação é definida pelo fluxo de envio e conferência.");
     out.status = input.status;
   }
+  if (input.tracker_waiver_authorized !== undefined)
+    out.tracker_waiver_authorized = d.boolean(
+      input.tracker_waiver_authorized,
+      "Dispensa de rastreador autorizada",
+    );
   if (input.document_data !== undefined)
     out.document_data = JSON.stringify(
       normalizeDocumentData(input.document_data, old?.document_data || {}),
@@ -307,6 +312,7 @@ async function complete(
       [key],
     );
     if (
+      !o.tracker_waiver_authorized &&
       r?.stock_action === "install" &&
       (!options.stockReceipt ||
         o.stock_sync_state !== "confirmed" ||
@@ -343,7 +349,7 @@ async function complete(
     reason,
     batch_id: batchId,
   });
-  if (cfg.SGA_SYNC_ENABLED && o.sga_id)
+  if (cfg.SGA_SYNC_ENABLED && o.sga_id && !o.tracker_waiver_authorized)
     await enqueue(
       db,
       "sga_classification",
@@ -406,7 +412,7 @@ async function financial(db, tid, start, end) {
   if (!t) fail(404, "Técnico não encontrado.");
   const list = await d.rows(
     db,
-    "SELECT * FROM zc_orders o WHERE technician_id=$1 AND status='CONCLUÍDO' AND deleted_at='' AND substring(completed_at,1,10) BETWEEN $2 AND $3 AND NOT EXISTS(SELECT 1 FROM zc_settlement_orders s WHERE s.order_id=o.id) ORDER BY completed_at,id",
+    "SELECT * FROM zc_orders o WHERE tracker_waiver_authorized=false AND technician_id=$1 AND status='CONCLUÍDO' AND deleted_at='' AND substring(completed_at,1,10) BETWEEN $2 AND $3 AND NOT EXISTS(SELECT 1 FROM zc_settlement_orders s WHERE s.order_id=o.id) ORDER BY completed_at,id",
     [tid, start, end],
   );
   const orders = [];

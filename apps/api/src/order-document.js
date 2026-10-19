@@ -95,7 +95,13 @@ function orderDocument(order, masked = true, { portalUrl = "" } = {}) {
     .filter((k) => (data.equipment || []).includes(k))
     .map((k) => equipmentLabels[k]);
   const instructions = [];
-  if (equipment.length) {
+  if (order.tracker_waiver_authorized) {
+    instructions.push(
+      "DISPENSA DE RASTREADOR AUTORIZADA: cliente autorizado a permanecer sem rastreador. Esta OS não integra a remuneração do técnico, inclusive adicionais e ajustes.",
+      "",
+    );
+  }
+  if (equipment.length && !order.tracker_waiver_authorized) {
     instructions.push(
       "EQUIPAMENTOS SELECIONADOS: " + equipment.join(" | ") + ".",
     );
@@ -140,9 +146,11 @@ function orderDocument(order, masked = true, { portalUrl = "" } = {}) {
     appointment: appointment(order.scheduled_at),
     location: order.location,
     instructions: instructions.join("\n"),
-    returnInstructions: controlled
-      ? `Registre as fotos e os IMEIs/seriais no portal do técnico${portalUrl ? ": " + portalUrl : ""}. Envie para a conferência da central. A conclusão depende da aprovação no ZenControl e, nas instalações, da confirmação do Estoque Pro.`
-      : `Encaminhe OS: ${order.id}, Placa ou Chassi: ${order.vehicle}, as fotos e os comentários. Finalize com . ou #.# para o hub.`,
+    returnInstructions: order.tracker_waiver_authorized
+      ? "Registre as fotos da vistoria e o checklist preenchido e assinado no portal do técnico. Envie para conferência da central. A dispensa não registra instalação no Estoque Pro e não gera remuneração."
+      : controlled
+        ? `Registre as fotos e os IMEIs/seriais no portal do técnico${portalUrl ? ": " + portalUrl : ""}. Envie para a conferência da central. A conclusão depende da aprovação no ZenControl e, nas instalações, da confirmação do Estoque Pro.`
+        : `Encaminhe OS: ${order.id}, Placa ou Chassi: ${order.vehicle}, as fotos e os comentários. Finalize com . ou #.# para o hub.`,
   };
 }
 function scalar(...values) {

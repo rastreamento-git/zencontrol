@@ -321,6 +321,12 @@ function configureEcosystem(app, pool, cfg, auth) {
               [r.order_id, r.technician_id],
             );
             if (!l) fail(409, "OS ainda sem composição financeira.");
+            const order = await require("./orders").get(db, r.order_id);
+            if (order.tracker_waiver_authorized)
+              fail(
+                409,
+                "OS com dispensa de rastreador não gera remuneração nem ajustes.",
+              );
             await db.query(
               "INSERT INTO zc_adjustments(id,order_id,amount_cents,reason,created_by,request_id) VALUES($1,$2,$3,$4,$5,$6)",
               [
@@ -389,18 +395,11 @@ function configureEcosystem(app, pool, cfg, auth) {
     }),
   );
   app.post("/api/finance-v2/technicians/:id/rates", admin, async (req, res) =>
-    res
-      .status(201)
-      .json({
-        id: await transaction(pool, (db) =>
-          f.addRate(
-            db,
-            integer(req.params.id, "Técnico"),
-            req.body,
-            actor(req),
-          ),
-        ),
-      }),
+    res.status(201).json({
+      id: await transaction(pool, (db) =>
+        f.addRate(db, integer(req.params.id, "Técnico"), req.body, actor(req)),
+      ),
+    }),
   );
   app.put("/api/finance-v2/technicians/:id/policy", admin, async (req, res) => {
     const tid = integer(req.params.id, "Técnico"),
@@ -546,14 +545,12 @@ function configureEcosystem(app, pool, cfg, auth) {
   });
   app.get("/api/finance-v2/closings/:id/export", async (req, res) => {
     const s = await visibleClosing(req);
-    res
-      .attachment("Fechamento-" + s.id + ".json")
-      .json({
-        id: s.id,
-        state: s.state,
-        due_on: s.due_on,
-        snapshot: s.snapshot,
-      });
+    res.attachment("Fechamento-" + s.id + ".json").json({
+      id: s.id,
+      state: s.state,
+      due_on: s.due_on,
+      snapshot: s.snapshot,
+    });
   });
   app.get("/api/payments/:id/receipt", async (req, res) => {
     if (!["admin", "tecnico"].includes(req.user.papel))
@@ -603,7 +600,7 @@ function configureEcosystem(app, pool, cfg, auth) {
       ),
       missing_ledgers: await d.rows(
         pool,
-        "SELECT id FROM zc_orders WHERE workflow_mode='controlled' AND status='CONCLUÍDO' AND technician_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM zc_financial_ledger l WHERE l.order_id=zc_orders.id) AND NOT EXISTS(SELECT 1 FROM zc_settlement_orders s WHERE s.order_id=zc_orders.id)",
+        "SELECT id FROM zc_orders WHERE tracker_waiver_authorized=false AND workflow_mode='controlled' AND status='CONCLUÍDO' AND technician_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM zc_financial_ledger l WHERE l.order_id=zc_orders.id) AND NOT EXISTS(SELECT 1 FROM zc_settlement_orders s WHERE s.order_id=zc_orders.id)",
       ),
       unresolved_stock: await d.rows(
         pool,

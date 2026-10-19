@@ -113,6 +113,16 @@ export default function ControlledReview({ batch, reload, onSaved }) {
         </b>{" "}
         <Badge value={batch.state} />
       </div>
+      {batch.current_order?.tracker_waiver_authorized && (
+        <div className="zc-notice">
+          <b>Dispensa de rastreador autorizada</b>
+          <p>
+            Esta OS não integra a remuneração do técnico, incluindo adicionais e
+            ajustes. Confira a vistoria e o checklist assinado. A aprovação não
+            registra instalação no estoque.
+          </p>
+        </div>
+      )}
       <div className="zc-notice">
         {batch.rule?.stock_action === "install"
           ? "Ao aprovar, o Estoque Pro valida os IMEIs na carga do técnico e registra a instalação. A OS será concluída após o recibo de confirmação."

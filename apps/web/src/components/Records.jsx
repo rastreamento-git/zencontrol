@@ -232,6 +232,7 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
       technician_id: "",
       scheduled_at: "",
       additional: "",
+      tracker_waiver_authorized: false,
     }),
     [techs, setTechs] = useState([]),
     [busy, setBusy] = useState(false),
@@ -304,6 +305,7 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
       "shift",
       "notes",
       "document_data",
+      "tracker_waiver_authorized",
     ].some(
       (k) => JSON.stringify(values[k] ?? "") !== JSON.stringify(order[k] ?? ""),
     );
@@ -340,6 +342,7 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
         "shift",
         "notes",
         "document_data",
+        "tracker_waiver_authorized",
         "sga_classification",
         "sga_status",
       ];
@@ -598,49 +601,74 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
                 .map((s) => [s, s]),
               disabled: order?.status === "CONCLUÍDO",
             })}
-            {field("Termo", "term")}
-            {field("Local de atendimento", "location", { full: true })}
             <div className="zc-full zc-document-equipment">
-              <span>Equipamentos previstos no atendimento</span>
-              <div>
-                {[
-                  ["tracker", "Rastreador"],
-                  ["tracker_extra", "Rastreador extra"],
-                  ["tag", "Tag"],
-                ].map(([key, label]) => (
-                  <label className="zc-checkbox" key={key}>
-                    <input
-                      type="checkbox"
-                      checked={(documentData.equipment || []).includes(key)}
-                      onChange={(e) =>
-                        changeDocument(
-                          "equipment",
-                          e.target.checked
-                            ? [...(documentData.equipment || []), key]
-                            : (documentData.equipment || []).filter(
-                                (v) => v !== key,
-                              ),
-                        )
-                      }
-                    />
-                    {label}
-                  </label>
-                ))}
-              </div>
               <label className="zc-checkbox">
                 <input
                   type="checkbox"
-                  checked={documentData.technician_brings_equipment !== false}
+                  checked={values.tracker_waiver_authorized === true}
+                  disabled={order?.status === "CONCLUÍDO"}
                   onChange={(e) =>
-                    changeDocument(
-                      "technician_brings_equipment",
-                      e.target.checked,
-                    )
+                    setValues((v) => ({
+                      ...v,
+                      tracker_waiver_authorized: e.target.checked,
+                    }))
                   }
                 />
-                O técnico deverá levar os equipamentos
+                Dispensa de rastreador autorizada
               </label>
+              <small>
+                Cliente autorizado a permanecer sem rastreador. Esta OS não
+                entra na remuneração nem no fechamento do técnico, incluindo
+                adicionais e ajustes. A conclusão exige vistoria, checklist
+                assinado e conferência da central, sem registrar instalação no
+                estoque.
+              </small>
             </div>
+            {field("Termo", "term")}
+            {field("Local de atendimento", "location", { full: true })}
+            {!values.tracker_waiver_authorized && (
+              <div className="zc-full zc-document-equipment">
+                <span>Equipamentos previstos no atendimento</span>
+                <div>
+                  {[
+                    ["tracker", "Rastreador"],
+                    ["tracker_extra", "Rastreador extra"],
+                    ["tag", "Tag"],
+                  ].map(([key, label]) => (
+                    <label className="zc-checkbox" key={key}>
+                      <input
+                        type="checkbox"
+                        checked={(documentData.equipment || []).includes(key)}
+                        onChange={(e) =>
+                          changeDocument(
+                            "equipment",
+                            e.target.checked
+                              ? [...(documentData.equipment || []), key]
+                              : (documentData.equipment || []).filter(
+                                  (v) => v !== key,
+                                ),
+                          )
+                        }
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+                <label className="zc-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={documentData.technician_brings_equipment !== false}
+                    onChange={(e) =>
+                      changeDocument(
+                        "technician_brings_equipment",
+                        e.target.checked,
+                      )
+                    }
+                  />
+                  O técnico deverá levar os equipamentos
+                </label>
+              </div>
+            )}
             {field("Observações", "notes", { type: "textarea", full: true })}
           </div>
         </fieldset>

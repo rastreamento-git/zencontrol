@@ -40,3 +40,13 @@ O portal permite baixar a OS somente ao técnico atualmente responsável e sempr
 A migração `003_order_document.sql` adiciona `zc_orders.document_data` como JSONB com valor inicial vazio. Campos anteriores, ordens e vínculos permanecem preservados. Execute `npm run migrate` no banco do ZenControl antes de iniciar a versão 6.1, conforme o Pre-Deploy já configurado no Render.
 
 Os dados complementares integram o backup operacional e são restaurados junto da OS. Não é necessário criar um serviço separado para o gerador Python nem cadastrar novamente o agendamento.
+
+## Dispensa de rastreador autorizada
+
+No cadastro ou na edição da OS, a central pode marcar **Dispensa de rastreador autorizada**, indicando que o cliente está autorizado a permanecer sem rastreador. O campo `tracker_waiver_authorized` é booleano, aparece no ZenField, na conferência e nas instruções do PDF e participa da auditoria da OS. O técnico não pode alterar essa autorização.
+
+A OS marcada fica fora dos valores estimados, confirmados e dos fechamentos do técnico, incluindo tarifa base, adicionais e ajustes. Isso vale para o cálculo atual e o legado. A dispensa não cria composição financeira; se a central marcar uma OS ainda aberta que já possua composição, ela é preservada para histórico e excluída dos cálculos. Desmarcar antes da conclusão restaura a elegibilidade normal. OS confirmadas exigem reabertura administrativa quando permitida; OS já incluídas em fechamento não permitem alteração retroativa.
+
+O atendimento com dispensa exige fotos da vistoria, checklist preenchido e assinado e conferência da central. Não exige fotos de instalação/etiqueta nem IMEI, não aceita registro de instalação e não gera movimento no Estoque Pro. A conclusão não envia a classificação padrão de instalação concluída ao SGA.
+
+A migração `007_tracker_waiver.sql` inicializa o campo como `false` nas OS existentes. Execute as migrações antes de subir o backend atualizado; backups passam a incluir o campo junto da OS. Valide a interface com `node scripts/tracker-waiver-ui.cjs` após `npm run homologation:build` e as regras com `node --test apps/api/test/tracker-waiver.test.js apps/api/test/order-document.test.js`.
