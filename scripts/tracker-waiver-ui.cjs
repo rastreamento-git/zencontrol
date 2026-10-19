@@ -137,6 +137,8 @@ async function main() {
     .scrollIntoViewIfNeeded();
   await central.screenshot({
     path: path.join(directory, "central-waiver.png"),
+    animations: "disabled",
+    timeout: 60000,
   });
   await central
     .getByRole("button", { name: "Criar ordem de serviço", exact: true })
