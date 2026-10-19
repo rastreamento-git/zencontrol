@@ -44,3 +44,13 @@ Ambos: mesma branch de homologação, `NODE_VERSION=24`, `SKIP_INSTALL_DEPS=true
 6. Baixar backup antes de parar ou deixar a instância suspender. Não inserir dados reais.
 
 Para manter registros e imagens entre reinícios, preparar posteriormente bancos exclusivos de homologação no Aiven e bucket privado separado no Supabase, verificar cotas e usar o start convencional. Isso exige as configurações privadas desses ambientes e nova validação; não é parte do modo efêmero.
+
+## Migração das interfaces para Vercel
+
+Criar projetos exclusivos `zencontrol-homolog` e `zenfield-homolog`, conectados aos respectivos repositórios, publicando a branch `feat/ecossistema-homologacao`. Não alterar o projeto de produção do Estoque Pro. Os dois usam Node 24, Root Directory vazio, instalação `npm ci --include=dev`, build `npm run build` e `VITE_API_URL=https://zencontrol-homolog.onrender.com`. A saída da central é `apps/web/dist`; a do ZenField é `dist`. O `vercel.json` desta branch habilita seu deploy e impede indexação por buscadores.
+
+A API temporária continua no Render. Depois de obter os endereços estáveis dos dois novos projetos, definir `ONLINE_CENTRAL_URL` (origem HTTPS da central Vercel) e atualizar `ONLINE_FIELD_URL` (origem HTTPS do ZenField Vercel) no serviço `zencontrol-homolog`. Fazer um único deploy manual da API. `ONLINE_CENTRAL_URL` é opcional e, quando ausente, preserva a origem anterior no Render. O CORS aceita apenas as origens exatas configuradas, sem curinga para previews.
+
+No Vercel, `Production` é o destino de publicação do projeto **exclusivo de homologação**; usar essa opção somente nesses dois projetos novos, com a branch de teste. Não promover a branch de teste em projetos produtivos. Os dados continuam temporários. Nunca copiar segredos do backend para variáveis `VITE_*`.
+
+Validar as telas, a resposta de sessão a partir de cada origem, a ativação individual, uma foto fictícia, checklist e conferência na central antes de retirar os frontends antigos do Render. Só a hospedagem das interfaces muda; nenhuma transferência de banco ou fotos é necessária.

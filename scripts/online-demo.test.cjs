@@ -38,6 +38,11 @@ const env = {
 };
 test("online mode rejects remote credentials and requires explicit demo secrets", () => {
   assert.equal(configuration(env).port, 10000);
+  assert.equal(configuration(env).centralOrigin, env.RENDER_EXTERNAL_URL);
+  assert.equal(configuration({ ...env, ONLINE_CENTRAL_URL: "https://central-demo.vercel.app" }).centralOrigin, "https://central-demo.vercel.app");
+  for (const address of ["http://example.com", "https://example.com/path", "https://user:password@example.com", "https://example.com?query=1"]) {
+    assert.throws(() => configuration({ ...env, ONLINE_CENTRAL_URL: address }));
+  }
   for (const key of [
     "DATABASE_URL",
     "TEST_DATABASE_URL",

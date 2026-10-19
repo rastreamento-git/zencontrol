@@ -132,7 +132,7 @@ async function main() {
       ? onlineConfig.fieldOrigin
       : "http://127.0.0.1:4319",
     CORS_ORIGINS: online
-      ? [onlineConfig.publicOrigin, onlineConfig.fieldOrigin].join(",")
+      ? [onlineConfig.publicOrigin, onlineConfig.centralOrigin, onlineConfig.fieldOrigin].join(",")
       : "http://127.0.0.1:4319,http://127.0.0.1:4320,http://127.0.0.1:4321",
     ...(online ? { TRUST_PROXY: "1" } : {}),
     ZEN_DATA_DIR: path.join(dataDir, "media-data"),

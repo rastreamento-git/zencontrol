@@ -42,6 +42,7 @@ function configuration(env) {
     throw Error("PORT inválida.");
   return {
     publicOrigin: origin(env.RENDER_EXTERNAL_URL),
+    centralOrigin: origin(env.ONLINE_CENTRAL_URL || env.RENDER_EXTERNAL_URL),
     fieldOrigin: origin(env.ONLINE_FIELD_URL),
     stockOrigin: origin(env.ONLINE_STOCK_URL),
     adminPassword: env.ONLINE_DEMO_PASSWORD,

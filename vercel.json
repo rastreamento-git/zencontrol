@@ -27,12 +27,20 @@
           "value": "strict-origin-when-cross-origin"
         }
       ]
+    },
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex, nofollow, noarchive"
+        }
+      ]
     }
   ],
-  "ignoreCommand": "if [ \"$VERCEL_GIT_COMMIT_REF\" = \"feat/ecossistema-homologacao\" ]; then exit 0; else exit 1; fi",
   "git": {
     "deploymentEnabled": {
-      "feat/ecossistema-homologacao": false
+      "feat/ecossistema-homologacao": true
     }
   }
 }
