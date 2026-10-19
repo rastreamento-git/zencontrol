@@ -5,8 +5,8 @@ require("dotenv").config({ path: path.join(ROOT, ".env"), quiet: true });
 const yes = (v) =>
   ["1", "true", "yes", "sim"].includes(String(v).toLowerCase());
 function configuration(env = process.env) {
-  if (!env.APP_PASSWORD || env.APP_PASSWORD.length < 12)
-    throw Error("Configure APP_PASSWORD com pelo menos 12 caracteres.");
+  if (!env.APP_PASSWORD || env.APP_PASSWORD.length < 8)
+    throw Error("Configure APP_PASSWORD com pelo menos 8 caracteres.");
   if (!env.SESSION_SECRET || env.SESSION_SECRET.length < 32)
     throw Error("Configure SESSION_SECRET com pelo menos 32 caracteres.");
   if (!env.ZEN_WEBHOOK_SECRET || env.ZEN_WEBHOOK_SECRET.length < 32)

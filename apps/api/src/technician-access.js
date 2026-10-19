@@ -40,7 +40,7 @@ async function createTechnicianAccount(db, technician, actor) {
   )
     login = base + ++n;
   // zen123 is only an activation proof; it can never authenticate against this random hash.
-  const passwordHash = await hashPassword(randomBytes(32).toString("hex"));
+  const passwordHash = await hashPassword("Az1!" + randomBytes(32).toString("hex"));
   const user = (
     await db.query(
       "INSERT INTO usuarios(login,nome,senha_hash,papel,ativo,activation_required) VALUES($1,$2,$3,'tecnico',$4,true) RETURNING id",

@@ -1,3 +1,4 @@
+import { passwordInputProps, passwordRequirements } from "@zen/ui/lib/password-policy";
 import AppLinks from "@zen/ui/components/AppLinks";
 import { NoticeBell, FinancePanel } from "./components/Ecosystem";
 import { useEffect, useRef, useState } from "react";
@@ -380,10 +381,11 @@ export default function App() {
       {password && (
         <FormModal
           title="Alterar senha"
-          description="Use uma senha de 12 a 128 caracteres."
+          description={passwordRequirements}
           fields={[
             {
               name: "current_password",
+              autoComplete: "current-password",
               label: "Senha atual",
               type: "password",
               required: true,
@@ -391,6 +393,7 @@ export default function App() {
             },
             {
               name: "new_password",
+              ...passwordInputProps,
               label: "Nova senha",
               type: "password",
               required: true,

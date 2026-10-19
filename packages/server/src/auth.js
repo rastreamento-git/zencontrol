@@ -26,13 +26,22 @@ function username(value) {
   return login;
 }
 function password(value) {
-  if (typeof value !== "string" || value.length < 12 || value.length > 128)
-    fail(400, "A senha deve ter entre 12 e 128 caracteres.");
+  if (
+    typeof value !== "string" || value.length < 8 || value.length > 128 ||
+    !/\p{Lu}/u.test(value) || !/\p{Ll}/u.test(value) ||
+    !/[0-9]/.test(value) || !/[\p{P}\p{S}]/u.test(value)
+  )
+    fail(400, "Use de 8 a 128 caracteres, com pelo menos uma letra maiúscula, uma minúscula, um número e um símbolo.");
   return value;
 }
 async function hashPassword(value) {
+  return hashCredential(password(value));
+}
+// Bootstrap reuses the already configured administrator credential. New user
+// passwords always pass through hashPassword; existing logins are not revalidated.
+async function hashCredential(value) {
   const salt = randomBytes(16).toString("hex");
-  const hash = await derive(password(value), salt, 64, options);
+  const hash = await derive(value, salt, 64, options);
   return `scrypt$${salt}$${hash.toString("hex")}`;
 }
 async function checkPassword(value, stored) {
@@ -66,9 +75,9 @@ function configureAuth(app, env, pool) {
   const enabled = Boolean(env.APP_PASSWORD);
   if (
     env.NODE_ENV === "production" &&
-    (!enabled || env.APP_PASSWORD.length < 12)
+    (!enabled || env.APP_PASSWORD.length < 8)
   )
-    throw Error("Produção exige APP_PASSWORD com pelo menos 12 caracteres.");
+    throw Error("Produção exige APP_PASSWORD com pelo menos 8 caracteres.");
   if (enabled && (!env.SESSION_SECRET || env.SESSION_SECRET.length < 32))
     throw Error("Configure SESSION_SECRET com pelo menos 32 caracteres.");
   let initialization;
@@ -79,7 +88,7 @@ function configureAuth(app, env, pool) {
       initialization = (async () => {
         const existing = await pool.query("SELECT id FROM usuarios LIMIT 1");
         if (existing.rowCount) return;
-        const hash = await hashPassword(env.APP_PASSWORD);
+        const hash = await hashCredential(env.APP_PASSWORD);
         await pool.query(
           "INSERT INTO usuarios (login,nome,senha_hash,papel) VALUES ($1,'Administrador',$2,'admin') ON CONFLICT(login) DO NOTHING",
           [initialLogin, hash],

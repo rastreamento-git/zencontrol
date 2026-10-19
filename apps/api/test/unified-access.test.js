@@ -15,7 +15,7 @@ const { createApp } = require("../src/app"),
     createApp: stockApp,
   } = require("../../../integrations/estoque-pro/src/app");
 const { hashPassword } = require("../src/auth");
-const password = "fictitious-unified-password-2026",
+const password = "Unified1!teste",
   secret = "test-only-stock-integration-secret-123456789";
 let db,
   sdb,

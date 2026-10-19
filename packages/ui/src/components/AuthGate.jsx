@@ -1,3 +1,4 @@
+import { passwordInputProps, passwordRequirements } from "../lib/password-policy";
 import { useEffect, useState } from "react";
 import { Box } from "lucide-react";
 import { api, errorMessage, saveToken } from "../lib/api";
@@ -254,20 +255,19 @@ export default function AuthGate({ children, audience = "central" }) {
                         required
                       />
                       <label htmlFor="new-password">
-                        Nova senha (mínimo 12 caracteres)
+                        Nova senha (mínimo 8 caracteres)
                       </label>
                       <input
                         id="new-password"
                         type="password"
                         autoComplete="new-password"
-                        minLength={12}
-                        maxLength={128}
+                        {...passwordInputProps}
                         value={newPassword}
                         onChange={(e) => setNewPassword(e.target.value)}
                         required
                       />
                       <p>
-                        Use zen123 como senha provisória e o código individual.
+                        {passwordRequirements} Use zen123 como senha provisória e o código individual.
                         O código expira em 24 horas.
                       </p>
                     </>

@@ -67,7 +67,7 @@ async function main() {
     "Inventory must reject central session tokens",
   );
   const access = await api("/technicians/1/activation", {}, admin),
-    password = "homologation-browser-only-password";
+    password = "Homolog1!browser";
   let args;
   if (process.env.ZEN_CHROMIUM_MODULE)
     args = (await import(process.env.ZEN_CHROMIUM_MODULE)).default.args;
@@ -91,7 +91,7 @@ async function main() {
   await page
     .getByLabel("Código individual fornecido pela central")
     .fill(access.code);
-  await page.getByLabel("Nova senha (mínimo 12 caracteres)").fill(password);
+  await page.getByLabel("Nova senha (mínimo 8 caracteres)").fill(password);
   await page.getByRole("button", { name: "Ativar conta", exact: true }).click();
   await page
     .getByText("Conta ativada. Entre com sua nova senha.", { exact: true })

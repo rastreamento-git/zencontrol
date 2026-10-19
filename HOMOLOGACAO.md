@@ -35,7 +35,7 @@ O inicializador recusa `DATABASE_URL`, `TEST_DATABASE_URL` e `NODE_ENV=productio
 | API ZenControl  | http://127.0.0.1:4317 |
 | API Estoque Pro | http://127.0.0.1:4318 |
 
-O terminal informa a senha fictícia do administrador. O login é `admin` no ZenControl e no Estoque Pro. As credenciais locais geradas ficam em `.homologation/access.json`, protegido e ignorado pelo Git. Não são credenciais produtivas. O primeiro acesso dos técnicos usa login individual, `zen123`, código de ativação e uma nova senha de no mínimo 12 caracteres. Nenhuma senha definitiva de técnico é gravada em texto simples.
+O terminal informa a senha fictícia do administrador. O login é `admin` no ZenControl e no Estoque Pro. As credenciais locais geradas ficam em `.homologation/access.json`, protegido e ignorado pelo Git. Não são credenciais produtivas. O primeiro acesso dos técnicos usa login individual, `zen123`, código de ativação e uma nova senha de no mínimo 8 caracteres, com maiúscula, minúscula, número e símbolo. Nenhuma senha definitiva de técnico é gravada em texto simples.
 
 Use Ctrl+C para encerrar: o worker termina a tarefa atual, os servidores fecham e os bancos são persistidos. Os dados permanecem ao reiniciar. Não rode dois inicializadores nas mesmas portas. Se uma inicialização for interrompida antes de popular a base, preserve a pasta incompleta com outro nome e inicie uma instância nova; não use comandos de reset em banco remoto.
 
@@ -60,7 +60,7 @@ Os arquivos também podem ser baixados, por exemplo, em http://127.0.0.1:4319/de
 1. Entre no ZenControl como administrador, abra **Equipe técnica** e cadastre José da Silva Martins, ou use o José já populado.
 2. Um cadastro novo devolve login e ativação. Para um existente, use **Gerar código de acesso ZenField**. A emissão revoga as sessões desse usuário e expira em 24 horas.
 3. Abra o ZenField. A senha `zen123` sozinha deve falhar.
-4. Marque **Primeiro acesso ou redefinição**, informe login, senha provisória, código e nova senha com pelo menos 12 caracteres.
+4. Marque **Primeiro acesso ou redefinição**, informe login, senha provisória, código e nova senha com pelo menos 8 caracteres, com maiúscula, minúscula, número e símbolo.
 5. Entre com a nova senha. Reutilizar o código deve falhar.
 6. Entre como Maria e confirme que OS, evidências, estoque, solicitações e demonstrativos de José não aparecem. As APIs também recusam IDs de outro técnico.
 
@@ -217,3 +217,7 @@ Veja [API-ECOSSISTEMA.md](API-ECOSSISTEMA.md) e [RELATORIO-HOMOLOGACAO.md](RELAT
 Fechamentos existentes antes da migração recebem `legacy_unverified`: não são presumidos como dívida nem como pagos. Conferir o histórico antes de aprovar/importar os pagamentos externos; esses totais ficam separados do saldo confirmado.
 
 Fechamento autorizado de valor zero termina como `no_payment_due` (sem valor a pagar), sem criar transferência fictícia. Resumos financeiros agregam toda a conta, independentemente do limite de itens exibidos, separam fechamentos em conferência e incluem ajustes aprovados pendentes. A API antiga de fechamento permanece apenas para OS legadas; OS controlada exige o fluxo Financeiro 6.4.
+
+## Política de senhas
+
+Novas senhas no cadastro, na ativação e na troca devem ter de 8 a 128 caracteres, com ao menos uma letra maiúscula, uma minúscula, um número e um símbolo. Espaço não conta como símbolo. As validações do navegador e da API seguem a mesma regra. Credenciais já configuradas continuam válidas para login; a exigência é aplicada ao definir uma senha nova.

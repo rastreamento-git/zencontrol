@@ -1015,6 +1015,26 @@ test("exportação CSV neutraliza fórmulas e backup não contém contas ou segr
   assert.equal(backup.status, 200);
   assert.equal(backup.bytes.subarray(0, 2).toString(), "PK");
 });
+test("cadastro e troca aceitam oito caracteres completos e recusam cada categoria ausente", async () => {
+  const payload = { login: "senha.oito", nome: "Teste de política de senha", papel: "operador" };
+  for (const value of ["Aa1!aaa", "abcdef1!", "ABCDEF1!", "Abcdefg!", "Abcdefg1", "Abcdef1 "]) {
+    const rejected = await request("/api/users", "POST", { ...payload, password: value });
+    assert.equal(rejected.status, 400, JSON.stringify(rejected.data));
+  }
+  const created = await request("/api/users", "POST", { ...payload, password: "Ab1!cdef" });
+  assert.equal(created.status, 200, JSON.stringify(created.data));
+  const signed = await request("/api/auth/login", "POST", { login: payload.login, password: "Ab1!cdef" }, null);
+  assert.equal(signed.status, 200);
+  const token = signed.data.token;
+  const rejected = await request("/api/auth/password", "POST", { current_password: "Ab1!cdef", new_password: "Abcdefg1" }, token);
+  assert.equal(rejected.status, 400);
+  assert.equal((await request("/api/meta", "GET", undefined, token)).status, 200);
+  const changed = await request("/api/auth/password", "POST", { current_password: "Ab1!cdef", new_password: "Xy2@mnop" }, token);
+  assert.equal(changed.status, 200, JSON.stringify(changed.data));
+  assert.equal((await request("/api/meta", "GET", undefined, token)).status, 401);
+  const again = await request("/api/auth/login", "POST", { login: payload.login, password: "Xy2@mnop" }, null);
+  assert.equal(again.status, 200);
+});
 test("alteração de senha revoga a sessão anterior e não afeta outras contas", async () => {
   assert.equal(
     (

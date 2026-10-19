@@ -183,6 +183,11 @@ export function Field({
   full = false,
   disabled = false,
   rows = 3,
+  minLength,
+  maxLength,
+  pattern,
+  title,
+  autoComplete,
 }) {
   return (
     <label className={full ? "zc-full" : ""}>
@@ -217,7 +222,11 @@ export function Field({
           onChange={onChange}
           required={required}
           disabled={disabled}
-          autoComplete={type === "password" ? "new-password" : undefined}
+          minLength={minLength}
+          maxLength={maxLength}
+          pattern={pattern}
+          title={title}
+          autoComplete={autoComplete ?? (type === "password" ? "new-password" : undefined)}
           min={type === "number" ? 0 : undefined}
           step={type === "number" ? "0.01" : undefined}
         />

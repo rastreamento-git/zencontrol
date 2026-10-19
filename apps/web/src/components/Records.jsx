@@ -1,3 +1,4 @@
+import { passwordInputProps, passwordRequirements } from "@zen/ui/lib/password-policy";
 import { useEffect, useState } from "react";
 import {
   Plus,
@@ -1069,7 +1070,7 @@ export function Technicians({ user, revision, refresh }) {
             </p>
             <p>
               No ZenField, marque “Primeiro acesso ou redefinição” e cadastre
-              uma nova senha de pelo menos 12 caracteres.
+              uma nova senha de pelo menos 8 caracteres, com maiúscula, minúscula, número e símbolo.
             </p>
             <button className="primary-button" onClick={() => setAccess(null)}>
               Concluir
@@ -1326,6 +1327,7 @@ export function UsersPage({ revision, refresh }) {
       {edit && (
         <FormModal
           title={edit.id ? "Editar acesso" : "Adicionar pessoa"}
+          description={passwordRequirements}
           initial={{ ativo: true, papel: "operador", ...edit }}
           fields={[
             { name: "nome", label: "Nome", required: true },
@@ -1352,6 +1354,8 @@ export function UsersPage({ revision, refresh }) {
             },
             {
               name: "password",
+              ...passwordInputProps,
+              title: passwordRequirements,
               label: edit.id ? "Nova senha (opcional)" : "Senha inicial",
               type: "password",
               required: !edit.id,

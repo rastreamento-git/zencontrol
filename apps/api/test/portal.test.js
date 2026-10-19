@@ -23,7 +23,7 @@ const { configuration } = require("../src/config"),
   { runOne } = require("../src/jobs"),
   { StockClient, StockError } = require("../src/stock-client");
 const secret = "test-only-stock-integration-secret-123456789",
-  password = "test-only-password-123456789";
+  password = "Portal1!teste";
 let db,
   sdb,
   pool,

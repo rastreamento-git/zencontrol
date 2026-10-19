@@ -64,7 +64,7 @@ async function main() {
     })
   ).token;
   const access = await api("/technicians/1/activation", {}, admin),
-    techPassword = "browser-test-technician-password";
+    techPassword = "Technician1!browser";
   await api("/auth/activate", {
     login: access.login,
     password: "zen123",
@@ -77,7 +77,7 @@ async function main() {
       login: "operador.teste",
       nome: "Operador de teste",
       papel: "operador",
-      password: "operator-browser-test-password",
+      password: "Operator1!browser",
     },
     admin,
   );

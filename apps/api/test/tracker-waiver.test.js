@@ -16,7 +16,7 @@ const d = require("../src/domain"),
 const { transaction } = require("../src/database");
 const { orderDocument } = require("../src/order-document");
 let db, pool, server, base, folder, admin, tech, tid, jpg;
-const password = "waiver-test-only-password",
+const password = "Waiver1!teste",
   secret = "waiver-test-only-secret-123456789012345";
 async function req(route, method = "GET", body, token = admin, status = 200) {
   const res = await fetch(base + "/api" + route, {

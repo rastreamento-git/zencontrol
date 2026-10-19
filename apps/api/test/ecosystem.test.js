@@ -26,7 +26,7 @@ let db,
   folder,
   config,
   access;
-const password = "homologation-test-only-password",
+const password = "Zen1!abc",
   secret = "homologation-test-only-secret-123456789012345";
 async function req(route, method = "GET", body, token = admin) {
   const r = await fetch(base + "/api" + route, {
