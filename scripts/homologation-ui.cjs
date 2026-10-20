@@ -162,11 +162,8 @@ async function main() {
     page
       .locator(".portal-capture-group")
       .filter({ has: page.getByRole("heading", { name, exact: true }) });
-  for (const name of [
-    "Placa ou chassi",
-    "Equipamento instalado",
-    "Fotos da vistoria",
-  ]) {
+  for (let i = 0; i < 3; i++) {
+    const name = "Fotos do atendimento";
     const response = page.waitForResponse(
       (r) => r.url().endsWith("/photos") && r.request().method() === "POST",
     );

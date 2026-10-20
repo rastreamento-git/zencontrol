@@ -33,3 +33,11 @@ O backend recusa técnicos tentando selecionar contextos e funcionários sem sel
 ## Verificação
 
 `apps/api/test/field-supervision.test.js` cobre perfis, seleção, adulteração de contexto, concorrência, atendimento completo com autoria real, financeiro, notificações e desativação. `apps/api/test/unified-access.test.js` cobre SSO e reautenticação dos dois perfis da central. O teste `scripts/unified-access-ui.cjs`, executado após `npm run homologation:build`, percorre os três cards, os três aplicativos, a operação por técnico, a auditoria, troca de contexto, saída global e entrada direta do técnico, com verificação de rolagem e largura em celular.
+
+## Fotos do atendimento no ZenField
+
+As fotos gerais são enviadas juntas em **Fotos do atendimento**, sem selecionar veículo, instalação, serviço ou vistoria. A quantidade mínima permanece a soma dos mínimos anteriores de fotos gerais, incluindo a vistoria obrigatória dos registros atuais. Fotos já salvas nas categorias antigas continuam visíveis e contam para esse total. Checklist assinado e etiquetas não substituem fotos gerais. Não há migração de banco.
+
+O envio sem `kind` é armazenado como `other`. As regras de equipamentos e checklist continuam separadas. O bloco **Foto do rastreador ou da TAG** usa o leitor ZXing WASM do backend para códigos de barras, QR Code e DataMatrix; valida o IMEI/serial com a carga do técnico no EstoquePro e identifica o tipo. A leitura confirmada mostra o código. Foto ilegível, código fora da carga ou múltiplos equipamentos geram aviso no próprio bloco e não criam evidência identificada. Não existe digitação manual para contornar a leitura.
+
+Verificação: `node scripts/field-photos-ui.cjs` (após os builds locais) cobre envio sem categoria, avisos, ausência de evidências em falhas, rastreador por código de barras, TAG por QR, checklist e envio completo no celular. `apps/api/test/equipment-photo.test.js` também testa IMEI em QR Code.

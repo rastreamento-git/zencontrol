@@ -1153,6 +1153,100 @@ test("pre-upgrade submissions retain their original evidence requirements", asyn
   assert.equal((await ok("/api/orders/" + a.id)).status, "CONCLUÍDO");
 });
 
+test("uncategorized photos share the required total; equipment and checklist never replace general evidence", async () => {
+  const a = await order("Visita");
+  let b = await ok(
+    "/api/technician/orders/" + a.id + "/draft",
+    "POST",
+    { version: a.version },
+    ta,
+    201,
+  );
+  const detail = await ok(
+    "/api/technician/orders/" + a.id,
+    "GET",
+    undefined,
+    ta,
+  );
+  assert.equal(detail.rule.general_photo_min, 3);
+  // Neither kind nor a label choice is required for general photographs.
+  for (let i = 0; i < 2; i++) {
+    const added = await ok(
+      "/api/technician/batches/" + b.id + "/photos",
+      "POST",
+      { version: b.version, image: jpg },
+      ta,
+      201,
+    );
+    assert.equal(added.serial_code, "");
+    b.version = added.version;
+  }
+  const checklist = await ok(
+    "/api/technician/batches/" + b.id + "/photos",
+    "POST",
+    { version: b.version, kind: "checklist", image: jpg },
+    ta,
+    201,
+  );
+  b.version = checklist.version;
+  const partial = await req(
+    "/api/technician/batches/" + b.id + "/submit",
+    "POST",
+    {
+      version: b.version,
+      serials: [],
+      confirmed: true,
+      checklist_signed: true,
+    },
+    ta,
+  );
+  assert.equal(partial.status, 400);
+  assert.match(partial.data.error, /pelo menos 3 fotos do atendimento/);
+  const added = await ok(
+    "/api/technician/batches/" + b.id + "/photos",
+    "POST",
+    { version: b.version, image: jpg },
+    ta,
+    201,
+  );
+  b.version = added.version;
+  const ready = await ok(
+    "/api/technician/orders/" + a.id,
+    "GET",
+    undefined,
+    ta,
+  );
+  assert.equal(
+    ready.submissions[0].files.filter((f) => f.kind === "other").length,
+    3,
+  );
+  await ok(
+    "/api/technician/batches/" + b.id + "/submit",
+    "POST",
+    {
+      version: b.version,
+      serials: [],
+      confirmed: true,
+      checklist_signed: true,
+    },
+    ta,
+  );
+  const review = await ok("/api/batches/" + b.id);
+  await ok(
+    "/api/batches/" + b.id + "/approve",
+    "POST",
+    {
+      version: review.version,
+      order_version: review.current_order.version,
+      serials: [],
+      reason: "Fotos gerais e checklist conferidos.",
+      checklist_reviewed: true,
+    },
+    operator,
+  );
+  assert.equal((await ok("/api/orders/" + a.id)).status, "CONCLUÍDO");
+});
+
 test("portal accepts staff supervision and technician accounts; central accepts only staff", async () => {
   const technicianAtCentral = await req(
     "/api/auth/login",

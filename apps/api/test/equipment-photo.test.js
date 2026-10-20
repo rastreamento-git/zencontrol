@@ -79,3 +79,17 @@ test("a blurred/plain photograph returns no barcode", async () => {
     .toBuffer();
   assert.deepEqual(await decodeEquipmentPhoto(plain), []);
 });
+
+test("reads a tracker IMEI from a QR payload and rejects an unrelated code", async () => {
+  const qr = await barcode(
+    JSON.stringify({ imei: tracker.codigo_serial }),
+    "QRCode",
+  );
+  const result = matchEquipment(await decodeEquipmentPhoto(qr), [tracker, tag]);
+  assert.equal(result.serial_code, tracker.codigo_serial);
+  assert.equal(result.equipment_type, "RASTREADOR");
+  assert.throws(
+    () => matchEquipment(["IMEI: 999999999999999"], [tracker, tag]),
+    /não corresponde/,
+  );
+});

@@ -51,14 +51,22 @@ async function batch(db, id) {
   if (!b) fail(404, "Envio não encontrado.");
   return b;
 }
+function generalPhotoMinimum(rule, captureVersion = 2) {
+  const general = rule.required_photos.filter(
+    (p) => !["label", "checklist"].includes(p.kind),
+  );
+  const total = general.reduce((sum, p) => sum + p.min, 0);
+  const inspection = general.find((p) => p.kind === "inspection")?.min || 0;
+  return total + (captureVersion >= 2 ? Math.max(0, 1 - inspection) : 0);
+}
 async function rule(db, service, order = null) {
   const key = d.services.find((s) => service.startsWith(s));
-  const r = await d.one(db, "SELECT * FROM zc_service_rules WHERE service=$1", [
+  let r = await d.one(db, "SELECT * FROM zc_service_rules WHERE service=$1", [
     key || service,
   ]);
   if (!r) fail(409, "Defina as regras deste serviço antes de continuar.");
   if (order?.tracker_waiver_authorized)
-    return {
+    r = {
       ...r,
       stock_action: "none",
       min_serials: 0,
@@ -66,7 +74,7 @@ async function rule(db, service, order = null) {
         (p) => !["label", "installed"].includes(p.kind),
       ),
     };
-  return r;
+  return { ...r, general_photo_min: generalPhotoMinimum(r) };
 }
 const snapshot = (order) => ({
   id: order.id,
@@ -182,7 +190,8 @@ async function startDraft(pool, userId, id, version) {
   });
 }
 async function upload(pool, cfg, userId, id, input) {
-  if (!kinds.includes(input.kind)) fail(400, "Selecione o tipo de foto.");
+  const kind = input.kind ?? "other";
+  if (!kinds.includes(kind)) fail(400, "Selecione o tipo de foto.");
   const initial = await ownBatch(pool, userId, id);
   editable(initial.b, initial.order, input.version);
   if (typeof input.image !== "string" || input.image.length > 12 * 1024 * 1024)
@@ -191,7 +200,7 @@ async function upload(pool, cfg, userId, id, input) {
   let bytes,
     mime = "image/jpeg",
     extension = ".jpg";
-  if (input.kind === "checklist" && raw.subarray(0, 5).toString() === "%PDF-") {
+  if (kind === "checklist" && raw.subarray(0, 5).toString() === "%PDF-") {
     try {
       const pdf = await PDFDocument.load(raw);
       if (
@@ -233,7 +242,7 @@ async function upload(pool, cfg, userId, id, input) {
     }
   }
   const equipment =
-    input.kind === "label"
+    kind === "label"
       ? await identifyEquipment(bytes, initial.t, cfg)
       : { serial_code: "", equipment_type: "", equipment_model: "" };
   return transaction(pool, async (db) => {
@@ -263,7 +272,7 @@ async function upload(pool, cfg, userId, id, input) {
       mime,
       sha256: sha,
       state: "ready",
-      kind: input.kind,
+      kind,
       ...equipment,
     });
     await db.query(
@@ -272,7 +281,7 @@ async function upload(pool, cfg, userId, id, input) {
     );
     await d.audit(db, String(userId), "portal_photo_added", "batch", id, {
       evidence_id: eid,
-      kind: input.kind,
+      kind,
     });
     return { id: eid, version: b.version + 1, ...equipment };
   });
@@ -305,11 +314,27 @@ async function verifyEvidence(db, b, r, codes, order) {
     files.length !== b.expected_count
   )
     fail(400, "Todas as fotos precisam estar prontas.");
-  for (const required of r.required_photos)
+  const requiredPhotos = r.required_photos.filter((p) =>
+    ["label", "checklist"].includes(p.kind),
+  );
+  for (const required of requiredPhotos)
     if (files.filter((f) => f.kind === required.kind).length < required.min)
       fail(400, "Foto obrigatória pendente: " + required.label + ".");
-  if (b.capture_version >= 2 && !files.some((f) => f.kind === "inspection"))
-    fail(400, "Anexe as fotos da vistoria.");
+  {
+    const minimum = generalPhotoMinimum(r, b.capture_version);
+    const received = files.filter(
+      (f) => !["label", "checklist"].includes(f.kind),
+    ).length;
+    if (received < minimum)
+      fail(
+        400,
+        "Anexe pelo menos " +
+          minimum +
+          " fotos do atendimento. Recebidas: " +
+          received +
+          ".",
+      );
+  }
   if (b.capture_version >= 2 && !files.some((f) => f.kind === "checklist"))
     fail(400, "Anexe o checklist preenchido e assinado (PDF ou fotos).");
   if (codes.length < r.min_serials)
@@ -677,4 +702,5 @@ module.exports = {
   confirmStock,
   kinds,
   requiredEquipment,
+  generalPhotoMinimum,
 };
