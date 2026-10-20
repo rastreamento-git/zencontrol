@@ -58,7 +58,7 @@ export function prepareAccess(app) {
           Date.now() - proof.created > 5 * 60000
         )
           throw Error(
-            "Este acesso expirou ou foi aberto em outra aba. Use Entrar com conta ZEN novamente.",
+            "Este acesso expirou ou foi aberto em outra aba. Use Entrar no ZenTracking novamente.",
           );
         const { data } = await api.post("/auth/sso/exchange", {
           app,
@@ -86,7 +86,9 @@ export function prepareAccess(app) {
 export async function routeSession(data, current, config) {
   if (!config?.unified_login || !data.user) return false;
   const technical = data.user.papel === "tecnico";
-  const allowed = technical ? ["zenfield"] : ["zencontrol", "stock"];
+  const allowed = technical
+    ? ["zenfield"]
+    : ["zencontrol", "zenfield", "stock"];
   const query = new URLSearchParams(window.location.search);
   const target = query.get("zen_app");
   if (
@@ -112,7 +114,7 @@ export async function routeSession(data, current, config) {
     await routing;
     return true;
   }
-  const destination = technical ? "zenfield" : "zencontrol";
+  const destination = technical ? "zenfield" : current;
   if (current !== destination) {
     const url = new URL(config.apps[destination]);
     url.searchParams.set("zen_login", "1");

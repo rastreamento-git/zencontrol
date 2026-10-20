@@ -16,13 +16,15 @@ const { settlementPdf } = require("./pdf");
 function configureEcosystem(app, pool, cfg, auth) {
   const admin = auth.requireAdmin,
     actor = (req) => req.user.nome || req.user.login;
+  const inField = () => require("./field-access").delegated();
   const mine = (req) => portal.technician(pool, req.user.id);
   const central = (req, res, next) => {
     if (req.user.papel === "tecnico") fail(403, "Ação exclusiva da central.");
     next();
   };
   app.get("/api/notifications", async (req, res) => {
-    const t = req.user.papel === "tecnico" ? await mine(req) : null,
+    const t =
+        req.user.papel === "tecnico" || inField() ? await mine(req) : null,
       limit = Math.min(100, integer(req.query.limit || 30, "Limite")),
       page = integer(req.query.page || 1, "Página");
     const args = [t ? "technician" : "central", t?.id || null, req.user.id];
@@ -45,7 +47,8 @@ function configureEcosystem(app, pool, cfg, auth) {
     res.json({ items, unread, page, limit });
   });
   app.post("/api/notifications/:id/read", async (req, res) => {
-    const t = req.user.papel === "tecnico" ? await mine(req) : null;
+    const t =
+      req.user.papel === "tecnico" || inField() ? await mine(req) : null;
     const n = await d.one(pool, "SELECT * FROM zc_notifications WHERE id=$1", [
       req.params.id,
     ]);
@@ -59,6 +62,14 @@ function configureEcosystem(app, pool, cfg, auth) {
       "INSERT INTO zc_notification_reads(notification_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING",
       [n.id, req.user.id],
     );
+    if (inField())
+      await d.audit(
+        pool,
+        actor(req),
+        "field_notification_read",
+        "notification",
+        n.id,
+      );
     res.json({ ok: true });
   });
   app.post("/api/technicians/:id/activation", admin, async (req, res) => {
@@ -524,14 +535,15 @@ function configureEcosystem(app, pool, cfg, auth) {
       );
   });
   async function visibleClosing(req) {
-    if (!["admin", "tecnico"].includes(req.user.papel))
+    if (!["admin", "operador", "tecnico"].includes(req.user.papel))
       fail(403, "Demonstrativo financeiro restrito.");
     const s = await d.one(pool, "SELECT * FROM zc_settlements WHERE id=$1", [
       req.params.id,
     ]);
     if (
       !s ||
-      (req.user.papel === "tecnico" && s.technician_id !== (await mine(req)).id)
+      ((req.user.papel === "tecnico" || inField()) &&
+        s.technician_id !== (await mine(req)).id)
     )
       fail(404, "Fechamento indisponível.");
     return s;
@@ -553,7 +565,7 @@ function configureEcosystem(app, pool, cfg, auth) {
     });
   });
   app.get("/api/payments/:id/receipt", async (req, res) => {
-    if (!["admin", "tecnico"].includes(req.user.papel))
+    if (!["admin", "operador", "tecnico"].includes(req.user.papel))
       fail(403, "Comprovante restrito.");
     const p = await d.one(
       pool,
@@ -562,7 +574,8 @@ function configureEcosystem(app, pool, cfg, auth) {
     );
     if (
       !p?.receipt_path ||
-      (req.user.papel === "tecnico" && p.technician_id !== (await mine(req)).id)
+      ((req.user.papel === "tecnico" || inField()) &&
+        p.technician_id !== (await mine(req)).id)
     )
       fail(404, "Comprovante indisponível.");
     res

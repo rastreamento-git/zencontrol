@@ -110,6 +110,9 @@ async function main() {
   await central.getByLabel("Senha de acesso").fill(creds.admin_password);
   await central.getByRole("button", { name: "Entrar", exact: true }).click();
   await central
+    .getByRole("button", { name: "Abrir ZenControl", exact: true })
+    .click();
+  await central
     .getByRole("button", { name: "Ordens de serviço", exact: true })
     .click();
   await central

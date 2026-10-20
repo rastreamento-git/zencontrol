@@ -22,7 +22,7 @@ Os dois bancos são acessíveis somente por loopback e usam pools separados; ess
 
 Variáveis: `NODE_VERSION=24`, `NODE_ENV=production`, `SKIP_INSTALL_DEPS=true`, `ZEN_HOMOLOGATION_MODE=online-demo`, `ZEN_HOMOLOGY_INSTANCE=online-demo`, `ONLINE_DEMO_PASSWORD` (aleatória, mínimo 16 caracteres), `ONLINE_DEMO_SECRET` (aleatório, mínimo 32 caracteres), `ONLINE_FIELD_URL` e `ONLINE_STOCK_URL` com as origens HTTPS reais dos Static Sites. `RENDER=true`, `RENDER_EXTERNAL_URL` e `PORT` são fornecidos pelo Render. Não definir `DATABASE_URL`, `SUPABASE_*` ou `STOCK_API_URL`. As integrações permitidas são configuradas internamente somente em loopback.
 
-O build baixa apenas o código público oficial do inventário, fixado no commit `6a0407896c1a639cffc2f01529138c36841ab4ca`. Não inclui credenciais nos bundles, logs ou arquivos versionados. A senha fica em `ONLINE_DEMO_PASSWORD` no Environment do novo serviço. Login: `admin`.
+O build baixa apenas o código público oficial do inventário, fixado no commit `e274effa3bd7a6dfbcb6270fd3ee4a77f756651d`. Não inclui credenciais nos bundles, logs ou arquivos versionados. A senha fica em `ONLINE_DEMO_PASSWORD` no Environment do novo serviço. Login: `admin`.
 
 O build instala `embedded-postgres@18.4.0-beta.17`, com binários nativos, em uma pasta privada de runtime e gera as etiquetas. O PostgreSQL inicia sem privilégios root, aceita conexões apenas em `127.0.0.1:54321`, usa SCRAM e não cria usuários no sistema operacional. As duas APIs usam bancos distintos. O runtime WASM anterior foi recusado pelo limite de 512 MiB do Render, por isso não é usado online. O consumo deve ser acompanhado durante os testes de fotos.
 
@@ -55,9 +55,9 @@ No Vercel, `Production` é o destino de publicação do projeto **exclusivo de h
 
 Validar as telas, a resposta de sessão a partir de cada origem, a ativação individual, uma foto fictícia, checklist e conferência na central antes de retirar os frontends antigos do Render. Só a hospedagem das interfaces muda; nenhuma transferência de banco ou fotos é necessária.
 
-## Acesso único ZEN
+## Acesso único ZenTracking
 
-A entrada principal é a interface do ZenControl na Vercel. Uma conta individual é cadastrada em **ZenControl → Usuários**: administradores e operadores usam a central e o botão **Abrir Estoque Pro**; técnicos seguem automaticamente para o ZenField. O ZenField e o estoque oferecem **Entrar com conta ZEN**. O primeiro acesso do técnico continua exigindo o código individual e a troca da senha provisória; a ativação também está disponível na entrada principal.
+A entrada principal é o **[ZenTracking](https://zencontrol-homolog.vercel.app)**. Administradores e operadores têm acesso completo aos três sistemas e recebem cards ilustrados para ZenControl, ZenField e EstoquePro. Técnicos seguem automaticamente para seu ZenField, sem passar pelos cards. Uma conta individual é cadastrada em **ZenControl → Equipe e acessos**. O ZenField e o estoque oferecem **Entrar no ZenTracking**. Na central, o ZenField permite selecionar um técnico ativo e operar seu ambiente, com aviso permanente e auditoria da identidade real. Consulte [o fluxo e suas verificações](docs/ZENTRACKING.md). O primeiro acesso do técnico continua exigindo o código individual e a troca da senha provisória; a ativação também está disponível na entrada principal.
 
 O inicializador de homologação configura `SSO_LOGIN_URL`, `SSO_STOCK_URL` e `TECHNICIAN_PORTAL_URL` na central, e `ZEN_IDENTITY_API_URL`, `ZEN_LOGIN_URL`, `ZENCONTROL_INTEGRATION_SECRET` no estoque. Apenas os endereços públicos aparecem nos frontends. A integração usa o segredo já existente do estoque, exclusivamente nos servidores. No modo normal, configurar os valores equivalentes explicitamente antes de ativar o recurso; sem essa configuração, o login legado é preservado.
 

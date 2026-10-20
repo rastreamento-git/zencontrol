@@ -39,7 +39,7 @@ async function files(db, id) {
 function configurePortal(app, pool, cfg, auth) {
   const prefix = "/api/technician";
   app.use(prefix, (req, res, next) => {
-    if (req.user.papel !== "tecnico")
+    if (!["tecnico", "admin", "operador"].includes(req.user.papel))
       fail(403, "Esta área exige uma conta de técnico.");
     next();
   });
@@ -213,6 +213,13 @@ function configurePortal(app, pool, cfg, auth) {
         },
         true,
       );
+      await d.audit(
+        db,
+        String(req.user.id),
+        "portal_draft_updated",
+        "batch",
+        b.id,
+      );
     });
     res.json({ ok: true });
   });
@@ -269,6 +276,14 @@ function configurePortal(app, pool, cfg, auth) {
         code,
         item.id,
       ]);
+      await d.audit(
+        db,
+        String(req.user.id),
+        "portal_photo_identification_changed",
+        "batch",
+        b.id,
+        { evidence_id: item.id },
+      );
       await db.query("UPDATE zc_batches SET version=version+1 WHERE id=$1", [
         b.id,
       ]);

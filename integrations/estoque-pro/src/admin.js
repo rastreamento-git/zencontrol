@@ -164,7 +164,10 @@ function configureAdmin(app, pool, auth) {
       if (!row) fail(404, "Usuário não encontrado.");
       const active = req.body.ativo ?? row.ativo,
         role = papel ?? row.papel;
-      if (id === req.user.id && (!active || role !== "admin"))
+      if (
+        id === req.user.id &&
+        (!active || (row.papel === "admin" && role !== "admin"))
+      )
         fail(
           409,
           "Você não pode desativar ou retirar seu próprio perfil de administrador.",

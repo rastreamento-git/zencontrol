@@ -5,11 +5,11 @@ import "@zen/ui/styles/theme.css";
 import "@zen/ui/styles/zencontrol.css";
 import AuthGate from "@zen/ui/components/AuthGate";
 import Feedback from "@zen/ui/components/Feedback";
-import App from "./App";
+import TrackingEntry from "./TrackingEntry";
 createRoot(document.getElementById("root")).render(
   <StrictMode>
     <AuthGate>
-      <App />
+      <TrackingEntry />
     </AuthGate>
     <Feedback />
   </StrictMode>,

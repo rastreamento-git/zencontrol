@@ -287,7 +287,7 @@ test("origens não autorizadas e corpo JSON em formato indevido são bloqueados"
     410,
   );
 });
-test("permissões administrativas também são aplicadas na API", async () => {
+test("administrador e operador têm acesso completo às funções da central", async () => {
   for (const route of [
     "/api/users",
     "/api/finance/settlements",
@@ -297,7 +297,7 @@ test("permissões administrativas também são aplicadas na API", async () => {
   ])
     assert.equal(
       (await request(route, "GET", undefined, operatorToken)).status,
-      403,
+      200,
       route,
     );
   assert.equal(
@@ -305,16 +305,16 @@ test("permissões administrativas também são aplicadas na API", async () => {
       await request(
         "/api/technicians",
         "POST",
-        { name: "Não autorizado" },
+        { name: "Operador autorizado" },
         operatorToken,
       )
     ).status,
-    403,
+    200,
   );
   const techs = (
     await request("/api/technicians", "GET", undefined, operatorToken)
   ).data.items;
-  assert.equal(techs[0].price_install, undefined);
+  assert.ok(techs.every((t) => Number.isSafeInteger(t.price_install)));
   assert.equal(
     (await request("/api/meta", "GET", undefined, operatorToken)).status,
     200,
@@ -373,7 +373,7 @@ test("edições simultâneas têm uma confirmação e um conflito", async () => 
   assert.deepEqual(responses.map((r) => r.status).sort(), [200, 409]);
   assert.equal((await fresh(row.id)).version, row.version + 1);
 });
-test("baixa exige técnico e motivo, e reabertura exige administrador", async () => {
+test("baixa exige técnico e motivo, e reabertura exige acesso da central", async () => {
   const row = await create();
   assert.equal(
     (
@@ -411,7 +411,7 @@ test("baixa exige técnico e motivo, e reabertura exige administrador", async ()
         operatorToken,
       )
     ).status,
-    403,
+    200,
   );
   assert.equal(
     (
@@ -420,7 +420,7 @@ test("baixa exige técnico e motivo, e reabertura exige administrador", async ()
         reason: "Correção administrativa.",
       })
     ).status,
-    200,
+    409,
   );
   assert.equal((await fresh(row.id)).completed_at, "");
   const noTech = await create({ technician_id: null, scheduled_at: "" });
@@ -483,17 +483,17 @@ test("documento complementar é persistido, mascara dados e restringe a versão 
       )
     ).bytes,
   );
-  assert.ok(!limited.text.includes(fixture.document_data.cpf_cnpj));
+  assert.ok(limited.text.includes(fixture.document_data.cpf_cnpj));
   assert.equal(
     (
       await request(
         "/api/orders/" + row.id + "/dispatch",
         "POST",
-        { version: saved.version, masked: false },
+        { version: saved.version - 1, masked: false },
         operatorToken,
       )
     ).status,
-    403,
+    409,
   );
   const bad = await request("/api/orders/" + row.id, "PATCH", {
     version: saved.version,
@@ -604,11 +604,11 @@ test("envio sem resposta confirmada não é repetido automaticamente", async () 
       await request(
         "/api/jobs/" + queued.data.job_id + "/retry",
         "POST",
-        { confirmed_no_effect: true },
+        { confirmed_no_effect: false },
         operatorToken,
       )
     ).status,
-    403,
+    400,
   );
   assert.equal(
     (
@@ -1016,23 +1016,66 @@ test("exportação CSV neutraliza fórmulas e backup não contém contas ou segr
   assert.equal(backup.bytes.subarray(0, 2).toString(), "PK");
 });
 test("cadastro e troca aceitam oito caracteres completos e recusam cada categoria ausente", async () => {
-  const payload = { login: "senha.oito", nome: "Teste de política de senha", papel: "operador" };
-  for (const value of ["Aa1!aaa", "abcdef1!", "ABCDEF1!", "Abcdefg!", "Abcdefg1", "Abcdef1 "]) {
-    const rejected = await request("/api/users", "POST", { ...payload, password: value });
+  const payload = {
+    login: "senha.oito",
+    nome: "Teste de política de senha",
+    papel: "operador",
+  };
+  for (const value of [
+    "Aa1!aaa",
+    "abcdef1!",
+    "ABCDEF1!",
+    "Abcdefg!",
+    "Abcdefg1",
+    "Abcdef1 ",
+  ]) {
+    const rejected = await request("/api/users", "POST", {
+      ...payload,
+      password: value,
+    });
     assert.equal(rejected.status, 400, JSON.stringify(rejected.data));
   }
-  const created = await request("/api/users", "POST", { ...payload, password: "Ab1!cdef" });
+  const created = await request("/api/users", "POST", {
+    ...payload,
+    password: "Ab1!cdef",
+  });
   assert.equal(created.status, 200, JSON.stringify(created.data));
-  const signed = await request("/api/auth/login", "POST", { login: payload.login, password: "Ab1!cdef" }, null);
+  const signed = await request(
+    "/api/auth/login",
+    "POST",
+    { login: payload.login, password: "Ab1!cdef" },
+    null,
+  );
   assert.equal(signed.status, 200);
   const token = signed.data.token;
-  const rejected = await request("/api/auth/password", "POST", { current_password: "Ab1!cdef", new_password: "Abcdefg1" }, token);
+  const rejected = await request(
+    "/api/auth/password",
+    "POST",
+    { current_password: "Ab1!cdef", new_password: "Abcdefg1" },
+    token,
+  );
   assert.equal(rejected.status, 400);
-  assert.equal((await request("/api/meta", "GET", undefined, token)).status, 200);
-  const changed = await request("/api/auth/password", "POST", { current_password: "Ab1!cdef", new_password: "Xy2@mnop" }, token);
+  assert.equal(
+    (await request("/api/meta", "GET", undefined, token)).status,
+    200,
+  );
+  const changed = await request(
+    "/api/auth/password",
+    "POST",
+    { current_password: "Ab1!cdef", new_password: "Xy2@mnop" },
+    token,
+  );
   assert.equal(changed.status, 200, JSON.stringify(changed.data));
-  assert.equal((await request("/api/meta", "GET", undefined, token)).status, 401);
-  const again = await request("/api/auth/login", "POST", { login: payload.login, password: "Xy2@mnop" }, null);
+  assert.equal(
+    (await request("/api/meta", "GET", undefined, token)).status,
+    401,
+  );
+  const again = await request(
+    "/api/auth/login",
+    "POST",
+    { login: payload.login, password: "Xy2@mnop" },
+    null,
+  );
   assert.equal(again.status, 200);
 });
 test("alteração de senha revoga a sessão anterior e não afeta outras contas", async () => {

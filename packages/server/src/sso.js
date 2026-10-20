@@ -62,7 +62,7 @@ function configureSso(
     role === "tecnico"
       ? target === "zenfield"
       : ["admin", "operador"].includes(role) &&
-        ["zencontrol", "stock"].includes(target);
+        ["zencontrol", "zenfield", "stock"].includes(target);
   function requireEnabled() {
     if (!enabled) fail(503, "Acesso único não configurado.");
   }
@@ -113,6 +113,7 @@ function configureSso(
   }
   app.get("/api/auth/config", (req, res) =>
     res.json({
+      product_name: "ZenTracking",
       unified_login: enabled,
       login_url: enabled ? loginUrl : "",
       apps: enabled ? apps : {},
@@ -229,7 +230,7 @@ function configureSso(
   app.post("/api/auth/sso/reauth", limited, async (req, res) => {
     const row = await stockIdentity(req);
     if (
-      row.papel !== "admin" ||
+      !["admin", "operador"].includes(row.papel) ||
       !(await checkPassword(req.body.password, row.senha_hash))
     )
       fail(403, "A senha atual não confere.");

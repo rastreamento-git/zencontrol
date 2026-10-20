@@ -151,6 +151,23 @@ test("master entry exposes exact origins and no secrets", async () => {
 test("admin and operator use central identity in stock without colliding with its native admin", async () => {
   for (const token of [admin, operator]) {
     const g = await grant(token);
+    const field = await req(
+      base,
+      "/api/auth/sso/exchange",
+      await code(token, "zenfield"),
+    );
+    assert.equal(field.status, 200);
+    assert.equal(field.data.user.papel, g.user.papel);
+    assert.equal(
+      (await req(base, "/api/field/technicians", undefined, field.data.token))
+        .status,
+      200,
+    );
+    assert.equal(
+      (await req(base, "/api/technician/me", undefined, field.data.token))
+        .status,
+      400,
+    );
     assert.match(g.token, /^zen_sso_/);
     assert.notEqual(g.user.id, 1);
     const session = await req(sbase, "/api/auth/session", undefined, g.token);
@@ -162,7 +179,7 @@ test("admin and operator use central identity in stock without colliding with it
     );
     assert.equal(
       (await req(sbase, "/api/admin/users", undefined, g.token)).status,
-      g.user.papel === "admin" ? 409 : 403,
+      409,
     );
   }
   assert.equal(
@@ -230,25 +247,27 @@ test("expired codes fail closed", async () => {
   assert.equal((await req(sbase, "/api/auth/sso/exchange", p)).status, 401);
 });
 test("sensitive inventory actions reauthenticate with the central password and native login is disabled", async () => {
-  const g = await grant(admin),
-    identity =
-      require("../../../integrations/estoque-pro/src/identity").identity(
-        { ZEN_IDENTITY_API_URL: base, ZENCONTROL_INTEGRATION_SECRET: secret },
-        sdb.pool,
-        (r) => r,
-      );
-  await identity.reauthenticate({
-    headers: { authorization: "Bearer " + g.token },
-    body: { password },
-  });
-  await assert.rejects(
-    () =>
-      identity.reauthenticate({
-        headers: { authorization: "Bearer " + g.token },
-        body: { password: "wrong" },
-      }),
-    (e) => e.status === 403,
-  );
+  for (const token of [admin, operator]) {
+    const g = await grant(token),
+      identity =
+        require("../../../integrations/estoque-pro/src/identity").identity(
+          { ZEN_IDENTITY_API_URL: base, ZENCONTROL_INTEGRATION_SECRET: secret },
+          sdb.pool,
+          (r) => r,
+        );
+    await identity.reauthenticate({
+      headers: { authorization: "Bearer " + g.token },
+      body: { password },
+    });
+    await assert.rejects(
+      () =>
+        identity.reauthenticate({
+          headers: { authorization: "Bearer " + g.token },
+          body: { password: "wrong" },
+        }),
+      (e) => e.status === 403,
+    );
+  }
   assert.equal(
     (await req(sbase, "/api/auth/login", { login: "admin", password })).status,
     409,

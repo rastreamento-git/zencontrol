@@ -1,4 +1,7 @@
-import { passwordInputProps, passwordRequirements } from "../lib/password-policy";
+import {
+  passwordInputProps,
+  passwordRequirements,
+} from "../lib/password-policy";
 import { useEffect, useState } from "react";
 import { Box } from "lucide-react";
 import { api, errorMessage, saveToken } from "../lib/api";
@@ -47,7 +50,9 @@ export default function AuthGate({ children, audience = "central" }) {
     if (
       !config?.unified_login &&
       data.user &&
-      (data.user.papel === "tecnico") !== technicianEntry
+      (technicianEntry
+        ? !["admin", "operador", "tecnico"].includes(data.user.papel)
+        : data.user.papel === "tecnico")
     ) {
       saveToken(null);
       setUser(null);
@@ -118,6 +123,12 @@ export default function AuthGate({ children, audience = "central" }) {
         audience: access?.unified_login ? "ecosystem" : audience,
       });
       saveToken(data.token);
+      if (
+        currentApp === "zencontrol" &&
+        ["admin", "operador"].includes(data.user?.papel) &&
+        !new URLSearchParams(window.location.search).has("zen_app")
+      )
+        history.replaceState(null, "", "/");
       if (!(await applySession(data))) saveToken(null);
       setPassword("");
     } catch (e) {
@@ -145,7 +156,7 @@ export default function AuthGate({ children, audience = "central" }) {
                     Zen<span>Field</span>
                   </>
                 ) : access?.unified_login ? (
-                  "ZEN"
+                  "ZenTracking"
                 ) : (
                   <>
                     Zen<span>Control</span>
@@ -175,8 +186,8 @@ export default function AuthGate({ children, audience = "central" }) {
           ) : technicianEntry && access?.unified_login ? (
             <div className="auth-form">
               <p className="auth-description">
-                Use sua conta ZEN. Seu perfil abre automaticamente a área
-                correta.
+                Use sua conta ZenTracking. Seu perfil abre automaticamente a
+                área correta.
               </p>
               {error && <p role="alert">{error}</p>}
               <button
@@ -192,11 +203,11 @@ export default function AuthGate({ children, audience = "central" }) {
                   }
                 }}
               >
-                Entrar com conta ZEN
+                Entrar no ZenTracking
               </button>
               <p>
-                Primeiro acesso? Ative sua conta na tela de acesso ZEN com o
-                código fornecido pela central.
+                Primeiro acesso? Ative sua conta na tela de acesso ZenTracking
+                com o código fornecido pela central.
               </p>
             </div>
           ) : (
@@ -205,7 +216,7 @@ export default function AuthGate({ children, audience = "central" }) {
                 {technicianEntry
                   ? "Entre com seu usuário e senha para ver os serviços, enviar fotos e acompanhar a confirmação da central."
                   : access?.unified_login
-                    ? "Acesso único ZEN. Administradores e operadores entram na central e no estoque; técnicos seguem para o ZenField."
+                    ? "Acesse ZenControl, ZenField e EstoquePro em um só lugar. Técnicos seguem diretamente para o ZenField."
                     : "Entre para acompanhar os agendamentos e os atendimentos."}
               </p>
               <label htmlFor="login">Usuário</label>
@@ -267,8 +278,8 @@ export default function AuthGate({ children, audience = "central" }) {
                         required
                       />
                       <p>
-                        {passwordRequirements} Use zen123 como senha provisória e o código individual.
-                        O código expira em 24 horas.
+                        {passwordRequirements} Use zen123 como senha provisória
+                        e o código individual. O código expira em 24 horas.
                       </p>
                     </>
                   )}
@@ -287,7 +298,15 @@ export default function AuthGate({ children, audience = "central" }) {
           )}
         </section>
       </div>
-      <AppFooter product={technicianEntry ? "ZenField" : "ZenControl"} />
+      <AppFooter
+        product={
+          access?.unified_login
+            ? "ZenTracking"
+            : technicianEntry
+              ? "ZenField"
+              : "ZenControl"
+        }
+      />
     </main>
   );
 }

@@ -66,7 +66,7 @@ function JobTable({ items, user, onRetry }) {
               </td>
               <td className="zc-job-error">{j.last_error || "—"}</td>
               <td>
-                {user.papel === "admin" &&
+                {["admin", "operador"].includes(user.papel) &&
                   ["failed", "uncertain"].includes(j.state) && (
                     <button
                       className="secondary-button"

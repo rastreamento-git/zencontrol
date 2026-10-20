@@ -17,6 +17,20 @@ const kinds = [
   "checklist",
 ];
 async function technician(db, userId) {
+  const scope = require("./field-access").context.getStore();
+  if (
+    scope?.delegated &&
+    scope.actor.id === userId &&
+    ["admin", "operador"].includes(scope.actor.papel)
+  ) {
+    const selected = await d.one(
+      db,
+      "SELECT * FROM zc_technicians WHERE id=$1 AND active=true",
+      [scope.technician.id],
+    );
+    if (!selected) fail(403, "Técnico selecionado está inativo.");
+    return selected;
+  }
   const t = await d.one(
     db,
     "SELECT t.* FROM zc_technician_accounts a JOIN zc_technicians t ON t.id=a.technician_id WHERE a.user_id=$1 AND t.active=true",

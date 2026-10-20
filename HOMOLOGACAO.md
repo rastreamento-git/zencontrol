@@ -29,11 +29,13 @@ O inicializador recusa `DATABASE_URL`, `TEST_DATABASE_URL` e `NODE_ENV=productio
 
 | Aplicação       | Endereço local        |
 | --------------- | --------------------- |
-| ZenControl      | http://127.0.0.1:4320 |
+| ZenTracking     | http://127.0.0.1:4320 |
 | ZenField        | http://127.0.0.1:4319 |
 | Estoque Pro     | http://127.0.0.1:4321 |
 | API ZenControl  | http://127.0.0.1:4317 |
 | API Estoque Pro | http://127.0.0.1:4318 |
+
+A entrada **ZenTracking** apresenta cards dos três aplicativos para administradores e operadores, ambos com acesso completo. Técnicos entram diretamente no ZenField. No ZenField, a central pode selecionar e operar o ambiente de um técnico ativo; a auditoria preserva a identidade real. Veja [o fluxo detalhado](docs/ZENTRACKING.md).
 
 O terminal informa a senha fictícia do administrador. O login é `admin` no ZenControl e no Estoque Pro. As credenciais locais geradas ficam em `.homologation/access.json`, protegido e ignorado pelo Git. Não são credenciais produtivas. O primeiro acesso dos técnicos usa login individual, `zen123`, código de ativação e uma nova senha de no mínimo 8 caracteres, com maiúscula, minúscula, número e símbolo. Nenhuma senha definitiva de técnico é gravada em texto simples.
 
@@ -57,7 +59,7 @@ Os arquivos também podem ser baixados, por exemplo, em http://127.0.0.1:4319/de
 
 ### A — Cadastro e primeiro acesso
 
-1. Entre no ZenControl como administrador, abra **Equipe técnica** e cadastre José da Silva Martins, ou use o José já populado.
+1. Entre no ZenTracking como administrador, abra o card **ZenControl** e **Equipe técnica** e cadastre José da Silva Martins, ou use o José já populado.
 2. Um cadastro novo devolve login e ativação. Para um existente, use **Gerar código de acesso ZenField**. A emissão revoga as sessões desse usuário e expira em 24 horas.
 3. Abra o ZenField. A senha `zen123` sozinha deve falhar.
 4. Marque **Primeiro acesso ou redefinição**, informe login, senha provisória, código e nova senha com pelo menos 8 caracteres, com maiúscula, minúscula, número e símbolo.
@@ -104,7 +106,7 @@ Os arquivos também podem ser baixados, por exemplo, em http://127.0.0.1:4319/de
 ### G — Reajuste e contraproposta
 
 1. No ZenField, em **Meus valores**, solicite novas tarifas com vigência e justificativa.
-2. Na central, um administrador autorizado pode aprovar, rejeitar, pedir informações ou apresentar contraproposta. Operadores comuns não aprovam valores.
+2. Na central, administradores e operadores podem aprovar, rejeitar, pedir informações ou apresentar contraproposta.
 3. Uma contraproposta só cria a tarifa após o aceite do técnico. Aceitar com outro usuário ou repetir uma decisão desatualizada deve falhar.
 4. A vigência autorizada não pode ser anterior ao dia da autorização. Há uma versão por técnico/data de início. Datas futuras são permitidas.
 5. Compare um serviço já registrado antes do reajuste com um novo: o antigo preserva sua composição. O valor é congelado quando a execução finaliza ou é enviada pela primeira vez, com base na data executada. Correções não recalculam silenciosamente.

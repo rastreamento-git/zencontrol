@@ -268,6 +268,9 @@ async function main() {
   );
   await central.goto("http://127.0.0.1:4320");
   await central
+    .getByRole("button", { name: "Abrir ZenControl", exact: true })
+    .click();
+  await central
     .getByRole("button", { name: "Validações", exact: true })
     .click();
   await central.getByRole("button", { name: "Conferir", exact: true }).click();

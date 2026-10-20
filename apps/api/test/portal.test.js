@@ -1153,7 +1153,7 @@ test("pre-upgrade submissions retain their original evidence requirements", asyn
   assert.equal((await ok("/api/orders/" + a.id)).status, "CONCLUÍDO");
 });
 
-test("separate portal login accepts only technician accounts and central accepts only staff", async () => {
+test("portal accepts staff supervision and technician accounts; central accepts only staff", async () => {
   const technicianAtCentral = await req(
     "/api/auth/login",
     "POST",
@@ -1168,8 +1168,8 @@ test("separate portal login accepts only technician accounts and central accepts
     { login: "central", password, audience: "technician" },
     null,
   );
-  assert.equal(staffAtPortal.status, 403);
-  assert.equal(staffAtPortal.data.token, undefined);
+  assert.equal(staffAtPortal.status, 200);
+  assert.equal(staffAtPortal.data.user.papel, "operador");
   const technicianLogin = await ok(
     "/api/auth/login",
     "POST",

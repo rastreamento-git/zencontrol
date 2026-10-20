@@ -27,11 +27,18 @@ function username(value) {
 }
 function password(value) {
   if (
-    typeof value !== "string" || value.length < 8 || value.length > 128 ||
-    !/\p{Lu}/u.test(value) || !/\p{Ll}/u.test(value) ||
-    !/[0-9]/.test(value) || !/[\p{P}\p{S}]/u.test(value)
+    typeof value !== "string" ||
+    value.length < 8 ||
+    value.length > 128 ||
+    !/\p{Lu}/u.test(value) ||
+    !/\p{Ll}/u.test(value) ||
+    !/[0-9]/.test(value) ||
+    !/[\p{P}\p{S}]/u.test(value)
   )
-    fail(400, "Use de 8 a 128 caracteres, com pelo menos uma letra maiúscula, uma minúscula, um número e um símbolo.");
+    fail(
+      400,
+      "Use de 8 a 128 caracteres, com pelo menos uma letra maiúscula, uma minúscula, um número e um símbolo.",
+    );
   return value;
 }
 async function hashPassword(value) {
@@ -292,7 +299,10 @@ function configureAuth(app, env, pool) {
         !["central", "technician", "ecosystem"].includes(audience)
       )
         fail(400, "Área de acesso inválida.");
-      if (audience === "technician" && row.papel !== "tecnico")
+      if (
+        audience === "technician" &&
+        !["admin", "operador", "tecnico"].includes(row.papel)
+      )
         fail(403, "Use uma conta de técnico para entrar neste portal.");
       if (audience === "central" && row.papel === "tecnico")
         fail(403, "Esta conta é de técnico. Entre pelo Portal do Técnico.");
@@ -333,15 +343,15 @@ function configureAuth(app, env, pool) {
     next();
   });
   function requireAdmin(req, res, next) {
-    if (req.user?.papel !== "admin")
-      fail(403, "Esta ação exige um administrador.");
+    if (!["admin", "operador"].includes(req.user?.papel))
+      fail(403, "Esta ação exige acesso da central.");
     next();
   }
   async function reauthenticate(req) {
     if (!enabled)
       fail(403, "Configure acesso por senha para usar ações administrativas.");
     const { rows } = await pool.query(
-      "SELECT senha_hash FROM usuarios WHERE id=$1 AND ativo=true AND papel='admin'",
+      "SELECT senha_hash FROM usuarios WHERE id=$1 AND ativo=true AND papel IN ('admin','operador')",
       [req.user.id],
     );
     if (!(await checkPassword(req.body?.password, rows[0]?.senha_hash)))

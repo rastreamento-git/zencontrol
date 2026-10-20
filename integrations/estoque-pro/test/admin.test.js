@@ -87,13 +87,13 @@ test("bootstrap creates a hashed administrator; user endpoints never expose pass
   assert.equal((await login("admin", "incorrect-password")).status, 401);
   assert.equal((await login("unknown-user", "incorrect-password")).status, 401);
 });
-test("operators can move stock but secret codes cannot grant administrative permissions", async () => {
+test("operators have complete stock access; destructive actions still require confirmation and backup", async () => {
   const person = await makeUser();
   const auth = await login(person.login, "User1!ab");
   assert.equal(auth.status, 200);
   const token = auth.body.token;
   for (const path of ["admin/users", "admin/backup", "admin/audit"])
-    assert.equal((await get(path, token)).status, 403);
+    assert.equal((await get(path, token)).status, 200);
   assert.equal(
     (
       await request(
@@ -108,7 +108,7 @@ test("operators can move stock but secret codes cannot grant administrative perm
         token,
       )
     ).status,
-    403,
+    201,
   );
   assert.equal(
     (
@@ -119,7 +119,7 @@ test("operators can move stock but secret codes cannot grant administrative perm
         token,
       )
     ).status,
-    403,
+    400,
   );
   const id = await product();
   assert.equal(

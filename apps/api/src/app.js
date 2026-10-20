@@ -89,6 +89,7 @@ function createApp(pool, env = process.env) {
     await auth.ready();
   };
   app.locals.config = cfg;
+  require("./field-access").configureFieldAccess(app, pool);
   require("./ecosystem-routes").configureEcosystem(app, pool, cfg, auth);
   configurePortal(app, pool, cfg, auth);
   const admin = auth.requireAdmin;
@@ -197,14 +198,11 @@ function createApp(pool, env = process.env) {
       "SELECT id,kind,state,last_error,created_at FROM zc_jobs WHERE order_id=$1 ORDER BY created_at DESC LIMIT 20",
       [order.id],
     );
-    order.extras =
-      req.user.papel === "admin"
-        ? await d.rows(
-            pool,
-            "SELECT * FROM zc_order_extras WHERE order_id=$1",
-            [order.id],
-          )
-        : [];
+    order.extras = ["admin", "operador"].includes(req.user.papel)
+      ? await d.rows(pool, "SELECT * FROM zc_order_extras WHERE order_id=$1", [
+          order.id,
+        ])
+      : [];
     order.submissions = await d.rows(
       pool,
       "SELECT id,state,version,submitted_at FROM zc_batches WHERE order_id=$1 ORDER BY created_at DESC",
@@ -311,9 +309,15 @@ function createApp(pool, env = process.env) {
     res.json({ ok: true });
   });
   app.post("/api/orders/:id/dispatch", async (req, res) => {
-    if (req.body.masked === false && req.user.papel !== "admin")
+    if (
+      req.body.masked === false &&
+      !["admin", "operador"].includes(req.user.papel)
+    )
       fail(403, "A versão integral da OS exige administrador.");
-    if (req.body.masked === false && req.user.papel !== "admin")
+    if (
+      req.body.masked === false &&
+      !["admin", "operador"].includes(req.user.papel)
+    )
       fail(403, "Envio integral exige administração.");
     res.status(202).json({
       job_id: await o.dispatch(pool, req.params.id, req.body, actor(req), cfg),
@@ -327,7 +331,8 @@ function createApp(pool, env = process.env) {
       .send(
         await orderPdf(
           order,
-          req.query.integral !== "1" || req.user.papel !== "admin",
+          req.query.integral !== "1" ||
+            !["admin", "operador"].includes(req.user.papel),
           { portalUrl: cfg.TECHNICIAN_PORTAL_URL || cfg.PUBLIC_URL },
         ),
       );
@@ -339,7 +344,7 @@ function createApp(pool, env = process.env) {
     );
     for (const t of list) {
       delete t.extra_info;
-      if (req.user.papel !== "admin")
+      if (!["admin", "operador"].includes(req.user.papel))
         for (const k of [
           "price_install",
           "price_maintenance",
@@ -547,7 +552,10 @@ function createApp(pool, env = process.env) {
           [req.params.id],
         );
         if (!old) fail(404, "Usuário não encontrado.");
-        if (old.id === req.user.id && (!active || role !== "admin"))
+        if (
+          old.id === req.user.id &&
+          (!active || (old.papel === "admin" && role !== "admin"))
+        )
           fail(409, "Você não pode desativar a própria conta administrativa.");
         if (
           old.ativo &&

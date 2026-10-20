@@ -1,4 +1,7 @@
-import { passwordInputProps, passwordRequirements } from "@zen/ui/lib/password-policy";
+import {
+  passwordInputProps,
+  passwordRequirements,
+} from "@zen/ui/lib/password-policy";
 import AppLinks from "@zen/ui/components/AppLinks";
 import { NoticeBell, FinancePanel } from "./components/Ecosystem";
 import { useEffect, useRef, useState } from "react";
@@ -72,7 +75,7 @@ const groups = [
 ];
 export default function App() {
   const user = useSession(),
-    admin = user.papel === "admin";
+    admin = ["admin", "operador"].includes(user.papel);
   const [tab, setTab] = useState("dashboard"),
     [menu, setMenu] = useState(false),
     [search, setSearch] = useState(""),
@@ -199,7 +202,9 @@ export default function App() {
           <span className="avatar">{initials(user.nome)}</span>
           <div>
             <strong>{user.nome}</strong>
-            <small>{admin ? "Administrador" : "Operador"}</small>
+            <small>
+              {user.papel === "admin" ? "Administrador" : "Operador"}
+            </small>
           </div>
           <button
             className="icon-button"

@@ -26,7 +26,7 @@ async function main() {
   server.stderr.on("data", (s) => {
     output += s;
   });
-  for (let i = 0; i < 200; i++) {
+  for (let i = 0; i < 600; i++) {
     if (output.includes("Homologação LOCAL pronta.")) break;
     if (server.exitCode !== null)
       throw Error(
@@ -34,7 +34,7 @@ async function main() {
           output.replace(/Admin dos sistemas:.*/g, "[omitido]"),
       );
     await new Promise((r) => setTimeout(r, 200));
-    if (i === 199) throw Error("Inicialização demorou além do limite.");
+    if (i === 599) throw Error("Inicialização demorou além do limite.");
   }
   const creds = JSON.parse(
     await fs.readFile(path.join(directory, "access.json"), "utf8"),
@@ -96,41 +96,201 @@ async function main() {
     ...(args ? { args } : {}),
   });
   const errors = [];
+  const people = (await api("/technicians", undefined, admin)).items;
+  const first = people.find((t) => t.id === 1),
+    second = people.find((t) => t.id === 2);
   for (const [login, password] of [
     ["admin", creds.admin_password],
     ["operador.teste", "Operator1!browser"],
   ]) {
     const context = await browser.newContext({
-        viewport: { width: 1280, height: 800 },
-      }),
-      page = await context.newPage();
+      viewport: { width: 1280, height: 900 },
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(20000);
     page.on("pageerror", (e) => errors.push(e.message));
     await page.goto("http://127.0.0.1:4320");
+    await page
+      .getByRole("heading", { name: "ZenTracking", exact: true })
+      .waitFor();
     await page.getByLabel("Usuário", { exact: true }).fill(login);
     await page.getByLabel("Senha de acesso").fill(password);
     await page.getByRole("button", { name: "Entrar", exact: true }).click();
     await page
-      .getByRole("button", { name: "Abrir Estoque Pro", exact: true })
+      .getByRole("heading", { name: "Seu setor, em um só lugar.", exact: true })
+      .waitFor();
+    for (const name of ["ZenControl", "ZenField", "EstoquePro"])
+      await page
+        .getByRole("button", { name: "Abrir " + name, exact: true })
+        .waitFor();
+    if (login === "admin") {
+      await page.screenshot({
+        path: path.join(directory, "zentracking-desktop.png"),
+        timeout: 60000,
+        animations: "disabled",
+      });
+      await page.setViewportSize({ width: 390, height: 844 });
+      assert.ok(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+        "Hub must fit mobile width",
+      );
+      await page.screenshot({
+        path: path.join(directory, "zentracking-mobile.png"),
+        fullPage: true,
+        timeout: 60000,
+        animations: "disabled",
+      });
+      await page.setViewportSize({ width: 1280, height: 900 });
+    }
+    await page
+      .getByRole("button", { name: "Abrir ZenControl", exact: true })
+      .click();
+    await page.waitForURL("http://127.0.0.1:4320/zencontrol");
+    await page
+      .getByRole("button", { name: "Equipe e acessos", exact: true })
+      .waitFor();
+    await page
+      .getByRole("button", { name: "Financeiro", exact: true })
+      .waitFor();
+    await page.getByRole("link", { name: "Aplicativos", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Abrir EstoquePro", exact: true })
       .click();
     await page.waitForURL("http://127.0.0.1:4321/**");
     await page.getByRole("button", { name: "Sair", exact: true }).waitFor();
-    assert.ok(
+    await page
+      .getByRole("button", { name: "Backups locais", exact: true })
+      .waitFor();
+    await page
+      .getByRole("link", { name: "ZenTracking · Aplicativos", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "Abrir ZenField", exact: true })
+      .click();
+    await page.waitForURL("http://127.0.0.1:4319/**");
+    assert.equal(
       await page
-        .getByText(login === "admin" ? "Administrador" : "Operador de teste", {
+        .getByRole("heading", {
+          name: "Seu setor, em um só lugar.",
           exact: true,
         })
         .count(),
+      0,
     );
     await page
-      .getByRole("link", { name: "Abrir ZenControl", exact: true })
+      .getByRole("heading", {
+        name: "Qual técnico você quer acessar?",
+        exact: true,
+      })
+      .waitFor();
+    const notificationResponse = page.waitForResponse(
+      (r) =>
+        r.url().includes("/notifications?") &&
+        r.request().headers()["x-zen-technician-id"] === "1",
+    );
+    await page
+      .getByRole("button", {
+        name: "Acessar ambiente de " + first.name,
+        exact: true,
+      })
       .click();
     await page
-      .getByRole("button", { name: "Abrir Estoque Pro", exact: true })
+      .getByLabel("Ambiente selecionado", { exact: true })
+      .getByText("Ambiente de " + first.name, { exact: true })
       .waitFor();
+    assert.equal(
+      (await notificationResponse).status(),
+      200,
+      "Notifications must use selected technician",
+    );
+    await page
+      .getByRole("button", { name: "Meus serviços", exact: true })
+      .click();
+    await page.locator(".portal-order").first().click();
+    await page
+      .getByText("Ordem de serviço completa", { exact: true })
+      .waitFor();
+    const start = page.getByRole("button", {
+      name: "Começar registro",
+      exact: true,
+    });
+    if (await start.count()) await start.click();
+    await page
+      .getByRole("heading", {
+        name: "Checklist preenchido e assinado",
+        exact: true,
+      })
+      .waitFor();
+    await page
+      .getByLabel("Observações do atendimento (opcional)", { exact: true })
+      .fill("Registro realizado pela central: " + login);
+    const saved = page.waitForResponse(
+      (r) =>
+        r.request().method() === "PATCH" &&
+        /\/technician\/batches\//.test(r.url()),
+    );
+    await page
+      .getByRole("button", { name: "Salvar e continuar depois", exact: true })
+      .click();
+    const result = await saved;
+    assert.equal(result.status(), 200);
+    const id = result.url().split("/").at(-1);
+    const staffToken = await page.evaluate(() =>
+      sessionStorage.getItem("zenfield.session"),
+    );
+    const audit = await api("/audit?limit=100", undefined, staffToken);
+    const row = audit.items.find(
+      (x) =>
+        x.action === "portal_draft_updated" &&
+        x.entity_id === id &&
+        x.detail.delegation?.actor_login === login,
+    );
+    assert.ok(row, "Delegated UI action must preserve real operator identity");
+    assert.equal(row.detail.delegation.technician_id, 1);
+    await page
+      .getByRole("button", { name: "Trocar técnico", exact: true })
+      .click();
+    await page
+      .getByRole("button", {
+        name: "Acessar ambiente de " + second.name,
+        exact: true,
+      })
+      .click();
+    await page
+      .getByLabel("Ambiente selecionado", { exact: true })
+      .getByText("Ambiente de " + second.name, { exact: true })
+      .waitFor();
+    if (login === "admin") {
+      await page.setViewportSize({ width: 390, height: 844 });
+      assert.ok(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+        "Supervision must fit mobile width",
+      );
+      await page.screenshot({
+        path: path.join(directory, "zenfield-supervision.png"),
+        fullPage: true,
+        timeout: 60000,
+        animations: "disabled",
+      });
+    }
     await page.getByRole("button", { name: "Sair", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Entrar no ZenTracking", exact: true })
+      .waitFor();
+    await page.goto("http://127.0.0.1:4320");
     await page.getByLabel("Senha de acesso").waitFor();
     await context.close();
+    console.log(
+      "Staff flow passed: " +
+        login +
+        "; three apps, technician switch, direct action, audit and logout.",
+    );
   }
+
   const context = await browser.newContext({
       viewport: { width: 390, height: 520 },
       isMobile: true,
@@ -151,9 +311,15 @@ async function main() {
     .getByRole("button", { name: "Meus serviços", exact: true })
     .click();
   await page.locator(".portal-order").first().click();
-  await page
-    .getByRole("button", { name: "Começar registro", exact: true })
-    .click();
+  await page.getByText("Ordem de serviço completa", { exact: true }).waitFor();
+  if (
+    await page
+      .getByRole("button", { name: "Começar registro", exact: true })
+      .count()
+  )
+    await page
+      .getByRole("button", { name: "Começar registro", exact: true })
+      .click();
   await page
     .getByRole("heading", {
       name: "Checklist preenchido e assinado",
@@ -203,13 +369,16 @@ async function main() {
   );
   await page.getByRole("button", { name: "Sair", exact: true }).click();
   await page
-    .getByRole("button", { name: "Entrar com conta ZEN", exact: true })
+    .getByRole("button", { name: "Entrar no ZenTracking", exact: true })
     .waitFor();
   await context.close();
   assert.deepEqual(errors, []);
   console.log(
     JSON.stringify({
-      staffSso: "passed: admin and operator, central → stock → central",
+      staffSso:
+        "passed: ZenTracking cards → all three apps for admin and operator",
+      supervision:
+        "passed: select, switch, operate and audit actual staff identity",
       technician: "passed: master login routes directly to field",
       mobileScroll: "passed at 390×520, including after dialog",
       horizontalOverflow: false,
@@ -219,7 +388,20 @@ async function main() {
   );
 }
 main()
-  .catch((e) => {
+  .catch(async (e) => {
+    for (const context of browser?.contexts() || []) {
+      for (const page of context.pages()) {
+        console.error("UI failure at", page.url());
+        console.error((await page.locator("body").innerText()).slice(-12000));
+        await page
+          .screenshot({
+            path: path.join(directory, "failure.png"),
+            fullPage: true,
+            timeout: 60000,
+          })
+          .catch(() => {});
+      }
+    }
     console.error(e);
     process.exitCode = 1;
   })

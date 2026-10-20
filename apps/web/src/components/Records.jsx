@@ -1,4 +1,7 @@
-import { passwordInputProps, passwordRequirements } from "@zen/ui/lib/password-policy";
+import {
+  passwordInputProps,
+  passwordRequirements,
+} from "@zen/ui/lib/password-policy";
 import { useEffect, useState } from "react";
 import {
   Plus,
@@ -239,7 +242,7 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [action, setAction] = useState(null);
-  const admin = user.papel === "admin";
+  const admin = ["admin", "operador"].includes(user.papel);
   useEffect(() => {
     let active = true;
     Promise.all([
@@ -910,10 +913,10 @@ export const actionLabel = (k) =>
   })[k] || k.replaceAll("_", " ");
 export function Technicians({ user, revision, refresh }) {
   const { data: catalog } = useLoad(
-    user.papel === "admin" ? "/stock/catalog" : "/meta",
+    ["admin", "operador"].includes(user.papel) ? "/stock/catalog" : "/meta",
     revision,
   );
-  const admin = user.papel === "admin";
+  const admin = ["admin", "operador"].includes(user.papel);
   const [access, setAccess] = useState(null);
   const { data, loading, error } = useLoad("/technicians", revision);
   const [showInactive, setShowInactive] = useState(false),
@@ -1070,7 +1073,8 @@ export function Technicians({ user, revision, refresh }) {
             </p>
             <p>
               No ZenField, marque “Primeiro acesso ou redefinição” e cadastre
-              uma nova senha de pelo menos 8 caracteres, com maiúscula, minúscula, número e símbolo.
+              uma nova senha de pelo menos 8 caracteres, com maiúscula,
+              minúscula, número e símbolo.
             </p>
             <button className="primary-button" onClick={() => setAccess(null)}>
               Concluir
@@ -1208,7 +1212,7 @@ export function Volunteers({ user, revision, refresh }) {
                       </td>
                       <td>{v.sga_code || "Não informado"}</td>
                       <td>
-                        {user.papel === "admin" && (
+                        {["admin", "operador"].includes(user.papel) && (
                           <button
                             className="icon-button"
                             aria-label={"Remover " + v.name}
