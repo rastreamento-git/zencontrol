@@ -95,6 +95,26 @@ async function main() {
       : {}),
     ...(args ? { args } : {}),
   });
+  async function checkAppearance(page, expected) {
+    await page.waitForFunction(
+      (value) => document.documentElement.dataset.theme === value,
+      expected,
+    );
+    assert.equal(
+      await page.evaluate(
+        () => getComputedStyle(document.body).backgroundColor,
+      ),
+      expected === "dark" ? "rgb(16, 26, 44)" : "rgb(243, 246, 251)",
+    );
+    const images = page.locator(".zen-mark");
+    if (await images.count())
+      assert.ok(
+        await images
+          .first()
+          .evaluate((img) => img.complete && img.naturalWidth > 0),
+        "Z icon must load",
+      );
+  }
   const errors = [];
   const people = (await api("/technicians", undefined, admin)).items;
   const first = people.find((t) => t.id === 1),
@@ -119,6 +139,8 @@ async function main() {
     await page
       .getByRole("heading", { name: "Seu setor, em um só lugar.", exact: true })
       .waitFor();
+    await page.getByLabel("Aparência", { exact: true }).selectOption("dark");
+    await checkAppearance(page, "dark");
     for (const name of ["ZenControl", "ZenField", "EstoquePro"])
       await page
         .getByRole("button", { name: "Abrir " + name, exact: true })
@@ -154,7 +176,15 @@ async function main() {
     await page
       .getByRole("button", { name: "Financeiro", exact: true })
       .waitFor();
+    await checkAppearance(page, "dark");
+    if (login === "admin")
+      await page.screenshot({
+        path: path.join(directory, "zencontrol-dark.png"),
+        timeout: 60000,
+      });
     await page.getByRole("link", { name: "Aplicativos", exact: true }).click();
+    await page.getByLabel("Aparência", { exact: true }).selectOption("light");
+    await checkAppearance(page, "light");
     await page
       .getByRole("button", { name: "Abrir EstoquePro", exact: true })
       .click();
@@ -163,9 +193,18 @@ async function main() {
     await page
       .getByRole("button", { name: "Backups locais", exact: true })
       .waitFor();
+    await checkAppearance(page, "light");
+    await page.getByLabel("Aparência", { exact: true }).selectOption("dark");
+    await checkAppearance(page, "dark");
+    if (login === "admin")
+      await page.screenshot({
+        path: path.join(directory, "estoque-dark.png"),
+        timeout: 60000,
+      });
     await page
       .getByRole("link", { name: "ZenTracking · Aplicativos", exact: true })
       .click();
+    await checkAppearance(page, "dark");
     await page
       .getByRole("button", { name: "Abrir ZenField", exact: true })
       .click();
@@ -185,6 +224,12 @@ async function main() {
         exact: true,
       })
       .waitFor();
+    await checkAppearance(page, "dark");
+    if (login === "admin")
+      await page.screenshot({
+        path: path.join(directory, "field-selector-dark.png"),
+        timeout: 60000,
+      });
     const notificationResponse = page.waitForResponse(
       (r) =>
         r.url().includes("/notifications?") &&
@@ -304,6 +349,15 @@ async function main() {
   await page.getByRole("button", { name: "Entrar", exact: true }).click();
   await page.waitForURL("http://127.0.0.1:4319/**");
   await page.getByRole("button", { name: "Sair", exact: true }).waitFor();
+  await page.emulateMedia({ colorScheme: "dark" });
+  await checkAppearance(page, "dark");
+  await page.getByLabel("Aparência", { exact: true }).selectOption("light");
+  await checkAppearance(page, "light");
+  await page.reload();
+  await page.getByRole("button", { name: "Sair", exact: true }).waitFor();
+  await checkAppearance(page, "light");
+  await page.getByLabel("Aparência", { exact: true }).selectOption("system");
+  await checkAppearance(page, "dark");
   assert.ok(
     await page.getByText("Seus serviços em campo", { exact: true }).count(),
   );
@@ -375,6 +429,8 @@ async function main() {
   assert.deepEqual(errors, []);
   console.log(
     JSON.stringify({
+      appearance:
+        "passed: explicit overrides, system preference, reload and all three origins",
       staffSso:
         "passed: ZenTracking cards → all three apps for admin and operator",
       supervision:

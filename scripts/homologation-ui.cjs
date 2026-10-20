@@ -168,7 +168,7 @@ async function main() {
       (r) => r.url().endsWith("/photos") && r.request().method() === "POST",
     );
     await group(name)
-      .getByLabel("Escolher foto", { exact: true })
+      .getByLabel("Escolher fotos", { exact: true })
       .setInputFiles(
         path.join(directory, "fixtures/foto-vistoria-exemplo.jpg"),
       );
@@ -188,7 +188,7 @@ async function main() {
     (r) => r.url().endsWith("/photos") && r.request().method() === "POST",
   );
   await equipment
-    .getByLabel("Escolher foto", { exact: true })
+    .getByLabel("Escolher fotos", { exact: true })
     .setInputFiles(path.join(directory, "fixtures/foto-vistoria-exemplo.jpg"));
   assert.equal((await response).status(), 400);
   await page.getByRole("alert").filter({ hasText: "ilegível" }).waitFor();
@@ -196,7 +196,7 @@ async function main() {
     (r) => r.url().endsWith("/photos") && r.request().method() === "POST",
   );
   await equipment
-    .getByLabel("Escolher foto", { exact: true })
+    .getByLabel("Escolher fotos", { exact: true })
     .setInputFiles(path.join(directory, "fixtures/rastreador-jose.jpg"));
   assert.equal((await response).status(), 201);
   await page.getByText("Rastreador identificado", { exact: true }).waitFor();

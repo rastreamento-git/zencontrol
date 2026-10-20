@@ -6,7 +6,7 @@
 .eco-section h1 {
   font-size: 1.7rem;
   font-weight: 700;
-  color: #173759;
+  color: var(--ep-text);
 }
 .eco-section h2,
 .eco-card h2 {
@@ -48,10 +48,10 @@
   width: 100%;
   max-width: 100%;
   padding: 11px 12px;
-  border: 1px solid #ccd9e8;
+  border: 1px solid var(--ep-line);
   border-radius: 9px;
-  background: white;
-  color: #153451;
+  background: var(--ep-surface);
+  color: var(--ep-text);
   min-height: 44px;
   font: inherit;
 }
@@ -63,49 +63,49 @@
   min-height: 42px;
 }
 .eco-tag {
-  background: #edf4ff;
-  color: #24529c;
+  background: var(--ep-primary-soft);
+  color: var(--ep-primary-ink);
   border-radius: 30px;
   padding: 6px 12px;
   font-size: 12px;
   font-weight: 700;
 }
 .eco-info {
-  border: 1px solid #cddff8;
+  border: 1px solid var(--ep-line);
   border-radius: 12px;
   padding: 18px;
-  background: #f0f6ff;
-  color: #284d7b;
+  background: var(--ep-primary-soft);
+  color: var(--ep-primary-ink);
   display: grid;
   gap: 8px;
 }
 .eco-table-wrap {
   overflow-x: auto;
-  border: 1px solid #dce5ef;
+  border: 1px solid var(--ep-line);
   border-radius: 12px;
   max-width: 100%;
 }
 .eco-table-wrap table {
   border-collapse: collapse;
   width: 100%;
-  background: white;
+  background: var(--ep-surface);
   text-align: left;
   font-size: 13px;
 }
 .eco-table-wrap th {
-  background: #f0f5fb;
+  background: var(--ep-subtle);
   font-weight: 700;
-  color: #3c5777;
+  color: var(--ep-muted);
 }
 .eco-table-wrap td,
 .eco-table-wrap th {
   padding: 14px;
-  border-bottom: 1px solid #edf1f5;
+  border-bottom: 1px solid var(--ep-line);
   vertical-align: top;
 }
 .eco-table-wrap small {
   display: block;
-  color: #6a7d94;
+  color: var(--ep-muted);
 }
 .eco-bell {
   position: relative;
@@ -127,15 +127,15 @@
   z-index: 100;
   right: 0;
   top: 44px;
-  background: white;
+  background: var(--ep-surface);
   width: min(360px, calc(100vw - 32px));
-  border: 1px solid #d8e3f0;
+  border: 1px solid var(--ep-line);
   border-radius: 15px;
   box-shadow: 0 14px 48px #16376230;
   padding: 16px;
   max-height: 75vh;
   overflow-y: auto;
-  color: #233e60;
+  color: var(--ep-text);
 }
 .eco-notices h2 {
   font-weight: 700;
@@ -147,16 +147,16 @@
   width: 100%;
   gap: 6px;
   padding: 14px 8px;
-  border-bottom: 1px solid #e5edf7;
+  border-bottom: 1px solid var(--ep-line);
   overflow-wrap: anywhere;
 }
 .eco-notice small,
 .eco-notice time {
   font-size: 12px;
-  color: #63758d;
+  color: var(--ep-muted);
 }
 .eco-notice.is-unread {
-  background: #f1f6ff;
+  background: var(--ep-primary-soft);
 }
 .eco-link {
   text-align: left;
@@ -173,10 +173,10 @@
 .eco-nav button {
   white-space: nowrap;
   padding: 10px 14px;
-  border: 1px solid #d4e1f2;
+  border: 1px solid var(--ep-line);
   border-radius: 10px;
-  color: #3a5271;
-  background: white;
+  color: var(--ep-muted);
+  background: var(--ep-surface);
   font-weight: 600;
 }
 .eco-nav button.is-active {

@@ -1,3 +1,5 @@
+import ThemeControl from "@zen/ui/components/ThemeControl";
+import ZenMark from "@zen/ui/components/ZenMark";
 import {
   passwordInputProps,
   passwordRequirements,
@@ -160,7 +162,7 @@ export default function App() {
       >
         <div className="brand">
           <span className="brand-mark">
-            <Activity size={23} />
+            <ZenMark variant="control" size={36} />
           </span>
           <div>
             <strong>
@@ -280,6 +282,7 @@ export default function App() {
             </button>
           </form>
           <div className="topbar-actions">
+            <ThemeControl />
             <span className="header-date">
               {new Date().toLocaleDateString("pt-BR", {
                 day: "2-digit",

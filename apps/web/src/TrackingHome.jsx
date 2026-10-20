@@ -1,5 +1,7 @@
+import ThemeControl from "@zen/ui/components/ThemeControl";
+import ZenMark from "@zen/ui/components/ZenMark";
 import { useState } from "react";
-import { ArrowUpRight, KeyRound, LogOut, Radar } from "lucide-react";
+import { ArrowUpRight, KeyRound, LogOut } from "lucide-react";
 import { useSession } from "@zen/ui/lib/session";
 import { api, errorMessage, saveToken } from "@zen/ui/lib/api";
 import { openApp } from "@zen/ui/lib/sso";
@@ -296,7 +298,7 @@ export default function TrackingHome() {
           aria-label="ZenTracking · Início"
         >
           <span className="tracking-mark">
-            <Radar size={27} />
+            <ZenMark variant="tracking" size={48} />
           </span>
           <span>
             <strong>ZenTracking</strong>
@@ -304,6 +306,7 @@ export default function TrackingHome() {
           </span>
         </a>
         <div className="tracking-account">
+          <ThemeControl />
           <span className="tracking-identity">
             <b>{user.nome}</b>
             <small>
@@ -353,6 +356,18 @@ export default function TrackingHome() {
             >
               <div className="tracking-art">
                 <Illustration type={app.id} />
+                <span className="tracking-app-mark">
+                  <ZenMark
+                    variant={
+                      app.id === "zencontrol"
+                        ? "control"
+                        : app.id === "zenfield"
+                          ? "field"
+                          : "stock"
+                    }
+                    size={48}
+                  />
+                </span>
               </div>
               <div className="tracking-card-content">
                 <small>{app.category}</small>

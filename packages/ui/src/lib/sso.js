@@ -1,3 +1,4 @@
+import { appearanceUrl } from "./appearance";
 import { api, saveToken } from "./api";
 let preparation;
 let routing;
@@ -32,7 +33,7 @@ export async function beginLogin(app, config) {
     zen_state: state,
     zen_challenge: await challenge(verifier),
   }).toString();
-  window.location.replace(url.href);
+  window.location.replace(appearanceUrl(url.href));
 }
 export function prepareAccess(app) {
   if (!preparation)
@@ -106,7 +107,7 @@ export async function routeSession(data, current, config) {
           challenge: query.get("zen_challenge"),
         });
         history.replaceState(null, "", window.location.pathname);
-        window.location.replace(ticket.redirect_url);
+        window.location.replace(appearanceUrl(ticket.redirect_url));
       })().catch((e) => {
         routing = null;
         throw e;
@@ -118,7 +119,7 @@ export async function routeSession(data, current, config) {
   if (current !== destination) {
     const url = new URL(config.apps[destination]);
     url.searchParams.set("zen_login", "1");
-    window.location.replace(url.href);
+    window.location.replace(appearanceUrl(url.href));
     return true;
   }
   if (target) history.replaceState(null, "", window.location.pathname);
@@ -128,5 +129,5 @@ export async function openApp(app) {
   const { data: config } = await api.get("/auth/config");
   const url = new URL(config.apps[app]);
   url.searchParams.set("zen_login", "1");
-  window.location.assign(url.href);
+  window.location.assign(appearanceUrl(url.href));
 }

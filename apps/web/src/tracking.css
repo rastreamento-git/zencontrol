@@ -2,12 +2,12 @@
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
-  background: #f5f7fc;
-  color: #142945;
+  background: var(--ep-canvas);
+  color: var(--ep-text);
 }
 .tracking-header {
-  background: #fff;
-  border-bottom: 1px solid #e1e8f3;
+  background: var(--ep-surface);
+  border-bottom: 1px solid var(--ep-line);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -33,7 +33,7 @@
 .tracking-brand small,
 .tracking-identity small {
   font-size: 12px;
-  color: #6b7c94;
+  color: var(--ep-muted);
 }
 .tracking-mark {
   display: grid;
@@ -41,7 +41,7 @@
   width: 48px;
   height: 48px;
   border-radius: 15px;
-  background: #e8efff;
+  background: var(--ep-primary-soft);
   color: #2563eb;
 }
 .tracking-account {
@@ -70,7 +70,7 @@
   font-size: 10px;
   font-weight: 750;
   letter-spacing: 1.6px;
-  color: #4673be;
+  color: var(--ep-primary-ink);
   margin: 0 0 13px;
 }
 .tracking-intro h1 {
@@ -81,7 +81,7 @@
   font-weight: 700;
 }
 .tracking-intro > p:last-child {
-  color: #667992;
+  color: var(--ep-muted);
   font-size: 15px;
   margin: 0;
 }
@@ -91,16 +91,16 @@
   gap: 22px;
 }
 .tracking-card {
-  border: 1px solid #dce5f1;
+  border: 1px solid var(--ep-line);
   border-radius: 18px;
   overflow: hidden;
-  background: #fff;
+  background: var(--ep-surface);
   text-align: left;
   padding: 0;
   cursor: pointer;
   display: flex;
   flex-direction: column;
-  color: #142945;
+  color: var(--ep-text);
   min-width: 0;
   transition:
     transform 0.18s,
@@ -123,8 +123,8 @@
 .tracking-art {
   width: 100%;
   padding: 15px 10px 6px;
-  background: #edf3ff;
-  color: #396edd;
+  background: var(--ep-primary-soft);
+  color: var(--ep-primary-ink);
 }
 .tracking-art svg {
   width: 100%;
@@ -132,12 +132,12 @@
   display: block;
 }
 .tracking-field .tracking-art {
-  background: #eff0ff;
-  color: #7161cc;
+  background: var(--ep-primary-soft);
+  color: var(--ep-primary-ink);
 }
 .tracking-stock .tracking-art {
-  background: #eaf7f7;
-  color: #168c91;
+  background: var(--ep-primary-soft);
+  color: var(--ep-primary-ink);
 }
 .tracking-card-content {
   padding: 25px 25px 22px;
@@ -149,7 +149,7 @@
   font-size: 9px;
   font-weight: 750;
   letter-spacing: 0.9px;
-  color: #74849c;
+  color: var(--ep-muted);
 }
 .tracking-card h2 {
   font-size: 25px;
@@ -159,7 +159,7 @@
 .tracking-card-content > p {
   font-size: 13px;
   line-height: 1.75;
-  color: #6a7b93;
+  color: var(--ep-muted);
   margin: 0 0 26px;
 }
 .tracking-card-action {
@@ -169,13 +169,13 @@
   gap: 10px;
   margin-top: auto;
   padding-top: 18px;
-  border-top: 1px solid #edf1f7;
+  border-top: 1px solid var(--ep-line);
   font-size: 12px;
   font-weight: 650;
-  color: #3769c1;
+  color: var(--ep-primary-ink);
 }
 .tracking-access-note {
-  color: #8290a5;
+  color: var(--ep-muted);
   font-size: 11px;
   margin: 24px 0 0;
 }
@@ -216,4 +216,18 @@
   .tracking-card {
     transition: none;
   }
+}
+
+.tracking-art {
+  position: relative;
+}
+.tracking-app-mark {
+  position: absolute;
+  left: 22px;
+  top: 22px;
+}
+.tracking-art .zen-mark {
+  width: 48px;
+  height: 48px;
+  filter: drop-shadow(0 4px 8px #12346720);
 }

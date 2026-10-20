@@ -1,9 +1,10 @@
+import ThemeControl from "./ThemeControl";
+import ZenMark from "./ZenMark";
 import {
   passwordInputProps,
   passwordRequirements,
 } from "../lib/password-policy";
 import { useEffect, useState } from "react";
-import { Box } from "lucide-react";
 import { api, errorMessage, saveToken } from "../lib/api";
 import { SessionContext } from "../lib/session";
 import AppFooter from "./AppFooter";
@@ -143,11 +144,14 @@ export default function AuthGate({ children, audience = "central" }) {
     );
   return (
     <main className="auth-page">
+      <div className="auth-appearance">
+        <ThemeControl />
+      </div>
       <div className="auth-layout">
         <section className="auth-card" aria-labelledby="auth-title">
           <div className="auth-brand">
             <span className="brand-mark">
-              <Box size={24} aria-hidden="true" />
+              <ZenMark variant="tracking" size={44} />
             </span>
             <div>
               <h1 id="auth-title">

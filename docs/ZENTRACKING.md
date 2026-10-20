@@ -41,3 +41,13 @@ As fotos gerais são enviadas juntas em **Fotos do atendimento**, sem selecionar
 O envio sem `kind` é armazenado como `other`. As regras de equipamentos e checklist continuam separadas. O bloco **Foto do rastreador ou da TAG** usa o leitor ZXing WASM do backend para códigos de barras, QR Code e DataMatrix; valida o IMEI/serial com a carga do técnico no EstoquePro e identifica o tipo. A leitura confirmada mostra o código. Foto ilegível, código fora da carga ou múltiplos equipamentos geram aviso no próprio bloco e não criam evidência identificada. Não existe digitação manual para contornar a leitura.
 
 Verificação: `node scripts/field-photos-ui.cjs` (após os builds locais) cobre envio sem categoria, avisos, ausência de evidências em falhas, rastreador por código de barras, TAG por QR, checklist e envio completo no celular. `apps/api/test/equipment-photo.test.js` também testa IMEI em QR Code.
+
+## Seleção múltipla e identidade visual
+
+**Escolher fotos** permite selecionar várias imagens; cada etiqueta deve mostrar um único equipamento. Os arquivos são enviados em fila, com versão atualizada a cada sucesso. Cada imagem mostra seu resultado e pode ser repetida separadamente em caso de erro. Uma recusa de validação não bloqueia a imagem seguinte. Um resultado incerto de rede/servidor interrompe o restante da fila para conferência, sem repetir automaticamente arquivos já recebidos. O limite total continua sendo 30 arquivos por atendimento.
+
+ZenTracking, ZenControl, ZenField e EstoquePro usam o seletor **Aparência**: Claro, Escuro ou Automático. A preferência fica em `zen.appearance` no navegador, sincroniza abas da mesma origem e segue pelas navegações do SSO em `zen_theme` (somente `light`, `dark` ou `system`). O parâmetro é aplicado e removido antes da interface montar e não altera os códigos ou a prova PKCE. A opção Automático acompanha o sistema; uma escolha explícita prevalece sobre ele.
+
+A família de ícones e favicons usa Z estilizado com degradês azuis distintos. O logo oficial da ZEN SEGUROS está na visualização completa da OS no ZenField e em cada página do PDF, com arquivo local para funcionar sem buscar imagens externas. Os PDFs preservam fundo branco para impressão.
+
+A verificação Playwright cobre a fila com equipamento válido, foto ilegível e outro equipamento válido na mesma seleção, fotos gerais múltiplas, envio completo, tema explícito/automático, recarga, navegação nas três origens e ausência de rolagem horizontal no celular. Os testes do PDF protegem a paginação, dados mascarados e conteúdo.

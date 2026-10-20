@@ -1257,7 +1257,7 @@
 }
 .portal-capture-group {
   padding: 18px 0;
-  border-top: 1px solid var(--border-color, #dbe3ee);
+  border-top: 1px solid var(--ep-line);
 }
 .portal-capture-group h3 {
   margin: 0 0 6px;
@@ -1275,12 +1275,12 @@
   justify-content: center;
   padding: 20px;
   color: #2563eb;
-  background: #eff6ff;
+  background: var(--ep-primary-soft);
 }
 .portal-full-order {
   grid-column: 1 / -1;
   padding: 16px 0;
-  border-top: 1px solid var(--border-color, #dbe3ee);
+  border-top: 1px solid var(--ep-line);
 }
 .portal-full-order summary {
   cursor: pointer;
@@ -1311,8 +1311,8 @@
   place-items: center;
   width: 28px;
   height: 28px;
-  background: #dbeafe;
-  color: #1d4ed8;
+  background: var(--ep-primary-soft);
+  color: var(--ep-primary-ink);
 }
 .portal-service .error-banner {
   display: flex;

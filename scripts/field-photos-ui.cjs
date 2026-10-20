@@ -123,27 +123,38 @@ async function main() {
       0,
     );
   async function upload(section, fixture, status, kind) {
-    const response = page.waitForResponse(
-      (r) => r.url().endsWith("/photos") && r.request().method() === "POST",
-    );
+    const fixtures = Array.isArray(fixture) ? fixture : [fixture];
+    const statuses = Array.isArray(status) ? status : [status];
+    const collected = [];
+    let complete;
+    const responses = new Promise((resolve) => (complete = resolve));
+    const listener = (r) => {
+      if (r.url().endsWith("/photos") && r.request().method() === "POST") {
+        collected.push(r);
+        if (collected.length === fixtures.length) {
+          page.off("response", listener);
+          complete(collected);
+        }
+      }
+    };
+    page.on("response", listener);
     await section
-      .getByLabel("Escolher foto", { exact: true })
-      .setInputFiles(path.join(directory, "fixtures", fixture));
-    const r = await response;
-    assert.equal(r.status(), status, await r.text());
-    const body = r.request().postDataJSON();
-    assert.equal(body.kind, kind);
-    await section
-      .getByLabel("Escolher foto", { exact: true })
-      .waitFor({ state: "visible" });
+      .getByLabel("Escolher fotos", { exact: true })
+      .setInputFiles(fixtures.map((f) => path.join(directory, "fixtures", f)));
+    const results = await responses;
+    for (const [i, r] of results.entries()) {
+      assert.equal(r.status(), statuses[i], await r.text());
+      assert.equal(r.request().postDataJSON().kind, kind);
+    }
     await page.waitForFunction(
       () =>
         ![...document.querySelectorAll("input[type=file]")].some(
           (e) => e.disabled,
         ),
     );
-    return r.json();
+    return Promise.all(results.map((r) => r.json()));
   }
+
   const equipment = page.locator("section.portal-step").filter({
     has: page.getByRole("heading", {
       name: "Foto do rastreador ou da TAG",
@@ -163,15 +174,69 @@ async function main() {
     .filter({ hasText: "não corresponde" })
     .waitFor();
   assert.equal(await equipment.locator(".portal-photo").count(), 0);
-  await upload(equipment, "rastreador-jose.jpg", 201, "label");
+  const mixed = await upload(
+    equipment,
+    ["rastreador-jose.jpg", "foto-vistoria-exemplo.jpg", "tag-jose.jpg"],
+    [201, 400, 201],
+    "label",
+  );
+  assert.equal(
+    mixed[2].version,
+    mixed[0].version + 1,
+    "Rejected photo must not advance the batch version or block the next device",
+  );
   await equipment
     .getByText("Rastreador identificado", { exact: true })
     .waitFor();
-  await upload(equipment, "tag-jose.jpg", 201, "label");
   await equipment.getByText("TAG identificada", { exact: true }).waitFor();
-  assert.equal(await equipment.getByRole("alert").count(), 0);
-  for (let i = 0; i < 3; i++)
-    await upload(general, "foto-vistoria-exemplo.jpg", 201, undefined);
+  assert.equal(await equipment.locator(".portal-upload-queue li").count(), 3);
+  await equipment
+    .getByRole("alert")
+    .filter({ hasText: "1 foto(s) não aceita(s)" })
+    .waitFor();
+  const retryResponse = page.waitForResponse(
+    (r) => r.url().endsWith("/photos") && r.request().method() === "POST",
+  );
+  await equipment
+    .locator(".upload-error")
+    .getByRole("button", { name: "Tentar novamente", exact: true })
+    .click();
+  assert.equal((await retryResponse).status(), 400);
+  await page.waitForFunction(
+    () =>
+      ![...document.querySelectorAll("input[type=file]")].some(
+        (e) => e.disabled,
+      ),
+  );
+  assert.equal(
+    await equipment.locator(".portal-upload-queue li").count(),
+    3,
+    "Retrying a rejected photo must retain the other results",
+  );
+  assert.equal(await equipment.locator(".upload-success").count(), 2);
+  await page.getByLabel("Aparência", { exact: true }).selectOption("dark");
+  assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
+  assert.equal(
+    await page
+      .getByAltText("ZEN SEGUROS", { exact: true })
+      .evaluate((img) => img.complete && img.naturalWidth > 0),
+    true,
+  );
+  await equipment.screenshot({
+    path: path.join(directory, "multiple-equipment-dark.png"),
+    timeout: 60000,
+  });
+  await upload(
+    general,
+    [
+      "foto-vistoria-exemplo.jpg",
+      "foto-vistoria-exemplo.jpg",
+      "foto-vistoria-exemplo.jpg",
+    ],
+    [201, 201, 201],
+    undefined,
+  );
+
   assert.equal(await general.locator(".portal-photo").count(), 3);
   assert.equal(
     await general.getByText("Foto do atendimento", { exact: true }).count(),
@@ -220,7 +285,9 @@ async function main() {
   assert.deepEqual(errors, []);
   console.log(
     JSON.stringify({
-      generalPhotos: "passed: no category and preserved minimum",
+      generalPhotos: "passed: multiple selection without category",
+      multiEquipment:
+        "passed: two devices in one selection, invalid middle image rejected without blocking the next",
       barcode: "passed: tracker IMEI",
       qr: "passed: TAG serial",
       warnings: "passed: unreadable and wrong technician load; neither saved",
