@@ -187,7 +187,7 @@ async function main() {
   assert.equal(
     await tech
       .getByRole("heading", {
-        name: "Foto do rastreador ou da TAG",
+        name: "Equipamentos previstos nesta OS",
         exact: true,
       })
       .count(),

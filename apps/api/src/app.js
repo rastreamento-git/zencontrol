@@ -203,6 +203,11 @@ function createApp(pool, env = process.env) {
           order.id,
         ])
       : [];
+    order.additional_orders = await d.rows(
+      pool,
+      "SELECT id,service,status,additional_equipment FROM zc_orders WHERE parent_order_id=$1 AND deleted_at='' ORDER BY id",
+      [order.id],
+    );
     order.submissions = await d.rows(
       pool,
       "SELECT id,state,version,submitted_at FROM zc_batches WHERE order_id=$1 ORDER BY created_at DESC",
@@ -655,6 +660,9 @@ function createApp(pool, env = process.env) {
     batch.rule = currentOrder
       ? await portal.rule(pool, currentOrder.service, currentOrder)
       : null;
+    batch.required_equipment = currentOrder
+      ? portal.requiredEquipment(currentOrder)
+      : {};
     batch.current_order = currentOrder ? d.publicOrder(currentOrder) : null;
     res.json(batch);
   });

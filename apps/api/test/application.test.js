@@ -238,7 +238,7 @@ test("migrações são idempotentes e rollback não deixa gravações parciais",
   await migrate(pool);
   assert.equal(
     Number((await d.one(pool, "SELECT count(*) n FROM schema_migrations")).n),
-    7,
+    8,
   );
   await assert.rejects(
     transaction(pool, async (tx) => {
@@ -352,7 +352,7 @@ test("cadastro valida campos e preserva agendamento e adicional separado", async
   assert.equal(row.status, "AGENDADO");
   assert.equal(
     (await fresh(row.id + "_EXTRA")).service,
-    "Instalação (Adicional)",
+    "Instalação (Equipamento adicional)",
   );
   assert.equal(row.raw_legacy, undefined);
   assert.equal(

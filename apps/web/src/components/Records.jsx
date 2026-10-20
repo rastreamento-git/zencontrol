@@ -226,7 +226,15 @@ export function Orders({ agenda, meta, revision, openOrder, globalQuery }) {
     </>
   );
 }
-export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
+export function OrderEditor({
+  id,
+  meta,
+  user,
+  refresh,
+  onClose,
+  navigate,
+  openOrder,
+}) {
   const [order, setOrder] = useState(null),
     [values, setValues] = useState({
       vehicle: "",
@@ -433,6 +441,39 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
         <p className="dialog-description">
           {id || "Preencha os dados do atendimento."}
         </p>
+        {order?.parent_order_id && (
+          <div className="zc-notice">
+            <b>OS de equipamento adicional · {order.additional_equipment}</b>
+            <p>
+              OS principal: {order.parent_order_id}. Conferência e remuneração
+              independentes.
+            </p>
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={busy}
+              onClick={() => openOrder(order.parent_order_id)}
+            >
+              Abrir OS principal
+            </button>
+          </div>
+        )}
+        {!!order?.additional_orders?.length && (
+          <div className="zc-notice">
+            <b>Equipamentos adicionais em OS separadas</b>
+            {order.additional_orders.map((extra) => (
+              <button
+                type="button"
+                className="secondary-button"
+                key={extra.id}
+                disabled={busy}
+                onClick={() => openOrder(extra.id)}
+              >
+                {extra.id} · {extra.additional_equipment} · {extra.status}
+              </button>
+            ))}
+          </div>
+        )}
         {id && order && (
           <div className="zc-actions">
             <button
@@ -568,12 +609,14 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
           <legend>02 · Atendimento e responsável</legend>
           <div className="zc-form-grid">
             {field("Serviço", "service", {
+              disabled: !!order?.parent_order_id,
               options: [...new Set([...meta.services, values.service])]
                 .filter(Boolean)
                 .map((s) => [s, s]),
             })}
-            {!id &&
-              field("Criar OS adicional", "additional", {
+            {!order?.parent_order_id &&
+              !values.tracker_waiver_authorized &&
+              field("Equipamento adicional (gera outra OS)", "additional", {
                 options: [
                   ["", "Nenhum"],
                   ["Tag Extra", "Tag extra"],
@@ -623,9 +666,8 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
               <small>
                 Cliente autorizado a permanecer sem rastreador. Esta OS não
                 entra na remuneração nem no fechamento do técnico, incluindo
-                adicionais e ajustes. A conclusão exige vistoria, checklist
-                assinado e conferência da central, sem registrar instalação no
-                estoque.
+                adicionais e ajustes. A conclusão exige checklist assinado e
+                conferência da central, sem registrar instalação no estoque.
               </small>
             </div>
             {field("Termo", "term")}
@@ -636,13 +678,20 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
                 <div>
                   {[
                     ["tracker", "Rastreador"],
-                    ["tracker_extra", "Rastreador extra"],
                     ["tag", "Tag"],
                   ].map(([key, label]) => (
                     <label className="zc-checkbox" key={key}>
                       <input
                         type="checkbox"
-                        checked={(documentData.equipment || []).includes(key)}
+                        checked={
+                          (documentData.equipment || []).includes(key) ||
+                          (key === "tracker" &&
+                            order?.additional_equipment === "RASTREADOR" &&
+                            (documentData.equipment || []).includes(
+                              "tracker_extra",
+                            ))
+                        }
+                        disabled={!!order?.parent_order_id}
                         onChange={(e) =>
                           changeDocument(
                             "equipment",
@@ -658,6 +707,11 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
                     </label>
                   ))}
                 </div>
+                <small>
+                  As fotos são exigidas somente para os equipamentos previstos
+                  nesta OS. Equipamento extra gera outra OS, com serviço e
+                  remuneração separados.
+                </small>
                 <label className="zc-checkbox">
                   <input
                     type="checkbox"

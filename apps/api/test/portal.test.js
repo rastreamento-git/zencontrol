@@ -1060,13 +1060,9 @@ test("new OS requiring tracker and TAG cannot be submitted with just one equipme
     ta,
     201,
   );
-  for (const kind of [
-    "vehicle",
-    "installed",
-    "inspection",
-    "checklist",
-    "label",
-  ]) {
+  assert.deepEqual(updated.required_equipment, { RASTREADOR: 1, TAG: 1 });
+  assert.equal(updated.rule.general_photo_min, 0);
+  for (const kind of ["checklist", "label"]) {
     const r = await ok(
       "/api/technician/batches/" + b.id + "/photos",
       "POST",
@@ -1153,9 +1149,9 @@ test("pre-upgrade submissions retain their original evidence requirements", asyn
   assert.equal((await ok("/api/orders/" + a.id)).status, "CONCLUÍDO");
 });
 
-test("uncategorized photos share the required total; equipment and checklist never replace general evidence", async () => {
+test("general photos have no minimum; a non-installation service can be submitted with only the signed checklist", async () => {
   const a = await order("Visita");
-  let b = await ok(
+  const b = await ok(
     "/api/technician/orders/" + a.id + "/draft",
     "POST",
     { version: a.version },
@@ -1168,63 +1164,19 @@ test("uncategorized photos share the required total; equipment and checklist nev
     undefined,
     ta,
   );
-  assert.equal(detail.rule.general_photo_min, 3);
-  // Neither kind nor a label choice is required for general photographs.
-  for (let i = 0; i < 2; i++) {
-    const added = await ok(
-      "/api/technician/batches/" + b.id + "/photos",
-      "POST",
-      { version: b.version, image: jpg },
-      ta,
-      201,
-    );
-    assert.equal(added.serial_code, "");
-    b.version = added.version;
-  }
-  const checklist = await ok(
+  assert.equal(detail.rule.general_photo_min, 0);
+  const file = await ok(
     "/api/technician/batches/" + b.id + "/photos",
     "POST",
     { version: b.version, kind: "checklist", image: jpg },
     ta,
     201,
   );
-  b.version = checklist.version;
-  const partial = await req(
-    "/api/technician/batches/" + b.id + "/submit",
-    "POST",
-    {
-      version: b.version,
-      serials: [],
-      confirmed: true,
-      checklist_signed: true,
-    },
-    ta,
-  );
-  assert.equal(partial.status, 400);
-  assert.match(partial.data.error, /pelo menos 3 fotos do atendimento/);
-  const added = await ok(
-    "/api/technician/batches/" + b.id + "/photos",
-    "POST",
-    { version: b.version, image: jpg },
-    ta,
-    201,
-  );
-  b.version = added.version;
-  const ready = await ok(
-    "/api/technician/orders/" + a.id,
-    "GET",
-    undefined,
-    ta,
-  );
-  assert.equal(
-    ready.submissions[0].files.filter((f) => f.kind === "other").length,
-    3,
-  );
   await ok(
     "/api/technician/batches/" + b.id + "/submit",
     "POST",
     {
-      version: b.version,
+      version: file.version,
       serials: [],
       confirmed: true,
       checklist_signed: true,
@@ -1232,18 +1184,11 @@ test("uncategorized photos share the required total; equipment and checklist nev
     ta,
   );
   const review = await ok("/api/batches/" + b.id);
-  await ok(
-    "/api/batches/" + b.id + "/approve",
-    "POST",
-    {
-      version: review.version,
-      order_version: review.current_order.version,
-      serials: [],
-      reason: "Fotos gerais e checklist conferidos.",
-      checklist_reviewed: true,
-    },
-    operator,
+  assert.equal(
+    review.files.filter((f) => !["label", "checklist"].includes(f.kind)).length,
+    0,
   );
+  await approve(review);
   assert.equal((await ok("/api/orders/" + a.id)).status, "CONCLUÍDO");
 });
 
@@ -1382,4 +1327,210 @@ test("J: health check returns 503 during a database outage without leaking confi
   } finally {
     await new Promise((resolve) => offline.close(resolve));
   }
+});
+
+test("an extra tracker creates a linked, independently confirmed and paid OS; unplanned equipment cannot be counted on the principal OS", async () => {
+  const d = require("../src/domain");
+  await ok(
+    "/api/finance-v2/technicians/" + tida + "/rates",
+    "POST",
+    {
+      effective_on: d.today(),
+      prices: Object.fromEntries(d.services.map((name) => [name, 9000])),
+    },
+    admin,
+    201,
+  );
+  const mainCode = "extra-main-tracker",
+    extraCode = "extra-additional-tracker",
+    tagCode = "extra-main-tag";
+  const tagModel = (
+    await spool.query(
+      "INSERT INTO produtos(nome,categoria) VALUES('TAG adicional planejada','TAG') RETURNING id",
+    )
+  ).rows[0].id;
+  await serials([mainCode, extraCode]);
+  await serials([tagCode], stockA, tagModel);
+  const main = await ok(
+    "/api/orders",
+    "POST",
+    {
+      vehicle: "EXT1A23",
+      customer_name: "Cliente fictício",
+      service: "Instalação",
+      technician_id: tida,
+      scheduled_at: d.today() + "T10:00",
+      document_data: { equipment: ["tracker", "tag", "tracker_extra"] },
+    },
+    admin,
+    201,
+  );
+  assert.deepEqual(main.document_data.equipment, ["tracker", "tag"]);
+  assert.equal(main.additional_orders.length, 1);
+  const child = await ok("/api/orders/" + main.additional_orders[0].id);
+  assert.equal(child.parent_order_id, main.id);
+  assert.equal(child.additional_equipment, "RASTREADOR");
+  assert.deepEqual(child.document_data.equipment, ["tracker"]);
+  const replay = await ok("/api/orders/" + main.id, "PATCH", {
+    version: main.version,
+    additional: "Rastreador Extra",
+  });
+  assert.equal(replay.additional_orders[0].id, child.id);
+  assert.equal(
+    Number(
+      (
+        await pool.query(
+          "SELECT count(*) n FROM zc_orders WHERE parent_order_id=$1",
+          [main.id],
+        )
+      ).rows[0].n,
+    ),
+    1,
+  );
+  const ownMain = await ok(
+    "/api/technician/orders/" + main.id,
+    "GET",
+    undefined,
+    ta,
+  );
+  assert.deepEqual(ownMain.required_equipment, { RASTREADOR: 1, TAG: 1 });
+  const ownChild = await ok(
+    "/api/technician/orders/" + child.id,
+    "GET",
+    undefined,
+    ta,
+  );
+  assert.deepEqual(ownChild.required_equipment, { RASTREADOR: 1, TAG: 0 });
+  assert.equal(
+    (await req("/api/technician/orders/" + child.id, "GET", undefined, tb))
+      .status,
+    404,
+  );
+  async function capture(order, codes, unplanned = false) {
+    let batch = await ok(
+      "/api/technician/orders/" + order.id + "/draft",
+      "POST",
+      { version: order.version },
+      ta,
+      201,
+    );
+    for (const code of codes) {
+      const f = await ok(
+        "/api/technician/batches/" + batch.id + "/photos",
+        "POST",
+        {
+          version: batch.version,
+          kind: "label",
+          image: await photo(code, code === tagCode ? "QRCode" : "Code128"),
+        },
+        ta,
+        201,
+      );
+      batch.version = f.version;
+    }
+    const checklist = await ok(
+      "/api/technician/batches/" + batch.id + "/photos",
+      "POST",
+      { version: batch.version, kind: "checklist", image: jpg },
+      ta,
+      201,
+    );
+    batch.version = checklist.version;
+    const payload = {
+      version: batch.version,
+      serials: codes,
+      confirmed: true,
+      checklist_signed: true,
+    };
+    if (unplanned) {
+      const refused = await req(
+        "/api/technician/batches/" + batch.id + "/submit",
+        "POST",
+        payload,
+        ta,
+      );
+      assert.equal(refused.status, 400);
+      assert.match(refused.data.error, /OS de equipamento adicional/);
+      return batch;
+    }
+    await ok(
+      "/api/technician/batches/" + batch.id + "/submit",
+      "POST",
+      payload,
+      ta,
+    );
+    const review = await ok("/api/batches/" + batch.id);
+    await approve(review);
+    return batch;
+  }
+  const wrong = await capture(main, [mainCode, tagCode, extraCode], true);
+  const details = await ok(
+    "/api/technician/orders/" + main.id,
+    "GET",
+    undefined,
+    ta,
+  );
+  const unwanted = details.submissions[0].files.find(
+    (f) => f.serial_code === extraCode,
+  );
+  await ok(
+    "/api/technician/photos/" + unwanted.id,
+    "DELETE",
+    { version: wrong.version },
+    ta,
+  );
+  const refreshed = await ok(
+    "/api/technician/orders/" + main.id,
+    "GET",
+    undefined,
+    ta,
+  );
+  const ready = refreshed.submissions[0];
+  await ok(
+    "/api/technician/batches/" + ready.id + "/submit",
+    "POST",
+    {
+      version: ready.version,
+      serials: [mainCode, tagCode],
+      confirmed: true,
+      checklist_signed: true,
+    },
+    ta,
+  );
+  await approve(await ok("/api/batches/" + ready.id));
+  await capture(child, [extraCode]);
+  for (let i = 0; i < 25; i++) {
+    if (
+      (await ok("/api/orders/" + main.id)).status === "CONCLUÍDO" &&
+      (await ok("/api/orders/" + child.id)).status === "CONCLUÍDO"
+    )
+      break;
+    assert.equal(await runOne(pool, cfg), true);
+  }
+  for (const id of [main.id, child.id])
+    assert.equal((await ok("/api/orders/" + id)).status, "CONCLUÍDO");
+  const ledger = (
+    await pool.query(
+      "SELECT order_id,total_cents,state FROM zc_financial_ledger WHERE order_id=ANY($1::text[])",
+      [[main.id, child.id]],
+    )
+  ).rows;
+  assert.equal(ledger.length, 2);
+  assert.ok(
+    ledger.every((x) => x.state === "approved" && x.total_cents === 9000),
+  );
+  const receipts = (
+    await spool.query(
+      "SELECT order_id,result->'serials' AS serials FROM zencontrol_installations WHERE order_id=ANY($1::text[])",
+      [[main.id, child.id]],
+    )
+  ).rows;
+  assert.equal(receipts.length, 2);
+  assert.deepEqual(
+    receipts.find((r) => r.order_id === main.id).serials.sort(),
+    [mainCode, tagCode].sort(),
+  );
+  assert.deepEqual(receipts.find((r) => r.order_id === child.id).serials, [
+    extraCode,
+  ]);
 });

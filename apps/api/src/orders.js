@@ -3,6 +3,7 @@ const { transaction } = require("./database");
 const { fail } = require("./errors");
 const d = require("./domain");
 const { normalizeDocumentData } = require("./order-document");
+const { prepareEquipment } = require("./equipment-plan");
 const textFields = {
   customer_name: 200,
   contact: 100,
@@ -156,9 +157,87 @@ async function validate(db, input, old = null) {
     fail(400, "Defina técnico e agendamento.");
   return out;
 }
+const additionalSummary = (row) => ({
+  id: row.id,
+  parent_order_id: row.parent_order_id,
+  additional_equipment: row.additional_equipment,
+  service: row.service,
+  status: row.status,
+});
+async function ensureAdditionalOrders(db, parent, types, actor) {
+  const result = [];
+  for (const type of types) {
+    const existing = await d.one(
+      db,
+      "SELECT * FROM zc_orders WHERE parent_order_id=$1 AND additional_equipment=$2",
+      [parent.id, type],
+    );
+    if (existing) {
+      if (existing.deleted_at)
+        fail(
+          409,
+          "Já existe uma OS adicional removida para este equipamento. Revise o histórico com a central.",
+        );
+      result.push(additionalSummary(existing));
+      continue;
+    }
+    const data = Object.fromEntries(
+      Object.keys(textFields)
+        .filter((k) => parent[k] !== undefined)
+        .map((k) => [k, parent[k]]),
+    );
+    const firstId = parent.id + "_EXTRA";
+    const id = (await d.one(db, "SELECT 1 FROM zc_orders WHERE id=$1", [
+      firstId,
+    ]))
+      ? firstId + "_" + type
+      : firstId;
+    const baseService = d.services.find((s) => parent.service.startsWith(s));
+    const extra = await insert(db, "zc_orders", {
+      ...data,
+      id,
+      workflow_mode: "controlled",
+      parent_order_id: parent.id,
+      additional_equipment: type,
+      service: baseService + " (Equipamento adicional)",
+      technician_id: parent.technician_id,
+      technician_name: parent.technician_name,
+      status:
+        parent.technician_id && parent.scheduled_at ? "AGENDADO" : "PENDENTE",
+      imei: "",
+      notes: (
+        "Equipamento adicional: " +
+        type +
+        ". OS principal: " +
+        parent.id +
+        ".\n" +
+        (parent.notes || "")
+      ).slice(0, 6000),
+      document_data: JSON.stringify({
+        ...parent.document_data,
+        equipment: [type === "TAG" ? "tag" : "tracker"],
+      }),
+      created_date: d.today(),
+      created_by: actor,
+      updated_at: d.now(),
+    });
+    await require("./notifications").orderEvent(db, extra, "created");
+    await d.audit(db, actor, "created", "order", extra.id, {
+      parent_id: parent.id,
+      additional_equipment: type,
+    });
+    await d.audit(db, actor, "additional_order_created", "order", parent.id, {
+      additional_order_id: extra.id,
+      additional_equipment: type,
+    });
+    result.push(additionalSummary(extra));
+  }
+  return result;
+}
 async function create(pool, input, actor) {
   return transaction(pool, async (db) => {
     const data = await validate(db, input);
+    const additional = prepareEquipment(data, input);
     const o = await insert(db, "zc_orders", {
       ...data,
       workflow_mode: "controlled",
@@ -169,31 +248,13 @@ async function create(pool, input, actor) {
     });
     await require("./notifications").orderEvent(db, o, "created");
     await d.audit(db, actor, "created", "order", o.id);
-    if (input.additional) {
-      if (!["Tag Extra", "Rastreador Extra"].includes(input.additional))
-        fail(400, "Adicional inválido.");
-      const extra = await insert(db, "zc_orders", {
-        ...data,
-        workflow_mode: "controlled",
-        id: o.id + "_EXTRA",
-        service: data.service + " (Adicional)",
-        notes: "Ref: " + input.additional,
-        document_data: JSON.stringify({
-          ...JSON.parse(data.document_data || "{}"),
-          equipment: [
-            input.additional === "Tag Extra" ? "tag" : "tracker_extra",
-          ],
-        }),
-        created_date: o.created_date,
-        created_by: actor,
-        updated_at: d.now(),
-      });
-      await require("./notifications").orderEvent(db, extra, "created");
-      await d.audit(db, actor, "created", "order", extra.id, {
-        parent_id: o.id,
-      });
-    }
-    return o;
+    const additionalOrders = await ensureAdditionalOrders(
+      db,
+      o,
+      additional,
+      actor,
+    );
+    return { ...o, additional_orders: additionalOrders };
   });
 }
 async function edit(pool, id, input, actor) {
@@ -220,6 +281,7 @@ async function edit(pool, id, input, actor) {
     )
       fail(409, "Uma OS concluída exige reabertura pela administração.");
     const data = await validate(db, input, old);
+    const additional = prepareEquipment(data, input, old);
     if (
       ((data.technician_id !== undefined &&
         data.technician_id !== old.technician_id) ||
@@ -237,7 +299,16 @@ async function edit(pool, id, input, actor) {
         k === "document_data" ? JSON.stringify(old[k]) !== v : old[k] !== v,
       ),
     );
-    if (!Object.keys(changes).length) return old;
+    if (!Object.keys(changes).length)
+      return {
+        ...old,
+        additional_orders: await ensureAdditionalOrders(
+          db,
+          old,
+          additional,
+          actor,
+        ),
+      };
     const result = await update(
       db,
       "zc_orders",
@@ -273,7 +344,15 @@ async function edit(pool, id, input, actor) {
           }
         : {}),
     });
-    return result;
+    return {
+      ...result,
+      additional_orders: await ensureAdditionalOrders(
+        db,
+        result,
+        additional,
+        actor,
+      ),
+    };
   });
 }
 async function enqueue(db, kind, orderId, payload, key) {

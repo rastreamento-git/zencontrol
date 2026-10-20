@@ -36,9 +36,9 @@ O backend recusa técnicos tentando selecionar contextos e funcionários sem sel
 
 ## Fotos do atendimento no ZenField
 
-As fotos gerais são enviadas juntas em **Fotos do atendimento**, sem selecionar veículo, instalação, serviço ou vistoria. A quantidade mínima permanece a soma dos mínimos anteriores de fotos gerais, incluindo a vistoria obrigatória dos registros atuais. Fotos já salvas nas categorias antigas continuam visíveis e contam para esse total. Checklist assinado e etiquetas não substituem fotos gerais. Não há migração de banco.
+As fotos gerais são enviadas juntas em **Fotos do atendimento**, sem selecionar veículo, instalação, serviço ou vistoria. As fotos gerais são opcionais, sem quantidade mínima, inclusive para vistorias. Fotos já salvas continuam visíveis. As etiquetas dos equipamentos previstos na OS e o checklist assinado são conferidos separadamente.
 
-O envio sem `kind` é armazenado como `other`. As regras de equipamentos e checklist continuam separadas. O bloco **Foto do rastreador ou da TAG** usa o leitor ZXing WASM do backend para códigos de barras, QR Code e DataMatrix; valida o IMEI/serial com a carga do técnico no EstoquePro e identifica o tipo. A leitura confirmada mostra o código. Foto ilegível, código fora da carga ou múltiplos equipamentos geram aviso no próprio bloco e não criam evidência identificada. Não existe digitação manual para contornar a leitura.
+O envio sem `kind` é armazenado como `other`. As regras de equipamentos e checklist continuam separadas. O bloco **Equipamentos previstos nesta OS** usa o leitor ZXing WASM do backend para códigos de barras, QR Code e DataMatrix; valida o IMEI/serial com a carga do técnico no EstoquePro e identifica o tipo. A leitura confirmada mostra o código. Foto ilegível, código fora da carga ou múltiplos equipamentos geram aviso no próprio bloco e não criam evidência identificada. Não existe digitação manual para contornar a leitura.
 
 Verificação: `node scripts/field-photos-ui.cjs` (após os builds locais) cobre envio sem categoria, avisos, ausência de evidências em falhas, rastreador por código de barras, TAG por QR, checklist e envio completo no celular. `apps/api/test/equipment-photo.test.js` também testa IMEI em QR Code.
 
@@ -51,3 +51,13 @@ ZenTracking, ZenControl, ZenField e EstoquePro usam o seletor **Aparência**: Cl
 A família de ícones e favicons usa Z estilizado com degradês azuis distintos. O logo oficial da ZEN SEGUROS está na visualização completa da OS no ZenField e em cada página do PDF, com arquivo local para funcionar sem buscar imagens externas. Os PDFs preservam fundo branco para impressão.
 
 A verificação Playwright cobre a fila com equipamento válido, foto ilegível e outro equipamento válido na mesma seleção, fotos gerais múltiplas, envio completo, tema explícito/automático, recarga, navegação nas três origens e ausência de rolagem horizontal no celular. Os testes do PDF protegem a paginação, dados mascarados e conteúdo.
+
+## Equipamentos previstos e OS adicional
+
+O ZenField exibe o tipo e a quantidade de cada equipamento previsto, com o progresso de identificação das etiquetas. Exemplo: uma OS com rastreador e TAG pede a foto de cada um; uma OS adicional de rastreador pede somente a etiqueta desse rastreador. Fotos gerais não bloqueiam o envio. Equipamentos além do previsto devem ser registrados na OS adicional, para não misturar serviço e remuneração.
+
+A central seleciona **Equipamento adicional (gera outra OS)** ao criar ou editar um atendimento. O contrato anterior `document_data.equipment=[tracker,tag,tracker_extra]` também gera a OS de rastreador adicional automaticamente e mantém na principal somente rastreador e TAG. Marcar as duas formas para o mesmo tipo gera apenas uma OS adicional. O vínculo é persistido em `parent_order_id` e `additional_equipment` pela migração `008_additional_equipment_orders.sql`. A migração vincula os adicionais gerados pelo fluxo anterior, sem alterar valores pagos ou evidências históricas.
+
+Cada adicional tem suas próprias etiquetas, envio, conferência, confirmação no EstoquePro e lançamento financeiro. A tarifa é a vigente e cadastrada para o serviço de instalação/reinstalação do técnico; não foi criado um valor arbitrário para equipamento adicional. A remuneração só fica elegível após a conferência e confirmação do estoque. A principal não remunera o equipamento extra junto com os seus equipamentos planejados. A central e o técnico encontram os adicionais vinculados na OS principal.
+
+Verificação de integração: `apps/api/test/portal.test.js` cobre conclusão sem fotos gerais, rastreador+TAG sem evidências gerais, criação idempotente de adicional, bloqueio de equipamento excedente na principal, duas confirmações reais no estoque e dois lançamentos financeiros independentes. `scripts/field-photos-ui.cjs` verifica os cartões por equipamento, envio com zero fotos gerais e abertura da OS adicional pelo celular.

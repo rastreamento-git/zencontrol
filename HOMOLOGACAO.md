@@ -77,7 +77,7 @@ Os arquivos também podem ser baixados, por exemplo, em http://127.0.0.1:4319/de
 
 1. No ZenField, abra **Meus serviços**, filtre por veículo/OS/data/tipo/situação e selecione a instalação.
 2. Abra a OS/PDF, confira os dados e toque em **Começar registro**.
-3. Envie fotos do veículo, instalação e vistoria. Tente usar a imagem de vistoria como etiqueta: deve ser recusada como ilegível, sem liberar IMEI digitado manualmente.
+3. Fotos gerais de veículo, instalação e vistoria são opcionais, sem mínimo. Envie a etiqueta de cada equipamento previsto na OS. Tente usar a imagem de vistoria como etiqueta: deve ser recusada como ilegível, sem liberar IMEI digitado manualmente.
 4. Envie `rastreador-jose.jpg` para José ou `rastreador-maria.jpg` para Maria. O servidor reconhece Code128/QR e confere o serial na carga correta. Etiqueta de outro técnico é recusada.
 5. Para uma OS com TAG, marque o equipamento exigido na criação e use a etiqueta QR correspondente. OS que exigem dois tipos precisam de ambos.
 6. Anexe `checklist-ficticio.pdf`, confirme preenchimento/assinatura, informe a data efetiva e observações. **Salvar rascunho** permite retomar.

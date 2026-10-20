@@ -95,6 +95,15 @@ function orderDocument(order, masked = true, { portalUrl = "" } = {}) {
     .filter((k) => (data.equipment || []).includes(k))
     .map((k) => equipmentLabels[k]);
   const instructions = [];
+  if (order.parent_order_id)
+    instructions.push(
+      "OS DE EQUIPAMENTO ADICIONAL: " +
+        order.additional_equipment +
+        ". OS principal: " +
+        order.parent_order_id +
+        ". Atendimento e remuneração registrados separadamente.",
+      "",
+    );
   if (order.tracker_waiver_authorized) {
     instructions.push(
       "DISPENSA DE RASTREADOR AUTORIZADA: cliente autorizado a permanecer sem rastreador. Esta OS não integra a remuneração do técnico, inclusive adicionais e ajustes.",

@@ -119,6 +119,11 @@ function configurePortal(app, pool, cfg, auth) {
       }),
       required_equipment: portal.requiredEquipment(order),
       rule: await portal.rule(pool, order.service, order),
+      additional_orders: await d.rows(
+        pool,
+        "SELECT id,service,status,additional_equipment FROM zc_orders WHERE parent_order_id=$1 AND technician_id=$2 AND deleted_at='' ORDER BY id",
+        [order.id, order.technician_id],
+      ),
       submissions: history,
     });
   });

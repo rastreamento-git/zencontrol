@@ -38,7 +38,7 @@ Ambos: mesma branch de homologação, `NODE_VERSION=24`, `SKIP_INSTALL_DEPS=true
 
 1. Login de administrador na central e no estoque. No ZenControl, gerar ativação para José; ativar e definir senha no ZenField.
 2. Selecionar instalação; testar uma foto ilegível, depois a etiqueta fictícia em `/demo-files/rastreador-jose.jpg`.
-3. Anexar vistoria e `/demo-files/checklist-ficticio.pdf`; concluir e enviar para conferência.
+3. Anexar as etiquetas dos equipamentos previstos e `/demo-files/checklist-ficticio.pdf`; fotos gerais/vistoria são opcionais, sem mínimo. Concluir e enviar para conferência.
 4. Conferir/aprovar na central; verificar recibo e baixa única no estoque.
 5. Verificar financeiro e registrar somente pagamento simulado.
 6. Baixar backup antes de parar ou deixar a instância suspender. Não inserir dados reais.

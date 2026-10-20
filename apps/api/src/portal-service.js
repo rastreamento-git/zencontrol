@@ -2,6 +2,7 @@ const { randomUUID, createHash } = require("node:crypto");
 const sharp = require("sharp");
 const { createMediaStore } = require("./media-store");
 const { identifyEquipment } = require("./equipment-photo");
+const { requiredEquipment } = require("./equipment-plan");
 const { PDFDocument } = require("pdf-lib");
 const { transaction } = require("./database");
 const { fail, integer, serials } = require("./errors");
@@ -51,14 +52,6 @@ async function batch(db, id) {
   if (!b) fail(404, "Envio não encontrado.");
   return b;
 }
-function generalPhotoMinimum(rule, captureVersion = 2) {
-  const general = rule.required_photos.filter(
-    (p) => !["label", "checklist"].includes(p.kind),
-  );
-  const total = general.reduce((sum, p) => sum + p.min, 0);
-  const inspection = general.find((p) => p.kind === "inspection")?.min || 0;
-  return total + (captureVersion >= 2 ? Math.max(0, 1 - inspection) : 0);
-}
 async function rule(db, service, order = null) {
   const key = d.services.find((s) => service.startsWith(s));
   let r = await d.one(db, "SELECT * FROM zc_service_rules WHERE service=$1", [
@@ -74,7 +67,18 @@ async function rule(db, service, order = null) {
         (p) => !["label", "installed"].includes(p.kind),
       ),
     };
-  return { ...r, general_photo_min: generalPhotoMinimum(r) };
+  return {
+    ...r,
+    general_photo_min: 0,
+    min_serials:
+      r.stock_action === "install" && order
+        ? Object.values(requiredEquipment(order)).reduce((a, b) => a + b, 0)
+        : r.min_serials,
+    required_photos: r.required_photos.map((p) => ({
+      ...p,
+      min: ["label", "checklist"].includes(p.kind) ? p.min : 0,
+    })),
+  };
 }
 const snapshot = (order) => ({
   id: order.id,
@@ -102,6 +106,8 @@ const publicOrder = (order) =>
       "version",
       "stock_sync_state",
       "workflow_mode",
+      "parent_order_id",
+      "additional_equipment",
       "tracker_waiver_authorized",
       "executed_on",
       "execution_finished_at",
@@ -286,17 +292,6 @@ async function upload(pool, cfg, userId, id, input) {
     return { id: eid, version: b.version + 1, ...equipment };
   });
 }
-function requiredEquipment(order) {
-  const selected = order.tracker_waiver_authorized
-    ? []
-    : order.document_data?.equipment || [];
-  return {
-    RASTREADOR:
-      Number(selected.includes("tracker")) +
-      Number(selected.includes("tracker_extra")),
-    TAG: Number(selected.includes("tag")),
-  };
-}
 async function verifyEvidence(db, b, r, codes, order) {
   if (order.tracker_waiver_authorized && codes.length)
     fail(
@@ -309,36 +304,19 @@ async function verifyEvidence(db, b, r, codes, order) {
     [b.id],
   );
   if (
-    !files.length ||
     files.some((f) => f.state !== "ready") ||
     files.length !== b.expected_count
   )
     fail(400, "Todas as fotos precisam estar prontas.");
-  const requiredPhotos = r.required_photos.filter((p) =>
-    ["label", "checklist"].includes(p.kind),
+  const requiredPhotos = r.required_photos.filter(
+    (p) =>
+      p.kind === "checklist" || (b.capture_version < 2 && p.kind === "label"),
   );
   for (const required of requiredPhotos)
     if (files.filter((f) => f.kind === required.kind).length < required.min)
       fail(400, "Foto obrigatória pendente: " + required.label + ".");
-  {
-    const minimum = generalPhotoMinimum(r, b.capture_version);
-    const received = files.filter(
-      (f) => !["label", "checklist"].includes(f.kind),
-    ).length;
-    if (received < minimum)
-      fail(
-        400,
-        "Anexe pelo menos " +
-          minimum +
-          " fotos do atendimento. Recebidas: " +
-          received +
-          ".",
-      );
-  }
   if (b.capture_version >= 2 && !files.some((f) => f.kind === "checklist"))
     fail(400, "Anexe o checklist preenchido e assinado (PDF ou fotos).");
-  if (codes.length < r.min_serials)
-    fail(400, "Informe os IMEIs/seriais exigidos para este serviço.");
   if (
     r.stock_action === "install" &&
     codes.some(
@@ -373,6 +351,11 @@ async function verifyEvidence(db, b, r, codes, order) {
           )
           .map((f) => f.serial_code),
       );
+      if (received.size > min)
+        fail(
+          400,
+          "Equipamento além do previsto na OS: solicite uma OS de equipamento adicional à central para registrar serviço e remuneração separadamente.",
+        );
       if (received.size < min)
         fail(
           400,
@@ -384,6 +367,8 @@ async function verifyEvidence(db, b, r, codes, order) {
         );
     }
   }
+  if (codes.length < r.min_serials)
+    fail(400, "Envie a foto dos IMEIs/seriais previstos nesta OS.");
   return files;
 }
 async function submit(pool, userId, id, input) {
@@ -702,5 +687,4 @@ module.exports = {
   confirmStock,
   kinds,
   requiredEquipment,
-  generalPhotoMinimum,
 };

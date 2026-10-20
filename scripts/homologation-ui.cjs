@@ -180,7 +180,7 @@ async function main() {
   }
   const equipment = page.locator("section").filter({
     has: page.getByRole("heading", {
-      name: "Foto do rastreador ou da TAG",
+      name: "Equipamentos previstos nesta OS",
       exact: true,
     }),
   });

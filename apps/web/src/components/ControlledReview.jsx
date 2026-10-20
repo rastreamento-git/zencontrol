@@ -160,17 +160,27 @@ export default function ControlledReview({ batch, reload, onSaved }) {
       </div>
       {batch.rule && (
         <div className="portal-code-list">
-          {batch.rule.required_photos.map((r) => (
-            <span className="zc-badge gray" key={r.kind}>
-              {r.label}:{" "}
-              {
-                batch.files.filter(
-                  (f) => f.kind === r.kind && f.state === "ready",
-                ).length
-              }
-              /{r.min}
-            </span>
-          ))}
+          <span className="zc-badge gray">Fotos gerais: opcionais</span>
+          {Object.entries(batch.required_equipment || {})
+            .filter(([, quantity]) => quantity > 0)
+            .map(([type, quantity]) => (
+              <span className="zc-badge gray" key={type}>
+                {type}:{" "}
+                {
+                  new Set(
+                    batch.files
+                      .filter(
+                        (f) =>
+                          f.kind === "label" &&
+                          f.equipment_type === type &&
+                          f.state === "ready",
+                      )
+                      .map((f) => f.serial_code),
+                  ).size
+                }
+                /{quantity}
+              </span>
+            ))}
         </div>
       )}
       {reviewable && batch.rule?.stock_action === "install" && (

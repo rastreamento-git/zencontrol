@@ -31,9 +31,9 @@ async function main() {
   const credentials = JSON.parse(
     await fs.readFile(path.join(directory, "access.json"), "utf8"),
   );
-  async function api(route, body, token) {
+  async function api(route, body, token, method = body ? "POST" : "GET") {
     const r = await fetch("http://127.0.0.1:4317/api" + route, {
-      method: body ? "POST" : "GET",
+      method,
       headers: {
         "Content-Type": "application/json",
         ...(token ? { Authorization: "Bearer " + token } : {}),
@@ -65,6 +65,19 @@ async function main() {
       audience: "technician",
     })
   ).token;
+  const assigned = (
+    await api("/technician/orders?view=open", undefined, token)
+  ).items.find((o) => o.vehicle === "ZEN1A23");
+  const planned = await api(
+    "/orders/" + assigned.id,
+    {
+      version: assigned.version,
+      document_data: { equipment: ["tracker", "tag"] },
+      additional: "Rastreador Extra",
+    },
+    admin,
+    "PATCH",
+  );
   const args = process.env.ZEN_CHROMIUM_MODULE
     ? (await import(process.env.ZEN_CHROMIUM_MODULE)).default.args.filter(
         (a) =>
@@ -98,7 +111,10 @@ async function main() {
   await page
     .getByRole("button", { name: "Meus serviços", exact: true })
     .click();
-  await page.locator(".portal-order").filter({ hasText: "ZEN1A23" }).click();
+  await page
+    .locator(".portal-order")
+    .filter({ has: page.getByText(assigned.id, { exact: true }) })
+    .click();
   await page
     .getByRole("button", { name: "Começar registro", exact: true })
     .click();
@@ -157,7 +173,7 @@ async function main() {
 
   const equipment = page.locator("section.portal-step").filter({
     has: page.getByRole("heading", {
-      name: "Foto do rastreador ou da TAG",
+      name: "Equipamentos previstos nesta OS",
       exact: true,
     }),
   });
@@ -226,21 +242,15 @@ async function main() {
     path: path.join(directory, "multiple-equipment-dark.png"),
     timeout: 60000,
   });
-  await upload(
-    general,
-    [
-      "foto-vistoria-exemplo.jpg",
-      "foto-vistoria-exemplo.jpg",
-      "foto-vistoria-exemplo.jpg",
-    ],
-    [201, 201, 201],
-    undefined,
+  assert.equal(await general.locator(".portal-photo").count(), 0);
+  assert.ok(
+    (await general.innerText()).includes("Opcional, sem quantidade mínima"),
   );
-
-  assert.equal(await general.locator(".portal-photo").count(), 3);
   assert.equal(
-    await general.getByText("Foto do atendimento", { exact: true }).count(),
-    3,
+    await equipment
+      .locator(".portal-equipment-requirement.is-complete")
+      .count(),
+    2,
   );
   const checklistResponse = page.waitForResponse(
     (r) => r.url().endsWith("/photos") && r.request().method() === "POST",
@@ -280,12 +290,51 @@ async function main() {
   const detail = await api("/technician/orders/" + order.id, undefined, token),
     batch = detail.submissions.find((b) => b.state === "submitted");
   assert.deepEqual(batch.imeis, ["123456789012345", "TAG-HOMO-001"]);
-  assert.equal(batch.files.filter((f) => f.kind === "other").length, 3);
+  assert.equal(batch.files.filter((f) => f.kind === "other").length, 0);
   assert.equal(batch.files.filter((f) => f.kind === "label").length, 2);
+  assert.equal(planned.additional_orders.length, 1);
+  await page
+    .getByRole("button", {
+      name:
+        "Abrir OS adicional " +
+        planned.additional_orders[0].id +
+        " · RASTREADOR",
+      exact: true,
+    })
+    .click();
+  await page
+    .getByText("OS de equipamento adicional · RASTREADOR", { exact: true })
+    .waitFor();
+  await page
+    .getByRole("button", { name: "Começar registro", exact: true })
+    .click();
+  await page
+    .getByRole("heading", {
+      name: "Equipamentos previstos nesta OS",
+      exact: true,
+    })
+    .waitFor();
+  assert.equal(await page.locator(".portal-equipment-requirement").count(), 1);
+  await page
+    .locator(".portal-equipment-requirement")
+    .getByText("1 rastreador", { exact: true })
+    .waitFor();
+  await page
+    .locator("section.portal-step")
+    .filter({
+      has: page.getByRole("heading", {
+        name: "Equipamentos previstos nesta OS",
+        exact: true,
+      }),
+    })
+    .screenshot({
+      path: path.join(directory, "additional-equipment-os.png"),
+      timeout: 60000,
+    });
   assert.deepEqual(errors, []);
   console.log(
     JSON.stringify({
-      generalPhotos: "passed: multiple selection without category",
+      generalPhotos: "passed: no minimum, zero general photos",
       multiEquipment:
         "passed: two devices in one selection, invalid middle image rejected without blocking the next",
       barcode: "passed: tracker IMEI",
