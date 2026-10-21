@@ -6,6 +6,7 @@ import {
 } from "@zen/ui/lib/password-policy";
 import AppLinks from "@zen/ui/components/AppLinks";
 import { NoticeBell, FinancePanel } from "./components/Ecosystem";
+import OperationalServices from "./components/OperationalServices";
 import { useEffect, useRef, useState } from "react";
 import {
   Activity,
@@ -29,6 +30,7 @@ import {
   Download,
   Heart,
   KeyRound,
+  ShieldCheck,
 } from "lucide-react";
 import { useSession } from "@zen/ui/lib/session";
 import { api, errorMessage, saveToken } from "@zen/ui/lib/api";
@@ -61,6 +63,7 @@ const groups = [
       ["orders", "Ordens de serviço", ClipboardList],
       ["agenda", "Agenda", CalendarDays],
       ["batches", "Validações", CheckCheck],
+      ["blocking", "Bloqueios", ShieldCheck],
       ["technicians", "Equipe técnica", Wrench],
     ],
   },
@@ -374,6 +377,8 @@ export default function App() {
               <UsersPage {...props} />
             ) : tab === "batches" ? (
               <Batches {...props} />
+            ) : tab === "blocking" ? (
+              <OperationalServices {...props} />
             ) : tab === "finance" ? (
               <FinancePanel />
             ) : tab === "history" ? (

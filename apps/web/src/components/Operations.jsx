@@ -413,6 +413,25 @@ function BatchReview({ id, onClose, onSaved }) {
     reload().catch((e) => setError(errorMessage(e)));
     return () => decoder.current?.close();
   }, [id]);
+  useEffect(() => {
+    if (batch?.state !== "approved_sync") return;
+    let active = true;
+    const timer = setInterval(async () => {
+      try {
+        const { data } = await api.get("/batches/" + id);
+        if (active) {
+          setBatch(data);
+          if (data.state !== "approved_sync") onSaved();
+        }
+      } catch (e) {
+        if (active) setError(errorMessage(e));
+      }
+    }, 2000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [id, batch?.state]);
   const approved = ["approved", "completed"].includes(batch?.state);
   async function scan() {
     setBusy(true);

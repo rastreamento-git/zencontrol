@@ -1309,6 +1309,8 @@ export const actionLabel = (k) =>
     approved_for_stock: "Instalação aprovada",
     stock_installation_confirmed: "Instalação confirmada no estoque",
     additional_order_created: "Equipamento adicional incluído",
+    operational_service_created: "Bloqueio operacional registrado",
+    operational_service_updated: "Bloqueio operacional atualizado",
   })[k] || k.replaceAll("_", " ");
 const auditFieldLabel = (key) =>
   ({

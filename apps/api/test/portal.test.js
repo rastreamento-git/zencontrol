@@ -140,8 +140,6 @@ async function approve(b) {
     {
       version: b.version,
       order_version: b.current_order.version,
-      serials: b.imeis,
-      reason: "Fotos e códigos conferidos na central.",
       checklist_reviewed: true,
     },
     operator,
@@ -2210,4 +2208,253 @@ test("scheduling keeps three main services, unproductive visit uses its own tari
       (await req("/api/orders", "POST", { ...body, document_data })).status,
       400,
     );
+});
+
+test("central confirmation uses saved devices without a second IMEI reading or mandatory written reason", async () => {
+  const codes = ["REVIEW-SAVED-01"];
+  await serials(codes);
+  const item = await ok(
+    "/api/orders",
+    "POST",
+    {
+      vehicle: "REV1A23",
+      customer_name: "Cliente conferência",
+      service: "Instalação",
+      technician_id: tida,
+      document_data: { equipment_counts: { tracker: 1, tag: 0 } },
+    },
+    admin,
+    201,
+  );
+  const b = await plannedSubmission(
+    item,
+    codes,
+    "Equipamento registrado e instalação finalizada.",
+  );
+  const body = {
+    version: b.version,
+    order_version: b.current_order.version,
+    checklist_reviewed: true,
+  };
+  for (const serials of [[], ["REPLACEMENT-NOT-IN-SUBMISSION"]]) {
+    const denied = await req(
+      "/api/batches/" + b.id + "/approve",
+      "POST",
+      { ...body, serials },
+      operator,
+    );
+    assert.equal(denied.status, 400);
+    assert.match(denied.data.error, /já foram registrados/);
+  }
+  assert.equal(
+    (
+      await req(
+        "/api/batches/" + b.id + "/approve",
+        "POST",
+        { ...body, checklist_reviewed: false },
+        operator,
+      )
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await req(
+        "/api/batches/" + b.id + "/approve",
+        "POST",
+        { ...body, version: b.version - 1 },
+        operator,
+      )
+    ).status,
+    409,
+  );
+  const result = await ok(
+    "/api/batches/" + b.id + "/approve",
+    "POST",
+    body,
+    operator,
+  );
+  assert.equal(result.status, "AGUARDANDO ESTOQUE");
+  const completed = await confirmPlanned(item.id);
+  assert.equal(completed.status, "CONCLUÍDO");
+  assert.deepEqual(completed.stock_receipt.serials, codes);
+  const review = await ok("/api/batches/" + b.id);
+  assert.deepEqual(review.imeis, codes);
+  assert.equal(review.reason, "Fotos e checklist conferidos na central.");
+  assert.equal(review.reviewed_by, "Central");
+  assert.equal(
+    (await req("/api/batches/" + b.id + "/approve", "POST", body, operator))
+      .status,
+    409,
+  );
+  const events = (
+    await spool.query(
+      "SELECT count(*)::int n FROM eventos_seriais WHERE codigo_serial=$1 AND status_novo='INSTALADO'",
+      codes,
+    )
+  ).rows[0].n;
+  assert.equal(events, 1);
+});
+
+test("Rede Veículo blocking is a staff operational record without technical orders, remuneration, stock jobs or Field access", async () => {
+  const item = await order("Manutenção");
+  const original = await ok("/api/orders/" + item.id);
+  async function counts() {
+    return (
+      await pool.query(
+        "SELECT (SELECT count(*)::int FROM zc_orders) orders,(SELECT count(*)::int FROM zc_batches) batches,(SELECT count(*)::int FROM zc_financial_ledger) ledger,(SELECT count(*)::int FROM zc_jobs) jobs",
+      )
+    ).rows[0];
+  }
+  const before = await counts();
+  const fieldBefore = await ok(
+    "/api/technician/orders?view=open",
+    "GET",
+    undefined,
+    ta,
+  );
+  const stockBefore = (
+    await spool.query("SELECT count(*)::int n FROM movimentacoes")
+  ).rows[0].n;
+  const payload = {
+    order_id: item.id,
+    vehicle: item.vehicle,
+    customer_name: "",
+    notes: "Acionar a operação da Rede Veículo.",
+  };
+  assert.equal(
+    (
+      await req(
+        "/api/operational-services",
+        "POST",
+        { ...payload, technician_id: tida },
+        operator,
+      )
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await req(
+        "/api/operational-services",
+        "POST",
+        { ...payload, vehicle: "WRG1A23" },
+        operator,
+      )
+    ).status,
+    400,
+  );
+  const row = await ok(
+    "/api/operational-services",
+    "POST",
+    payload,
+    operator,
+    201,
+  );
+  assert.equal(row.kind, "blocking");
+  assert.equal(row.provider, "Rede Veículo");
+  assert.equal(row.customer_name, item.customer_name);
+  assert.equal(row.status, "registered");
+  assert.equal(row.created_by, "Central");
+  assert.equal(row.completed_at, null);
+  assert.equal(row.technician_id, undefined);
+  for (const [route, method, body] of [
+    ["/api/operational-services", "GET"],
+    ["/api/operational-services/" + row.id, "GET"],
+    ["/api/operational-services", "POST", payload],
+    [
+      "/api/operational-services/" + row.id,
+      "PATCH",
+      { version: row.version, status: "completed" },
+    ],
+  ])
+    assert.equal((await req(route, method, body, ta)).status, 403);
+  assert.equal(
+    (
+      await req(
+        "/api/operational-services/" + row.id,
+        "PATCH",
+        { version: row.version, status: "unknown" },
+        operator,
+      )
+    ).status,
+    400,
+  );
+  const started = await ok(
+    "/api/operational-services/" + row.id,
+    "PATCH",
+    {
+      version: row.version,
+      status: "in_progress",
+      provider_reference: "RV-TEST-01",
+    },
+    operator,
+  );
+  assert.equal(
+    (
+      await req(
+        "/api/operational-services/" + row.id,
+        "PATCH",
+        { version: row.version, status: "completed" },
+        operator,
+      )
+    ).status,
+    409,
+  );
+  const completed = await ok(
+    "/api/operational-services/" + row.id,
+    "PATCH",
+    {
+      version: started.version,
+      status: "completed",
+      notes: "Conclusão informada pela Rede Veículo.",
+    },
+    admin,
+  );
+  assert.ok(completed.completed_at);
+  assert.equal(
+    (
+      await req(
+        "/api/operational-services/" + row.id,
+        "PATCH",
+        { version: completed.version, status: "registered" },
+        operator,
+      )
+    ).status,
+    409,
+  );
+  const detail = await ok(
+    "/api/operational-services/" + row.id,
+    "GET",
+    undefined,
+    operator,
+  );
+  assert.equal(detail.history.length, 3);
+  assert.equal(detail.history[0].detail.before.status, "in_progress");
+  assert.equal(detail.history[0].detail.after.status, "completed");
+  assert.equal(detail.history[2].actor, "Central");
+  const filtered = await ok(
+    "/api/operational-services?q=RV-TEST-01&status=completed",
+  );
+  assert.deepEqual(
+    filtered.items.map((r) => r.id),
+    [row.id],
+  );
+  await ok(
+    "/api/operational-services",
+    "POST",
+    { vehicle: "AVL1A23", customer_name: "Cliente avulso" },
+    operator,
+    201,
+  );
+  assert.deepEqual(await counts(), before);
+  assert.deepEqual(await ok("/api/orders/" + item.id), original);
+  assert.deepEqual(
+    await ok("/api/technician/orders?view=open", "GET", undefined, ta),
+    fieldBefore,
+  );
+  assert.equal(
+    (await spool.query("SELECT count(*)::int n FROM movimentacoes")).rows[0].n,
+    stockBefore,
+  );
 });

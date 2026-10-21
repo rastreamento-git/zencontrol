@@ -486,14 +486,22 @@ async function approve(pool, cfg, id, input, actor) {
         400,
         "Confira se o checklist anexado está preenchido e assinado antes de aprovar.",
       );
-    const reason = d.string(input.reason, "Conferência", 1000, true);
-    if (reason.length < 5) fail(400, "Descreva a conferência.");
-    const codes =
-      input.serials !== undefined
-        ? input.serials.length
-          ? serials(input.serials).sort()
-          : []
-        : [...b.imeis].sort();
+    const reason =
+      d.string(input.reason ?? "", "Conferência", 1000) ||
+      "Fotos e checklist conferidos na central.";
+    // Confirmation uses the immutable technical submission, never a second scan.
+    const codes = b.imeis.length ? serials(b.imeis).sort() : [];
+    if (input.serials !== undefined) {
+      const received =
+        Array.isArray(input.serials) && input.serials.length === 0
+          ? []
+          : serials(input.serials).sort();
+      if (JSON.stringify(received) !== JSON.stringify(codes))
+        fail(
+          400,
+          "Os equipamentos já foram registrados pelo técnico. Solicite correção do envio para alterar os códigos.",
+        );
+    }
     const r = await rule(db, order.service, order);
     await verifyEvidence(db, b, r, codes, order);
     const tech = await d.one(

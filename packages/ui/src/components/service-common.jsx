@@ -195,10 +195,13 @@ export function Field({
       {type === "textarea" ? (
         <textarea
           name={name}
+          aria-label={label}
           value={value ?? ""}
           onChange={onChange}
           rows={rows}
-          maxLength={6000}
+          maxLength={maxLength ?? 6000}
+          disabled={disabled}
+          required={required}
         />
       ) : options ? (
         <select

@@ -294,6 +294,9 @@ async function backupFixture() {
   await pool.query("UPDATE zc_orders SET document_data=$1::jsonb", [
     JSON.stringify(require("./fixtures/order-document.cjs").document_data),
   ]);
+  await pool.query(
+    "INSERT INTO zc_operational_services(id,order_id,vehicle,created_by,updated_by,provider_reference) SELECT 'backup-blocking',id,vehicle,'Operação','Operação','RV-BACKUP-01' FROM zc_orders LIMIT 1",
+  );
   const backup = await prepareBackup(pool, cfg),
     target = path.join(root, "backup-" + Date.now());
   await fs.mkdir(target);
@@ -305,6 +308,10 @@ test("backup operacional inclui integridade, exclui contas e restaura de forma a
   const { target, backup } = await backupFixture();
   const snapshot = JSON.parse(backup.database);
   assert.equal(snapshot.data.usuarios, undefined);
+  assert.equal(
+    snapshot.data.zc_operational_services[0].provider_reference,
+    "RV-BACKUP-01",
+  );
   assert.equal(backup.database.toString().includes("nao-importar"), false);
   await pool.query(
     "TRUNCATE " + tables.join(",") + " RESTART IDENTITY CASCADE",
@@ -318,6 +325,15 @@ test("backup operacional inclui integridade, exclui contas e restaura de forma a
   );
   const restored = await restoreBackup(pool, cfg, target, true);
   assert.equal(restored.dry_run, false);
+  assert.equal(
+    (
+      await d.one(
+        pool,
+        "SELECT provider_reference FROM zc_operational_services",
+      )
+    ).provider_reference,
+    "RV-BACKUP-01",
+  );
   assert.deepEqual(
     (await d.one(pool, "SELECT document_data FROM zc_orders")).document_data,
     require("./fixtures/order-document.cjs").document_data,

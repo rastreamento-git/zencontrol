@@ -96,6 +96,7 @@ function createApp(pool, env = process.env) {
   };
   app.locals.config = cfg;
   require("./field-access").configureFieldAccess(app, pool);
+  require("./operational-routes").configureOperational(app, pool, auth);
   require("./ecosystem-routes").configureEcosystem(app, pool, cfg, auth);
   configurePortal(app, pool, cfg, auth);
   const admin = auth.requireAdmin;

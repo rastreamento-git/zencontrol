@@ -309,18 +309,63 @@ async function main() {
     "123456789012345",
     "TAG-HOMO-001",
   ]);
-  const review = await api("/batches/" + batch.id, undefined, admin);
-  await api(
-    "/batches/" + batch.id + "/approve",
-    {
-      version: review.version,
-      order_version: review.current_order.version,
-      serials: review.imeis,
-      checklist_reviewed: true,
-      reason: "Etiquetas, veículo e checklist conferidos no navegador.",
-    },
-    admin,
+  const central = await browser.newPage({
+    viewport: { width: 1280, height: 900 },
+  });
+  page = central;
+  central.setDefaultTimeout(20000);
+  central.on("pageerror", (e) => errors.push(e.message));
+  await central.goto("http://127.0.0.1:4320");
+  await central.getByLabel("Usuário", { exact: true }).fill("admin");
+  await central.getByLabel("Senha de acesso").fill(credentials.admin_password);
+  await central.getByRole("button", { name: "Entrar", exact: true }).click();
+  await central
+    .getByRole("button", { name: "Abrir ZenControl", exact: true })
+    .click();
+  await central
+    .getByRole("button", { name: "Validações", exact: true })
+    .click();
+  await central
+    .locator("tr")
+    .filter({ has: central.getByText(order.id, { exact: true }) })
+    .getByRole("button", { name: "Conferir", exact: true })
+    .click();
+  const reviewDialog = central.getByRole("dialog", {
+    name: "Conferir atendimento",
+    exact: true,
+  });
+  await reviewDialog
+    .getByRole("heading", { name: "Equipamentos registrados pelo técnico" })
+    .waitFor();
+  assert.equal(await reviewDialog.locator("input,select").count(), 0);
+  assert.equal(
+    await reviewDialog
+      .getByLabel("IMEIs e seriais registrados")
+      .locator("code")
+      .count(),
+    2,
   );
+  await reviewDialog.locator("img").nth(1).waitFor();
+  assert.equal(await reviewDialog.locator("img").count(), 2);
+  await reviewDialog
+    .getByText("Baixar checklist assinado (PDF)", { exact: true })
+    .waitFor();
+  const approval = central.waitForResponse(
+    (r) => r.url().endsWith("/approve") && r.request().method() === "POST",
+  );
+  await reviewDialog.screenshot({
+    path: path.join(directory, "central-review.png"),
+  });
+  await reviewDialog
+    .getByRole("button", { name: "Confirmar e concluir OS", exact: true })
+    .click();
+  const approvalResponse = await approval;
+  assert.equal(approvalResponse.status(), 200, await approvalResponse.text());
+  assert.equal(
+    Object.hasOwn(approvalResponse.request().postDataJSON(), "serials"),
+    false,
+  );
+  assert.equal(approvalResponse.request().postDataJSON().reason, "");
   for (let i = 0; i < 60; i++) {
     const complete = await api("/orders/" + order.id, undefined, admin);
     if (complete.status === "CONCLUÍDO") {
@@ -331,6 +376,105 @@ async function main() {
     if (i === 59) throw Error("Confirmação do estoque não finalizou.");
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
+  await reviewDialog.getByText("Concluído", { exact: true }).waitFor();
+  await reviewDialog
+    .getByRole("button", { name: "Fechar diálogo", exact: true })
+    .click();
+  const completedOrder = await api("/orders/" + order.id, undefined, admin);
+  const fieldBeforeBlocking = await api(
+    "/technician/orders?view=open",
+    undefined,
+    token,
+  );
+  await central.getByRole("button", { name: "Bloqueios", exact: true }).click();
+  await central
+    .getByRole("button", { name: "Registrar bloqueio", exact: true })
+    .click();
+  const createBlocking = central.getByRole("dialog", {
+    name: "Registrar bloqueio operacional",
+    exact: true,
+  });
+  await createBlocking
+    .getByLabel("Placa ou chassi", { exact: true })
+    .fill(order.vehicle);
+  await createBlocking
+    .getByLabel("OS de referência (opcional)", { exact: true })
+    .fill(order.id);
+  await createBlocking
+    .getByLabel("Protocolo da Rede Veículo (opcional)", { exact: true })
+    .fill("RV-UI-01");
+  await createBlocking
+    .getByLabel("Observações operacionais", { exact: true })
+    .fill("Solicitação registrada pela central com a operação.");
+  assert.equal(
+    await createBlocking.getByLabel("Técnico", { exact: true }).count(),
+    0,
+  );
+  await createBlocking
+    .getByRole("button", { name: "Registrar bloqueio", exact: true })
+    .click();
+  const blockingRow = central.locator("tr").filter({ hasText: "RV-UI-01" });
+  await blockingRow.getByText("Registrado", { exact: true }).waitFor();
+  await blockingRow
+    .getByRole("button", { name: "Ver bloqueio", exact: true })
+    .click();
+  const editBlocking = central.getByRole("dialog", {
+    name: "Bloqueio · " + order.vehicle,
+    exact: true,
+  });
+  await editBlocking
+    .getByLabel("Situação do bloqueio", { exact: true })
+    .selectOption("completed");
+  await editBlocking
+    .getByLabel("Observações operacionais", { exact: true })
+    .fill("Conclusão informada pela Rede Veículo.");
+  await editBlocking
+    .getByRole("button", { name: "Salvar", exact: true })
+    .click();
+  await blockingRow.getByText("Concluído", { exact: true }).waitFor();
+  assert.deepEqual(
+    await api("/orders/" + order.id, undefined, admin),
+    completedOrder,
+  );
+  assert.deepEqual(
+    await api("/technician/orders?view=open", undefined, token),
+    fieldBeforeBlocking,
+  );
+  await central
+    .getByLabel("Filtrar situação", { exact: true })
+    .selectOption("completed");
+  await blockingRow
+    .getByRole("button", { name: "Ver bloqueio", exact: true })
+    .click();
+  await central.getByText("Histórico do bloqueio", { exact: true }).click();
+  await central
+    .locator(".operational-history")
+    .getByText("Conclusão informada pela Rede Veículo.", { exact: true })
+    .waitFor();
+  await central
+    .getByRole("button", { name: "Fechar diálogo", exact: true })
+    .click();
+  for (const theme of ["dark", "light"]) {
+    await central.getByLabel("Aparência", { exact: true }).selectOption(theme);
+    await central.screenshot({
+      path: path.join(directory, "blocking-" + theme + ".png"),
+    });
+  }
+  await central.setViewportSize({ width: 390, height: 844 });
+  await central
+    .getByRole("button", { name: "Registrar bloqueio", exact: true })
+    .click();
+  assert.ok(
+    await central.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  );
+  await central
+    .getByRole("dialog")
+    .screenshot({ path: path.join(directory, "blocking-mobile.png") });
+  await central
+    .getByRole("button", { name: "Fechar diálogo", exact: true })
+    .click();
   assert.deepEqual(errors, []);
   console.log(
     JSON.stringify({
@@ -341,6 +485,11 @@ async function main() {
       qr: "passed: TAG serial",
       warnings: "passed: unreadable and wrong technician load; neither saved",
       submission: "passed: checklist and both identified devices",
+      centralReview:
+        "passed: readonly devices, no scanner, no typed reason, one confirmation closes the root and extra OS",
+      operationalBlocking:
+        "passed: registration, provider protocol, completion, friendly-name history, no technician task or OS mutation",
+      themes: "light and dark; 390px blocking form without overflow",
       mobile: "390px without horizontal overflow",
       pageErrors: errors,
     }),

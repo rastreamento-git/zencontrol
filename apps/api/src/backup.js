@@ -29,6 +29,7 @@ const tables = [
   "zc_adjustments",
   "zc_payments",
   "zc_notifications",
+  "zc_operational_services",
 ];
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 async function prepareBackup(pool, cfg) {
@@ -155,6 +156,9 @@ async function restoreBackup(pool, cfg, source, apply = false) {
     "zc_payments",
     "zc_notifications",
   ];
+  // Backups from before operational services remain restorable.
+  if (!Object.hasOwn(snapshot.data, "zc_operational_services"))
+    snapshot.data.zc_operational_services = [];
   const legacy = tables.filter((t) => !additions.includes(t));
   if (Object.keys(snapshot.data).sort().join() === legacy.sort().join())
     for (const table of additions) snapshot.data[table] = [];
