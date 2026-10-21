@@ -64,6 +64,7 @@ function createApp(pool, env = process.env) {
     }),
   );
   app.use("/api/technician/batches", express.json({ limit: "12mb" }));
+  app.use("/api/technician/requests", express.json({ limit: "6mb" }));
   app.use("/api/evidence", express.json({ limit: "24mb" }));
   app.use("/api/finance-v2/closings", express.json({ limit: "6mb" }));
   app.use(express.json({ limit: "512kb" }));

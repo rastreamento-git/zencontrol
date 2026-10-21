@@ -48,7 +48,13 @@ test("existing additional OS gain a parent link without changing completed servi
     const after = (await db.pool.query("SELECT * FROM zc_orders ORDER BY id"))
       .rows;
     for (const [i, row] of after.entries()) {
-      const { parent_order_id, additional_equipment, ...original } = row;
+      const {
+        parent_order_id,
+        additional_equipment,
+        travel_fee_cents,
+        ...original
+      } = row;
+      assert.equal(travel_fee_cents, 0);
       assert.deepEqual(original, before[i]);
     }
     assert.equal(after[1].parent_order_id, "OS-LEGACY");

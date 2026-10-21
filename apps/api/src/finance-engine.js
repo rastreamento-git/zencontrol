@@ -109,6 +109,12 @@ async function capture(db, order, executedOn) {
     "SELECT type,description,amount_cents FROM zc_order_extras WHERE order_id=$1 ORDER BY id",
     [order.id],
   );
+  if (!order.parent_order_id && order.travel_fee_cents)
+    extras.push({
+      type: "travel",
+      description: "Taxa de deslocamento (operacional)",
+      amount_cents: order.travel_fee_cents,
+    });
   const total = base + extras.reduce((s, x) => s + x.amount_cents, 0);
   if (!Number.isSafeInteger(total) || total > 1e9)
     fail(400, "Composição acima do limite por serviço.");

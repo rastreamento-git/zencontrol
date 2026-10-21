@@ -1826,6 +1826,7 @@ test("one attendance and PDF accept 2 trackers and 2 TAGs, atomically consume st
     {
       vehicle: "QTY1A23",
       customer_name: "Cliente quantidades",
+      travel_fee_cents: 2500,
       service: "Instalação",
       contact: "11987654321",
       technician_id: tida,
@@ -1930,8 +1931,21 @@ test("one attendance and PDF accept 2 trackers and 2 TAGs, atomically consume st
     )
   ).rows;
   assert.equal(ledger.length, 4);
+  assert.equal(
+    ledger.flatMap((row) => row.extras).filter((x) => x.type === "travel")
+      .length,
+    1,
+  );
+  assert.equal(
+    ledger.reduce((sum, row) => sum + row.total_cents, 0),
+    38500,
+  );
   assert.ok(
-    ledger.every((row) => row.state === "approved" && row.total_cents === 9000),
+    ledger.every(
+      (row) =>
+        row.state === "approved" &&
+        row.total_cents === (row.order_id === item.id ? 11500 : 9000),
+    ),
   );
   const receipts = (
     await spool.query(

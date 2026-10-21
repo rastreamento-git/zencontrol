@@ -188,7 +188,7 @@ function configureEcosystem(app, pool, cfg, auth) {
   app.post("/api/technician/requests", async (req, res) => {
     const t = await mine(req),
       b = req.body;
-    if (!["rate", "dispute", "stock"].includes(b.kind))
+    if (!["rate", "dispute", "stock", "expense"].includes(b.kind))
       fail(400, "Tipo de solicitação inválido.");
     const reason = d.string(b.reason, "Justificativa", 2000, true),
       key = d.string(b.request_key, "Chave", 160, true);
@@ -216,6 +216,29 @@ function configureEcosystem(app, pool, cfg, auth) {
       )
         fail(400, "Informe o ajuste desejado em centavos.");
       proposed = { amount_cents: amount };
+    }
+    if (b.kind === "expense") {
+      const { order } = await portal.ownOrder(pool, req.user.id, b.order_id);
+      if (order.parent_order_id)
+        fail(400, "Declare a despesa na OS principal do atendimento.");
+      if (
+        order.tracker_waiver_authorized ||
+        ["CANCELADO"].includes(order.status)
+      )
+        fail(409, "Esta OS não admite despesas para remuneração do técnico.");
+      const amount = proposed.amount_cents;
+      if (!Number.isSafeInteger(amount) || amount <= 0 || amount > 100000000)
+        fail(400, "Informe o valor positivo da despesa em centavos.");
+      if (reason.length < 5)
+        fail(400, "Descreva o gasto realizado (mínimo de 5 caracteres).");
+      oid = order.id;
+      proposed = {
+        amount_cents: amount,
+        receipt: await require("./expense-receipt").expenseReceipt(
+          cfg,
+          b.receipt,
+        ),
+      };
     }
     if (b.kind === "stock") {
       if (
@@ -295,6 +318,25 @@ function configureEcosystem(app, pool, cfg, auth) {
     });
     res.status(201).json({ id });
   });
+  app.get("/api/requests/:id/receipt", async (req, res) => {
+    const r = await d.one(
+      pool,
+      "SELECT * FROM zc_requests WHERE id=$1 AND kind='expense'",
+      [req.params.id],
+    );
+    const scoped = req.user.papel === "tecnico" || inField();
+    if (!r || (scoped && r.technician_id !== (await mine(req)).id))
+      fail(404, "Comprovante indisponível.");
+    if (!scoped && !["admin", "operador"].includes(req.user.papel))
+      fail(403, "Acesso restrito.");
+    const receipt = r.proposed.receipt;
+    if (!receipt || !/^[a-f0-9]{64}\.jpg$/.test(receipt.path))
+      fail(404, "Comprovante indisponível.");
+    res
+      .set("Cache-Control", "no-store")
+      .type("image/jpeg")
+      .send(await createMediaStore(cfg).read(receipt.path));
+  });
   app.get("/api/requests", admin, async (req, res) =>
     res.json({
       items: await d.rows(
@@ -343,7 +385,7 @@ function configureEcosystem(app, pool, cfg, auth) {
         if (action === "approve") {
           if (r.kind === "rate")
             await f.addRate(db, r.technician_id, proposal, actor(req));
-          if (r.kind === "dispute") {
+          if (["dispute", "expense"].includes(r.kind)) {
             const l = await d.one(
               db,
               "SELECT * FROM zc_financial_ledger WHERE order_id=$1 AND technician_id=$2",
@@ -351,6 +393,13 @@ function configureEcosystem(app, pool, cfg, auth) {
             );
             if (!l) fail(409, "OS ainda sem composição financeira.");
             const order = await require("./orders").get(db, r.order_id);
+            if (order.status === "CANCELADO")
+              fail(409, "A OS foi cancelada e não permite novos ajustes.");
+            if (l.technician_id !== r.technician_id)
+              fail(
+                409,
+                "O técnico não corresponde à composição financeira da OS.",
+              );
             if (order.tracker_waiver_authorized)
               fail(
                 409,
@@ -362,7 +411,12 @@ function configureEcosystem(app, pool, cfg, auth) {
                 randomUUID(),
                 r.order_id,
                 proposal.amount_cents,
-                reason,
+                r.kind === "expense"
+                  ? "Reembolso de despesa: " +
+                    r.reason +
+                    ". Conferência: " +
+                    reason
+                  : reason,
                 actor(req),
                 r.id,
               ],

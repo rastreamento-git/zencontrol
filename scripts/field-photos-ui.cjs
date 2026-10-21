@@ -73,6 +73,7 @@ async function main() {
     {
       version: assigned.version,
       document_data: { equipment_counts: { tracker: 1, tag: 1 } },
+      travel_fee_cents: 3200,
     },
     admin,
     "PATCH",
@@ -475,6 +476,147 @@ async function main() {
   await central
     .getByRole("button", { name: "Fechar diálogo", exact: true })
     .click();
+  const fieldPage = context.pages()[0];
+  await fieldPage
+    .getByText("Taxa de deslocamento definida pela central:", { exact: false })
+    .waitFor();
+  await fieldPage
+    .getByRole("button", { name: "Declarar despesa extra", exact: true })
+    .click();
+  const expenseForm = fieldPage.locator("form").filter({
+    has: fieldPage.getByRole("heading", {
+      name: "Declarar despesa extra",
+      exact: true,
+    }),
+  });
+  assert.equal(
+    await expenseForm
+      .getByLabel("Número completo da OS", { exact: true })
+      .inputValue(),
+    order.id,
+  );
+  assert.equal(
+    await expenseForm
+      .getByLabel("Número completo da OS", { exact: true })
+      .getAttribute("readonly"),
+    "",
+  );
+  assert.equal(
+    await expenseForm
+      .getByRole("button", { name: "Enviar para aprovação", exact: true })
+      .isDisabled(),
+    true,
+  );
+  const description = "Estacionamento fictício do atendimento (homologação).";
+  await expenseForm
+    .getByLabel("Valor da despesa (R$)", { exact: true })
+    .fill("23.50");
+  await expenseForm
+    .getByLabel("Descrição do gasto (obrigatória)", { exact: true })
+    .fill(description);
+  await expenseForm
+    .getByLabel("Foto do comprovante (obrigatória)", { exact: true })
+    .setInputFiles(path.join(directory, "fixtures/foto-vistoria-exemplo.jpg"));
+  await expenseForm
+    .getByAltText("Prévia do comprovante", { exact: true })
+    .waitFor();
+  const declaration = fieldPage.waitForResponse(
+    (r) =>
+      r.url().endsWith("/technician/requests") &&
+      r.request().method() === "POST",
+  );
+  await expenseForm
+    .getByRole("button", { name: "Enviar para aprovação", exact: true })
+    .click();
+  const declarationResponse = await declaration;
+  assert.equal(
+    declarationResponse.status(),
+    201,
+    await declarationResponse.text(),
+  );
+  const expenseId = (await declarationResponse.json()).id;
+  await fieldPage
+    .getByRole("button", { name: "Meu financeiro", exact: true })
+    .click();
+  const ownExpense = fieldPage
+    .locator("article.eco-card")
+    .filter({ has: fieldPage.getByText(description, { exact: true }) });
+  await ownExpense.getByText("Aguardando decisão", { exact: true }).waitFor();
+  await ownExpense
+    .getByRole("button", { name: "Ver comprovante", exact: true })
+    .click();
+  await ownExpense
+    .getByAltText("Comprovante da despesa", { exact: true })
+    .waitFor();
+  assert.ok(
+    await fieldPage.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  );
+  await ownExpense.screenshot({
+    path: path.join(directory, "expense-mobile.png"),
+  });
+  await central.setViewportSize({ width: 1280, height: 900 });
+  await central
+    .getByRole("button", { name: "Financeiro", exact: true })
+    .click();
+  const centralExpense = central
+    .locator("article.eco-card")
+    .filter({ has: central.getByText(description, { exact: true }) });
+  await centralExpense
+    .getByRole("button", { name: "Ver comprovante", exact: true })
+    .click();
+  await centralExpense
+    .getByAltText("Comprovante da despesa", { exact: true })
+    .waitFor();
+  await centralExpense
+    .getByRole("button", { name: "Responder solicitação", exact: true })
+    .click();
+  await central
+    .getByLabel("Resposta e justificativa", { exact: true })
+    .fill("Descrição, valor e foto do comprovante conferidos pela central.");
+  const approvedExpense = central.waitForResponse((r) =>
+    r.url().endsWith("/requests/" + expenseId + "/decision"),
+  );
+  await central
+    .getByRole("button", { name: "Registrar decisão", exact: true })
+    .click();
+  assert.equal((await approvedExpense).status(), 200);
+  await centralExpense.getByText("Aprovado", { exact: true }).waitFor();
+  const finance = await api("/technician/finance", undefined, token);
+  const rootLedger = finance.ledger.find((row) => row.order_id === order.id);
+  assert.equal(
+    rootLedger.extras.find((x) => x.type === "travel").amount_cents,
+    3200,
+  );
+  assert.equal(rootLedger.adjustment_cents, 2350);
+  const childLedger = finance.ledger.find(
+    (row) => row.order_id === planned.additional_orders[0].id,
+  );
+  assert.equal(childLedger.extras.filter((x) => x.type === "travel").length, 0);
+  await fieldPage.reload();
+  await fieldPage
+    .getByRole("button", { name: "Meu financeiro", exact: true })
+    .click();
+  const totalWithExpense = (
+    (rootLedger.total_cents + 2350) /
+    100
+  ).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  const totalCell = fieldPage
+    .locator("tr")
+    .filter({ hasText: order.id })
+    .first()
+    .locator("td")
+    .nth(4);
+  await totalCell.waitFor();
+  assert.ok(
+    (await totalCell.innerText())
+      .replace(/\s/g, "")
+      .includes(totalWithExpense.replace(/\s/g, "")),
+  );
+  await centralExpense.screenshot({
+    path: path.join(directory, "expense-approved.png"),
+  });
   assert.deepEqual(errors, []);
   console.log(
     JSON.stringify({
@@ -491,6 +633,8 @@ async function main() {
         "passed: registration, provider protocol, completion, friendly-name history, no technician task or OS mutation",
       themes: "light and dark; 390px blocking form without overflow",
       mobile: "390px without horizontal overflow",
+      expenses:
+        "passed: readonly travel fee, declaration on the OS with photo and description, scoped receipt and central reimbursement approval",
       pageErrors: errors,
     }),
   );

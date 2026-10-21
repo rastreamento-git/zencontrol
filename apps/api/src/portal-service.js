@@ -106,6 +106,7 @@ const publicOrder = (order) =>
       "service_label",
       "location",
       "scheduled_at",
+      "travel_fee_cents",
       "notes",
       "status",
       "version",

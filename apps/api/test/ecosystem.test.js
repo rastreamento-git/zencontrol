@@ -699,6 +699,232 @@ test("zero-valued authorized closing ends without creating a fictitious money tr
     0,
   );
 });
+test("operational travel fee is frozen and expenses require photo, description, ownership and central approval before reimbursement", async () => {
+  const sharp = require("sharp");
+  const image =
+    "data:image/jpeg;base64," +
+    (
+      await sharp({
+        create: { width: 600, height: 300, channels: 3, background: "white" },
+      })
+        .jpeg()
+        .toBuffer()
+    ).toString("base64");
+  const item = await ok(
+    "/orders",
+    "POST",
+    {
+      vehicle: "DES1A23",
+      service: "Manutenção",
+      customer_name: "Cliente de despesas",
+      technician_id: tid,
+      travel_fee_cents: 4500,
+    },
+    admin,
+    201,
+  );
+  assert.equal(
+    (await ok("/technician/orders/" + item.id, "GET", null, tech)).order
+      .travel_fee_cents,
+    4500,
+  );
+  const expense = {
+    kind: "expense",
+    order_id: item.id,
+    reason: "Estacionamento durante atendimento",
+    proposed: { amount_cents: 2350 },
+    receipt: image,
+    request_key: randomUUID(),
+  };
+  for (const invalid of [
+    { ...expense, receipt: undefined },
+    { ...expense, reason: "" },
+    { ...expense, proposed: { amount_cents: -1 } },
+    { ...expense, receipt: "data:image/jpeg;base64,YmFk" },
+    { ...expense, receipt: "data:application/pdf;base64,YmFk" },
+  ])
+    assert.equal(
+      (await req("/technician/requests", "POST", invalid, tech)).status,
+      400,
+    );
+  assert.equal(
+    (await req("/technician/requests", "POST", expense, other)).status,
+    404,
+  );
+  const created = await ok("/technician/requests", "POST", expense, tech, 201);
+  assert.equal(
+    (await ok("/technician/requests", "POST", expense, tech, 201)).id,
+    created.id,
+  );
+  assert.equal(
+    (
+      await req(
+        "/technician/requests",
+        "POST",
+        { ...expense, proposed: { amount_cents: 3000 } },
+        tech,
+      )
+    ).status,
+    409,
+  );
+  assert.equal(
+    (
+      await req(
+        "/requests/" + created.id + "/decision",
+        "POST",
+        { version: 1, action: "approve", reason: "Conferido" },
+        tech,
+      )
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await req("/requests/" + created.id + "/decision", "POST", {
+        version: 1,
+        action: "approve",
+        reason: "Conferido",
+      })
+    ).status,
+    409,
+  );
+  for (const [token, expected] of [
+    [admin, 200],
+    [tech, 200],
+    [other, 404],
+  ]) {
+    const response = await fetch(
+      base + "/api/requests/" + created.id + "/receipt",
+      { headers: { Authorization: "Bearer " + token } },
+    );
+    assert.equal(response.status, expected);
+    if (expected === 200) {
+      assert.equal(response.headers.get("content-type"), "image/jpeg");
+      assert.ok((await response.arrayBuffer()).byteLength > 100);
+    }
+  }
+  const ledger = await transaction(pool, async (tx) => {
+    const row = await f.capture(tx, item, d.today());
+    await tx.query(
+      "UPDATE zc_orders SET executed_on=$2,status='CONCLUÍDO',completed_at=$2 WHERE id=$1",
+      [item.id, d.today()],
+    );
+    await f.makeEligible(tx, { ...item, executed_on: d.today() });
+    return row;
+  });
+  assert.equal(
+    ledger.extras.find((x) => x.type === "travel").amount_cents,
+    4500,
+  );
+  assert.equal(ledger.total_cents, ledger.base_cents + 4500);
+  assert.equal(
+    (
+      await req("/orders/" + item.id, "PATCH", {
+        version: item.version,
+        travel_fee_cents: 5000,
+      })
+    ).status,
+    409,
+  );
+  const preview = () => f.preview(pool, tid, d.today(), d.today());
+  assert.equal(
+    (await preview()).orders.find((o) => o.id === item.id).total_cents,
+    ledger.total_cents,
+  );
+  const decision = {
+    version: 1,
+    action: "approve",
+    reason: "Valor e comprovante conferidos pela operação",
+  };
+  await ok("/requests/" + created.id + "/decision", "POST", decision);
+  assert.equal(
+    (await req("/requests/" + created.id + "/decision", "POST", decision))
+      .status,
+    409,
+  );
+  assert.equal(
+    Number(
+      (
+        await d.one(
+          pool,
+          "SELECT count(*) n FROM zc_adjustments WHERE request_id=$1",
+          [created.id],
+        )
+      ).n,
+    ),
+    1,
+  );
+  const p = await preview(),
+    own = p.orders.find((o) => o.id === item.id);
+  assert.equal(own.total_cents, ledger.base_cents + 4500 + 2350);
+  assert.match(
+    own.adjustments[0].reason,
+    /Reembolso de despesa: Estacionamento/,
+  );
+  const closed = await transaction(pool, (tx) =>
+    f.createClosing(
+      tx,
+      {
+        technician_id: tid,
+        start: d.today(),
+        end: d.today(),
+        extraordinary: true,
+        reason: "Fechamento de despesas conferidas",
+        preview_hash: f.digest(p),
+        request_key: randomUUID(),
+      },
+      "Central",
+    ),
+  );
+  const frozen = JSON.stringify(closed.snapshot);
+  const late = await ok(
+    "/technician/requests",
+    "POST",
+    {
+      ...expense,
+      request_key: randomUUID(),
+      reason: "Pedágio no atendimento",
+      proposed: { amount_cents: 1000 },
+    },
+    tech,
+    201,
+  );
+  await ok("/requests/" + late.id + "/decision", "POST", decision);
+  assert.ok(
+    (await preview()).carry_adjustments.some(
+      (a) => a.request_id === late.id && a.amount_cents === 1000,
+    ),
+  );
+  assert.equal(
+    JSON.stringify(
+      (
+        await d.one(pool, "SELECT snapshot FROM zc_settlements WHERE id=$1", [
+          closed.id,
+        ])
+      ).snapshot,
+    ),
+    frozen,
+  );
+  const denied = await ok(
+    "/technician/requests",
+    "POST",
+    { ...expense, request_key: randomUUID(), proposed: { amount_cents: 888 } },
+    tech,
+    201,
+  );
+  await ok("/requests/" + denied.id + "/decision", "POST", {
+    version: 1,
+    action: "reject",
+    reason: "Gasto não autorizado",
+  });
+  assert.equal(
+    await d.one(pool, "SELECT 1 FROM zc_adjustments WHERE request_id=$1", [
+      denied.id,
+    ]),
+    null,
+  );
+});
+
 test("J: reset invalidates sessions, expired activation refuses access, deactivation is immediate", async () => {
   const a = await ok("/technicians/" + tid + "/activation", "POST", {});
   assert.equal(

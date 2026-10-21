@@ -88,6 +88,28 @@ async function guard(db, id, options = {}) {
 }
 async function validate(db, input, old = null) {
   const out = {};
+  if (input.travel_fee_cents !== undefined) {
+    const amount = input.travel_fee_cents;
+    if (!Number.isSafeInteger(amount) || amount < 0 || amount > 100000000)
+      fail(
+        400,
+        "Informe a taxa de deslocamento em centavos inteiros, sem valor negativo.",
+      );
+    if (old?.parent_order_id && amount)
+      fail(400, "O deslocamento é lançado apenas na OS principal.");
+    if (
+      old &&
+      amount !== old.travel_fee_cents &&
+      (await d.one(db, "SELECT 1 FROM zc_financial_ledger WHERE order_id=$1", [
+        old.id,
+      ]))
+    )
+      fail(
+        409,
+        "O deslocamento já integra a composição financeira. Solicite um ajuste auditado.",
+      );
+    out.travel_fee_cents = amount;
+  }
   for (const [key, max] of Object.entries(textFields))
     if (input[key] !== undefined) out[key] = d.string(input[key], key, max);
   if ((!old || old.workflow_mode === "controlled") && out.imei !== undefined) {
@@ -703,6 +725,12 @@ async function financial(db, tid, start, end) {
       "SELECT * FROM zc_order_extras WHERE order_id=$1",
       [o.id],
     );
+    if (!o.parent_order_id && o.travel_fee_cents)
+      extras.push({
+        type: "travel",
+        description: "Taxa de deslocamento (operacional)",
+        amount_cents: o.travel_fee_cents,
+      });
     const ledger = await d.one(
       db,
       "SELECT * FROM zc_financial_ledger WHERE order_id=$1",

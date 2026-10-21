@@ -65,6 +65,9 @@ async function prepareBackup(pool, cfg) {
       [
         ...snapshot.data.zc_evidence.flatMap((e) => [e.path, e.original_path]),
         ...snapshot.data.zc_payments.map((p) => p.receipt_path),
+        ...snapshot.data.zc_requests
+          .filter((r) => r.kind === "expense")
+          .map((r) => r.proposed.receipt?.path),
       ].filter(Boolean),
     )) {
       if (!photoName.test(name))
@@ -182,6 +185,12 @@ async function restoreBackup(pool, cfg, source, apply = false) {
   for (const p of snapshot.data.zc_payments)
     if (p.receipt_path && !media.has(p.receipt_path))
       fail(400, "Comprovante ausente no backup.");
+  for (const r of snapshot.data.zc_requests)
+    if (
+      r.kind === "expense" &&
+      (!r.proposed.receipt?.path || !media.has(r.proposed.receipt.path))
+    )
+      fail(400, "Comprovante de despesa ausente no backup.");
   const report = {
     dry_run: !apply,
     tables: {},

@@ -221,7 +221,70 @@ function PriceFields({ value, onChange }) {
     </div>
   );
 }
-export function Requests({ technical = false, kind, revision: external = 0 }) {
+function ExpensePhoto({ id }) {
+  const [open, setOpen] = useState(false),
+    [url, setUrl] = useState(""),
+    [error, setError] = useState("");
+  useEffect(() => {
+    if (!open) return;
+    setUrl("");
+    setError("");
+    let active = true,
+      object;
+    api
+      .get("/requests/" + id + "/receipt", { responseType: "blob" })
+      .then(({ data }) => {
+        object = URL.createObjectURL(data);
+        if (active) setUrl(object);
+        else URL.revokeObjectURL(object);
+      })
+      .catch((e) => active && setError(errorMessage(e)));
+    return () => {
+      active = false;
+      if (object) URL.revokeObjectURL(object);
+    };
+  }, [id, open]);
+  return (
+    <div>
+      <button
+        type="button"
+        className="secondary-button"
+        onClick={() => setOpen(!open)}
+      >
+        {open ? "Ocultar comprovante" : "Ver comprovante"}
+      </button>
+      {open && (
+        <>
+          <ErrorLine error={error} />
+          {url ? (
+            <a href={url} target="_blank" rel="noreferrer">
+              <img
+                src={url}
+                alt="Comprovante da despesa"
+                style={{
+                  display: "block",
+                  maxWidth: "100%",
+                  width: 320,
+                  maxHeight: 260,
+                  objectFit: "contain",
+                  marginTop: 12,
+                }}
+              />
+            </a>
+          ) : (
+            !error && <p role="status">Carregando comprovante…</p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+export function Requests({
+  technical = false,
+  kind,
+  revision: external = 0,
+  onDecided,
+}) {
   const [revision, setRevision] = useState(0),
     [error, setError] = useState(""),
     [selected, setSelected] = useState(null),
@@ -257,6 +320,7 @@ export function Requests({ technical = false, kind, revision: external = 0 }) {
       );
       setSelected(null);
       setRevision((x) => x + 1);
+      onDecided?.();
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -277,6 +341,7 @@ export function Requests({ technical = false, kind, revision: external = 0 }) {
                 {
                   rate: "Reajuste de tarifas",
                   dispute: "Contestação da OS",
+                  expense: "Despesa extra · reembolso",
                   stock: "Solicitação de estoque",
                 }[r.kind]
               }{" "}
@@ -319,8 +384,14 @@ export function Requests({ technical = false, kind, revision: external = 0 }) {
               {r.proposed.destination}
             </p>
           ) : (
-            <p>Ajuste solicitado: {brl(r.proposed.amount_cents)}</p>
+            <p>
+              {r.kind === "expense"
+                ? "Reembolso solicitado"
+                : "Ajuste solicitado"}
+              : {brl(r.proposed.amount_cents)}
+            </p>
           )}
+          {r.kind === "expense" && <ExpensePhoto id={r.id} />}
           <details>
             <summary>Histórico de decisões</summary>
             {r.history.map((h, i) => (
@@ -425,14 +496,19 @@ export function Requests({ technical = false, kind, revision: external = 0 }) {
     </section>
   );
 }
-function NewRequest({ kind, onSaved, initialPrices }) {
+export function NewRequest({
+  kind,
+  onSaved,
+  initialPrices,
+  initialOrderId = "",
+}) {
   const [open, setOpen] = useState(false),
     [reason, setReason] = useState(""),
     [effective, setEffective] = useState(today()),
     [prices, setPrices] = useState(
       initialPrices || Object.fromEntries(services.map((s) => [s, 0])),
     ),
-    [orderId, setOrderId] = useState(""),
+    [orderId, setOrderId] = useState(initialOrderId),
     [amount, setAmount] = useState(""),
     [stock, setStock] = useState({
       action: "replenishment",
@@ -444,16 +520,79 @@ function NewRequest({ kind, onSaved, initialPrices }) {
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const key = useRef(crypto.randomUUID());
+  const [receipt, setReceipt] = useState(""),
+    [reading, setReading] = useState(false),
+    [orders, setOrders] = useState([]);
+  const orderList = useId();
+  useEffect(() => {
+    if (kind !== "expense" || !open) return;
+    let active = true;
+    api
+      .get("/technician/orders?limit=100")
+      .then(
+        ({ data }) =>
+          active &&
+          setOrders(
+            data.items.filter(
+              (o) => !o.tracker_waiver_authorized && o.status !== "CANCELADO",
+            ),
+          ),
+      )
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [open, kind]);
+  async function readReceipt(file) {
+    setReceipt("");
+    setError("");
+    if (!file) return;
+    setReading(true);
+    let uri;
+    try {
+      if (
+        !["image/jpeg", "image/png", "image/webp"].includes(file.type) ||
+        file.size > 20 * 1024 * 1024
+      )
+        throw Error("Escolha uma foto JPEG, PNG ou WebP de até 20 MB.");
+      uri = URL.createObjectURL(file);
+      const image = new Image();
+      image.src = uri;
+      await image.decode();
+      const scale = Math.min(
+        1,
+        2000 / Math.max(image.naturalWidth, image.naturalHeight),
+      );
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+      canvas
+        .getContext("2d")
+        .drawImage(image, 0, 0, canvas.width, canvas.height);
+      const data = canvas.toDataURL("image/jpeg", 0.88);
+      if (data.length > 5500000)
+        throw Error("A foto está muito grande. Envie uma imagem menor.");
+      setReceipt(data);
+    } catch (e) {
+      setError(e.message || "Não foi possível abrir a foto do comprovante.");
+    } finally {
+      if (uri) URL.revokeObjectURL(uri);
+      setReading(false);
+    }
+  }
   async function submit(e) {
     e.preventDefault();
     setBusy(true);
     setError("");
     try {
+      if (kind === "expense" && !receipt)
+        throw Error("Anexe a foto do comprovante antes de enviar.");
       await api.post("/technician/requests", {
         kind,
         reason,
         order_id: orderId,
         request_key: key.current,
+        ...(kind === "expense" ? { receipt } : {}),
         proposed:
           kind === "rate"
             ? { prices, effective_on: effective }
@@ -463,6 +602,9 @@ function NewRequest({ kind, onSaved, initialPrices }) {
       });
       key.current = crypto.randomUUID();
       setOpen(false);
+      setReceipt("");
+      setReason("");
+      setAmount("");
       onSaved?.();
     } catch (e) {
       setError(errorMessage(e));
@@ -484,6 +626,7 @@ function NewRequest({ kind, onSaved, initialPrices }) {
           {
             rate: "Solicitar reajuste",
             dispute: "Contestar valor de uma OS",
+            expense: "Declarar despesa extra",
             stock: "Solicitar movimentação",
           }[kind]
         }
@@ -496,7 +639,9 @@ function NewRequest({ kind, onSaved, initialPrices }) {
           ? "Proposta de novas tarifas"
           : kind === "stock"
             ? "Solicitação de estoque"
-            : "Contestação de valor"}
+            : kind === "expense"
+              ? "Declarar despesa extra"
+              : "Contestação de valor"}
       </h3>
       <ErrorLine error={error} />
       {kind === "rate" ? (
@@ -563,12 +708,19 @@ function NewRequest({ kind, onSaved, initialPrices }) {
         <div className="eco-grid">
           <Field
             label="Número completo da OS"
+            list={kind === "expense" ? orderList : undefined}
+            readOnly={Boolean(initialOrderId)}
             required
             value={orderId}
             onChange={(e) => setOrderId(e.target.value)}
           />
           <Field
-            label="Ajuste desejado (R$, pode ser negativo)"
+            label={
+              kind === "expense"
+                ? "Valor da despesa (R$)"
+                : "Ajuste desejado (R$, pode ser negativo)"
+            }
+            min={kind === "expense" ? "0.01" : undefined}
             type="number"
             step="0.01"
             required
@@ -577,16 +729,57 @@ function NewRequest({ kind, onSaved, initialPrices }) {
           />
         </div>
       )}
-      <Field label="Justificativa">
+      {kind === "expense" && (
+        <>
+          <datalist id={orderList}>
+            {orders.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.vehicle} · {o.service}
+              </option>
+            ))}
+          </datalist>
+          <Field label="Foto do comprovante (obrigatória)">
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              disabled={busy || reading}
+              onChange={(e) => readReceipt(e.target.files?.[0])}
+            />
+          </Field>
+          {reading && <p role="status">Preparando comprovante…</p>}
+          {receipt && (
+            <img
+              src={receipt}
+              alt="Prévia do comprovante"
+              style={{ maxWidth: "100%", maxHeight: 220 }}
+            />
+          )}
+          <p>
+            A despesa só será incluída no pagamento após aprovação da central. O
+            comprovante deve permitir a leitura do gasto e do valor.
+          </p>
+        </>
+      )}
+      <Field
+        label={
+          kind === "expense"
+            ? "Descrição do gasto (obrigatória)"
+            : "Justificativa"
+        }
+      >
         <textarea
           required
+          minLength={kind === "expense" ? 5 : undefined}
           maxLength={2000}
           value={reason}
           onChange={(e) => setReason(e.target.value)}
         />
       </Field>
       <div className="eco-row">
-        <button className="primary-button" disabled={busy}>
+        <button
+          className="primary-button"
+          disabled={busy || reading || (kind === "expense" && !receipt)}
+        >
           {busy ? "Enviando…" : "Enviar para aprovação"}
         </button>
         <button
@@ -1198,10 +1391,10 @@ export function FinancePanel({ technical = false }) {
                       ))}
                     </td>
                     <td>
-                      {brl(l.total_cents)}
+                      {brl(l.total_cents + l.adjustment_cents)}
                       {l.adjustment_cents !== 0 && (
                         <small>
-                          Ajustes auditados: {brl(l.adjustment_cents)}
+                          Ajustes e reembolsos: {brl(l.adjustment_cents)}
                         </small>
                       )}
                     </td>
@@ -1404,7 +1597,7 @@ export function FinancePanel({ technical = false }) {
               </div>
             </form>
           )}
-          <h2>Ajustes auditados</h2>
+          <h2>Ajustes e reembolsos</h2>
           {data.adjustments.map((a) => (
             <p key={a.id}>
               {a.order_id} · {brl(a.amount_cents)} · {a.reason} ·{" "}
@@ -1415,7 +1608,17 @@ export function FinancePanel({ technical = false }) {
           ))}
         </>
       )}
-      {!technical && <Requests />}
+      {!technical && <Requests onDecided={() => setRevision((x) => x + 1)} />}
+      {technical && (
+        <section className="eco-section">
+          <h2>Despesas extras</h2>
+          <NewRequest
+            kind="expense"
+            onSaved={() => setRevision((x) => x + 1)}
+          />
+          <Requests technical kind="expense" revision={revision} />
+        </section>
+      )}
       {technical && <Requests technical kind="dispute" revision={revision} />}
     </section>
   );

@@ -272,6 +272,7 @@ export function OrderEditor({
       scheduled_at: "",
       additional: "",
       tracker_waiver_authorized: false,
+      travel_fee_cents: 0,
       document_data: {
         scheduled_service: "Instalação",
         service_address_same: true,
@@ -409,6 +410,7 @@ export function OrderEditor({
       "notes",
       "document_data",
       "tracker_waiver_authorized",
+      "travel_fee_cents",
     ].some(
       (k) => JSON.stringify(values[k] ?? "") !== JSON.stringify(order[k] ?? ""),
     );
@@ -443,6 +445,7 @@ export function OrderEditor({
         "notes",
         "document_data",
         "tracker_waiver_authorized",
+        "travel_fee_cents",
         "sga_classification",
         "sga_status",
       ];
@@ -967,6 +970,36 @@ export function OrderEditor({
                 </small>
               </div>
             )}
+            <label className="zc-full">
+              Taxa de deslocamento (R$)
+              <input
+                aria-label="Taxa de deslocamento (R$)"
+                type="number"
+                min="0"
+                max="1000000"
+                step="0.01"
+                value={(values.travel_fee_cents || 0) / 100}
+                disabled={
+                  !!order?.parent_order_id ||
+                  !!order?.execution_finished_at ||
+                  !!order?.submissions?.some((b) =>
+                    ["submitted", "approved_sync", "completed"].includes(
+                      b.state,
+                    ),
+                  )
+                }
+                onChange={(e) =>
+                  setValues((v) => ({
+                    ...v,
+                    travel_fee_cents: Math.round(Number(e.target.value) * 100),
+                  }))
+                }
+              />
+              <small>
+                Definida pela central, uma única vez por atendimento. O valor é
+                preservado ao registrar a execução.
+              </small>
+            </label>
             {field("Observações da central", "notes", {
               type: "textarea",
               full: true,
@@ -1323,6 +1356,7 @@ const auditFieldLabel = (key) =>
     fipe_value: "Valor FIPE",
     fipe_risk: "Tipo FIPE",
     notes: "Observações da central",
+    travel_fee_cents: "Deslocamento (centavos)",
     document_data: "Dados do veículo e documento",
     scheduled_at: "Agendamento",
     tracker_waiver_authorized: "Dispensa de rastreador",
