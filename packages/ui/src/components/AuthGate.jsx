@@ -24,6 +24,16 @@ export default function AuthGate({ children, audience = "central" }) {
     [code, setCode] = useState(""),
     [newPassword, setNewPassword] = useState(""),
     [message, setMessage] = useState("");
+  const connecting = status === "loading" || !access;
+  useEffect(() => {
+    document.title = connecting
+      ? "ZenField · Conectando…"
+      : technicianEntry
+        ? "ZenField · ZenTracking"
+        : access?.unified_login
+          ? "ZenTracking · Rastreamento"
+          : "ZenControl · Gestão de serviços";
+  }, [connecting, technicianEntry, access?.unified_login]);
   async function applySession(data, config = access) {
     if (!data.user) {
       setUser(null);
@@ -153,11 +163,13 @@ export default function AuthGate({ children, audience = "central" }) {
         <section className="auth-card" aria-labelledby="auth-title">
           <div className="auth-brand">
             <span className="brand-mark">
-              <ZenMark variant="tracking" size={44} />
+              <ZenMark variant={connecting ? "field" : "tracking"} size={44} />
             </span>
             <div>
               <h1 id="auth-title">
-                {technicianEntry ? (
+                {connecting ? (
+                  "ZenField"
+                ) : technicianEntry ? (
                   <>
                     Zen<span>Field</span>
                   </>
@@ -170,11 +182,13 @@ export default function AuthGate({ children, audience = "central" }) {
                 )}
               </h1>
               <p>
-                {technicianEntry
-                  ? "Portal do técnico"
-                  : access?.unified_login
-                    ? "Acesso único"
-                    : "Agendamentos e equipe técnica"}
+                {connecting
+                  ? "Ecossistema de rastreamento"
+                  : technicianEntry
+                    ? "Portal do técnico"
+                    : access?.unified_login
+                      ? "Acesso único"
+                      : "Agendamentos e equipe técnica"}
               </p>
             </div>
           </div>
@@ -306,11 +320,13 @@ export default function AuthGate({ children, audience = "central" }) {
       </div>
       <AppFooter
         product={
-          access?.unified_login
-            ? "ZenTracking"
-            : technicianEntry
-              ? "ZenField"
-              : "ZenControl"
+          connecting
+            ? "ZenField"
+            : access?.unified_login
+              ? "ZenTracking"
+              : technicianEntry
+                ? "ZenField"
+                : "ZenControl"
         }
       />
     </main>

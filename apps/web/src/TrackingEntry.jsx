@@ -9,7 +9,7 @@ export default function TrackingEntry() {
     <Suspense
       fallback={
         <main className="tracking-main" role="status">
-          Carregando ZenControl…
+          Carregando seu ambiente…
         </main>
       }
     >
