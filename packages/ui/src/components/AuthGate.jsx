@@ -27,7 +27,7 @@ export default function AuthGate({ children, audience = "central" }) {
   const connecting = status === "loading" || !access;
   useEffect(() => {
     document.title = connecting
-      ? "ZenField · Conectando…"
+      ? "ZenTracking · Conectando…"
       : technicianEntry
         ? "ZenField · ZenTracking"
         : access?.unified_login
@@ -163,12 +163,12 @@ export default function AuthGate({ children, audience = "central" }) {
         <section className="auth-card" aria-labelledby="auth-title">
           <div className="auth-brand">
             <span className="brand-mark">
-              <ZenMark variant={connecting ? "field" : "tracking"} size={44} />
+              <ZenMark variant="tracking" size={44} />
             </span>
             <div>
               <h1 id="auth-title">
                 {connecting ? (
-                  "ZenField"
+                  "ZenTracking"
                 ) : technicianEntry ? (
                   <>
                     Zen<span>Field</span>
@@ -321,7 +321,7 @@ export default function AuthGate({ children, audience = "central" }) {
       <AppFooter
         product={
           connecting
-            ? "ZenField"
+            ? "ZenTracking"
             : access?.unified_login
               ? "ZenTracking"
               : technicianEntry
