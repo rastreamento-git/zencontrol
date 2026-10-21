@@ -269,7 +269,7 @@ async function main() {
       })
       .waitFor();
     await page
-      .getByLabel("Observações do atendimento (opcional)", { exact: true })
+      .getByLabel("Observações do técnico (obrigatórias)", { exact: true })
       .fill("Registro realizado pela central: " + login);
     const saved = page.waitForResponse(
       (r) =>

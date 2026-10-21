@@ -251,6 +251,16 @@ function orderPdf(order, masked = true, options = {}) {
         label("FIPE"),
         value(view.vehicle.fipe),
       ],
+      ...(view.vehicle.fipe_type
+        ? [
+            [
+              label("TIPO FIPE"),
+              value(view.vehicle.fipe_type),
+              label("REGRA REGIONAL"),
+              value(view.vehicle.fipe_region),
+            ],
+          ]
+        : []),
     ]);
     const attendance = [
       [label("SERVIÇO"), value(view.service, 3)],

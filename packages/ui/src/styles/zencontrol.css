@@ -1,4 +1,47 @@
 /* Componentes de domínio. Cores e estrutura vêm do tema Estoque Pro 1.4. */
+.zc-audit-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+.zc-audit-summary > div,
+.zc-return {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid var(--ep-line);
+  border-radius: 12px;
+  margin-bottom: 10px;
+}
+.zc-audit-summary small {
+  color: var(--ep-muted);
+}
+.zc-audit-change {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+.zc-timeline details {
+  margin-top: 8px;
+}
+.zc-fipe-result output {
+  display: block;
+  padding: 14px 16px;
+  border: 1px solid var(--ep-line);
+  border-radius: 10px;
+  background: var(--ep-primary-soft);
+  color: var(--ep-primary-ink);
+  font-size: 17px;
+  font-weight: 650;
+}
+.zc-fipe-result small {
+  display: block;
+  color: var(--ep-muted);
+  font-size: 12px;
+  line-height: 1.7;
+  margin-top: 8px;
+}
 .zc-link {
   display: inline-flex;
   align-items: center;

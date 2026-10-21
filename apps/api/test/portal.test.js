@@ -411,6 +411,7 @@ test("submission requires confirmation, required photos and a label bound to eac
           version: b.version,
           serials: ["wrong-code"],
           confirmed: true,
+          notes: "Atendimento executado e conferido.",
           checklist_signed: true,
         },
         ta,
@@ -449,7 +450,12 @@ test("submission requires confirmation, required photos and a label bound to eac
       await req(
         "/api/technician/batches/" + b.id + "/submit",
         "POST",
-        { version: b.version, serials: ["123456789012345"], confirmed: true },
+        {
+          version: b.version,
+          serials: ["123456789012345"],
+          confirmed: true,
+          notes: "Atendimento executado e conferido.",
+        },
         ta,
       )
     ).status,
@@ -479,6 +485,7 @@ test("submission requires confirmation, required photos and a label bound to eac
       version: b.version,
       serials: ["123456789012345"],
       confirmed: true,
+      notes: "Atendimento executado e conferido.",
       checklist_signed: true,
     },
     ta,
@@ -922,6 +929,7 @@ test("signed checklist PDF is private and required before submission and central
     version: b.version,
     serials: [],
     confirmed: true,
+    notes: "Atendimento executado e conferido.",
     checklist_signed: true,
   });
   const pending = await req(
@@ -1080,6 +1088,7 @@ test("new OS requiring tracker and TAG cannot be submitted with just one equipme
     version: b.version,
     serials: [tracker],
     confirmed: true,
+    notes: "Atendimento executado e conferido.",
     checklist_signed: true,
   };
   const refused = await req(
@@ -1131,7 +1140,12 @@ test("pre-upgrade submissions retain their original evidence requirements", asyn
   await ok(
     "/api/technician/batches/" + b.id + "/submit",
     "POST",
-    { version: b.version, serials: [], confirmed: true },
+    {
+      version: b.version,
+      serials: [],
+      confirmed: true,
+      notes: "Atendimento executado e conferido.",
+    },
     ta,
   );
   const review = await ok("/api/batches/" + b.id);
@@ -1179,6 +1193,7 @@ test("general photos have no minimum; a non-installation service can be submitte
       version: file.version,
       serials: [],
       confirmed: true,
+      notes: "Atendimento executado e conferido.",
       checklist_signed: true,
     },
     ta,
@@ -1370,6 +1385,8 @@ test("an extra tracker creates a linked, independently confirmed and paid OS; un
   const child = await ok("/api/orders/" + main.additional_orders[0].id);
   assert.equal(child.parent_order_id, main.id);
   assert.equal(child.additional_equipment, "RASTREADOR");
+  assert.deepEqual(child.reported_imeis, []);
+  assert.equal(child.imei, "");
   assert.deepEqual(child.document_data.equipment, ["tracker"]);
   const replay = await ok("/api/orders/" + main.id, "PATCH", {
     version: main.version,
@@ -1440,6 +1457,7 @@ test("an extra tracker creates a linked, independently confirmed and paid OS; un
       version: batch.version,
       serials: codes,
       confirmed: true,
+      notes: "Atendimento executado e conferido.",
       checklist_signed: true,
     };
     if (unplanned) {
@@ -1459,6 +1477,10 @@ test("an extra tracker creates a linked, independently confirmed and paid OS; un
       payload,
       ta,
     );
+    const sent = await ok("/api/orders/" + order.id);
+    assert.deepEqual(sent.reported_imeis.sort(), [...codes].sort());
+    assert.equal(sent.technician_notes, payload.notes);
+    assert.equal(sent.audit_summary.last_modified_by, "Ana");
     const review = await ok("/api/batches/" + batch.id);
     await approve(review);
     return batch;
@@ -1493,12 +1515,20 @@ test("an extra tracker creates a linked, independently confirmed and paid OS; un
       version: ready.version,
       serials: [mainCode, tagCode],
       confirmed: true,
+      notes: "Atendimento executado e conferido.",
       checklist_signed: true,
     },
     ta,
   );
   await approve(await ok("/api/batches/" + ready.id));
   await capture(child, [extraCode]);
+  const grouped = await ok("/api/orders?q=" + encodeURIComponent(extraCode));
+  assert.equal(grouped.total, 1);
+  assert.equal(grouped.items[0].id, main.id);
+  assert.deepEqual(
+    grouped.items[0].group_imeis.sort(),
+    [mainCode, tagCode, extraCode].sort(),
+  );
   for (let i = 0; i < 25; i++) {
     if (
       (await ok("/api/orders/" + main.id)).status === "CONCLUÍDO" &&
@@ -1509,6 +1539,10 @@ test("an extra tracker creates a linked, independently confirmed and paid OS; un
   }
   for (const id of [main.id, child.id])
     assert.equal((await ok("/api/orders/" + id)).status, "CONCLUÍDO");
+  assert.equal(
+    (await ok("/api/orders/" + child.id)).audit_summary.closed_by,
+    "Central",
+  );
   const ledger = (
     await pool.query(
       "SELECT order_id,total_cents,state FROM zc_financial_ledger WHERE order_id=ANY($1::text[])",
@@ -1533,4 +1567,172 @@ test("an extra tracker creates a linked, independently confirmed and paid OS; un
   assert.deepEqual(receipts.find((r) => r.order_id === child.id).serials, [
     extraCode,
   ]);
+});
+
+test("technician notes are required to finish and submit, remain distinct from central notes, and audit uses friendly names", async () => {
+  const a = await order("Visita");
+  let b = await ok(
+    "/api/technician/orders/" + a.id + "/draft",
+    "POST",
+    { version: a.version },
+    ta,
+    201,
+  );
+  const image = await ok(
+    "/api/technician/batches/" + b.id + "/photos",
+    "POST",
+    { version: b.version, kind: "checklist", image: jpg },
+    ta,
+    201,
+  );
+  b.version = image.version;
+  const send = {
+    version: b.version,
+    serials: [],
+    confirmed: true,
+    checklist_signed: true,
+    notes: "   ",
+  };
+  const missing = await req(
+    "/api/technician/batches/" + b.id + "/submit",
+    "POST",
+    send,
+    ta,
+  );
+  assert.equal(missing.status, 400);
+  assert.match(missing.data.error, /Observações do técnico/);
+  const current = (
+    await ok("/api/technician/orders/" + a.id, "GET", undefined, ta)
+  ).order;
+  const finish = {
+    version: current.version,
+    executed_on: require("../src/domain").today(),
+  };
+  assert.equal(
+    (
+      await req(
+        "/api/technician/orders/" + a.id + "/finish",
+        "POST",
+        finish,
+        ta,
+      )
+    ).status,
+    400,
+  );
+  await ok(
+    "/api/technician/orders/" + a.id + "/finish",
+    "POST",
+    { ...finish, notes: "Visita realizada. Cliente orientado." },
+    ta,
+  );
+  let detail = await ok("/api/orders/" + a.id);
+  assert.equal(detail.technician_notes, "Visita realizada. Cliente orientado.");
+  assert.equal(detail.notes, "");
+  assert.equal(detail.audit_summary.last_modified_by, "Ana");
+  assert.deepEqual(detail.reported_imeis, []);
+  b = (
+    await ok("/api/technician/orders/" + a.id, "GET", undefined, ta)
+  ).submissions.find((s) => s.state === "draft");
+  await ok(
+    "/api/technician/batches/" + b.id + "/submit",
+    "POST",
+    {
+      ...send,
+      version: b.version,
+      notes: "Visita concluída, sem necessidade de intervenção.",
+    },
+    ta,
+  );
+  detail = await ok("/api/orders/" + a.id);
+  assert.equal(
+    detail.technician_notes,
+    "Visita concluída, sem necessidade de intervenção.",
+  );
+  assert.ok(
+    detail.history.some(
+      (e) =>
+        e.action === "portal_submitted" &&
+        e.actor === "Ana" &&
+        e.detail.user.name === "Ana",
+    ),
+  );
+});
+
+test("additional equipment shares a paginated operational row and filters, while reassigned equipment respects technician access", async () => {
+  const main = await ok(
+    "/api/orders",
+    "POST",
+    {
+      vehicle: "GRP1A23",
+      customer_name: "Cliente agrupado",
+      service: "Instalação",
+      technician_id: tida,
+      scheduled_at: "2026-10-20T10:00",
+      additional: "Rastreador Extra",
+    },
+    admin,
+    201,
+  );
+  const child = await ok("/api/orders/" + main.additional_orders[0].id);
+  for (const prefix of ["/api/orders", "/api/technician/orders"]) {
+    const result = await ok(
+      prefix + "?q=" + child.id + "&limit=1",
+      "GET",
+      undefined,
+      prefix.includes("technician") ? ta : admin,
+    );
+    assert.equal(result.total, 1);
+    assert.equal(result.items.length, 1);
+    assert.equal(result.items[0].id, main.id);
+    assert.equal(result.items[0].additional_orders[0].id, child.id);
+  }
+  // A finished principal must not hide the remaining installation in Field.
+  await pool.query("UPDATE zc_orders SET status='CONCLUÍDO' WHERE id=$1", [
+    main.id,
+  ]);
+  const pendingGroup = await ok(
+    "/api/technician/orders?view=open&vehicle=GRP1A23",
+    "GET",
+    undefined,
+    ta,
+  );
+  assert.equal(pendingGroup.total, 1);
+  assert.equal(pendingGroup.items[0].id, main.id);
+  assert.equal(pendingGroup.items[0].group_status, "AGENDADO");
+  const notFinished = await ok(
+    "/api/technician/orders?view=closed&vehicle=GRP1A23",
+    "GET",
+    undefined,
+    ta,
+  );
+  assert.equal(notFinished.total, 0);
+  await ok("/api/orders/" + child.id, "PATCH", {
+    version: child.version,
+    technician_id: tidb,
+    status: "CANCELADO",
+  });
+  const central = await ok("/api/orders?status=CANCELADO&q=GRP1A23");
+  assert.equal(central.total, 1);
+  assert.equal(central.items[0].id, main.id);
+  const ownA = await ok(
+    "/api/technician/orders?vehicle=GRP1A23",
+    "GET",
+    undefined,
+    ta,
+  );
+  assert.equal(ownA.items[0].id, main.id);
+  assert.deepEqual(ownA.items[0].additional_orders, []);
+  const ownB = await ok(
+    "/api/technician/orders?vehicle=GRP1A23",
+    "GET",
+    undefined,
+    tb,
+  );
+  assert.equal(ownB.total, 1);
+  assert.equal(ownB.items[0].id, child.id);
+  assert.equal(
+    (await req("/api/technician/orders/" + main.id, "GET", undefined, tb))
+      .status,
+    404,
+  );
 });

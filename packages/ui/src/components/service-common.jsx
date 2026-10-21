@@ -203,6 +203,7 @@ export function Field({
       ) : options ? (
         <select
           name={name}
+          aria-label={label}
           value={value ?? ""}
           onChange={onChange}
           disabled={disabled}
@@ -226,7 +227,9 @@ export function Field({
           maxLength={maxLength}
           pattern={pattern}
           title={title}
-          autoComplete={autoComplete ?? (type === "password" ? "new-password" : undefined)}
+          autoComplete={
+            autoComplete ?? (type === "password" ? "new-password" : undefined)
+          }
           min={type === "number" ? 0 : undefined}
           step={type === "number" ? "0.01" : undefined}
         />

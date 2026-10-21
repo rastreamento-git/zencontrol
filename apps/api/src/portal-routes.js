@@ -7,6 +7,7 @@ const d = require("./domain"),
 const { StockClient } = require("./stock-client");
 const { orderDocument } = require("./order-document");
 const { orderPdf } = require("./pdf");
+const { groupedPage, presentOrders } = require("./order-presentation");
 const safeBatch = (b) =>
   Object.fromEntries(
     [
@@ -57,11 +58,7 @@ function configurePortal(app, pool, cfg, auth) {
       limit = Math.min(100, integer(req.query.limit || 50, "Limite")),
       page = integer(req.query.page || 1, "Página");
     const args = [t.id],
-      parts = [
-        "technician_id=$1",
-        "deleted_at=''",
-        "workflow_mode='controlled'",
-      ];
+      parts = [];
     for (const [field, column] of [
       ["q", "id"],
       ["vehicle", "vehicle"],
@@ -83,29 +80,25 @@ function configurePortal(app, pool, cfg, auth) {
           `substring(COALESCE(NULLIF(executed_on,''),scheduled_at),1,10) ${op} $${args.length}`,
         );
       }
-    if (req.query.view === "open")
-      parts.push("status NOT IN ('CONCLUÍDO','CANCELADO')");
-    if (req.query.view === "closed")
-      parts.push("status IN ('CONCLUÍDO','CANCELADO')");
-    const where = parts.join(" AND "),
-      total = Number(
-        (
-          await d.one(
-            pool,
-            "SELECT count(*) n FROM zc_orders WHERE " + where,
-            args,
-          )
-        ).n,
-      );
-    const list = await d.rows(
-      pool,
-      `SELECT * FROM zc_orders WHERE ${where} ORDER BY CASE WHEN status IN ('CONCLUÍDO','CANCELADO') THEN 1 ELSE 0 END,scheduled_at,id LIMIT $${args.length + 1} OFFSET $${args.length + 2}`,
-      [...args, limit, (page - 1) * limit],
-    );
-    res.json({ items: list.map(portal.publicOrder), total, page, limit });
+    const result = await groupedPage(pool, {
+      base: "technician_id=$1 AND deleted_at='' AND workflow_mode='controlled'",
+      conditions: parts.join(" AND "),
+      args,
+      page,
+      limit,
+      view: req.query.view,
+      sort: "CASE WHEN status IN ('CONCLUÍDO','CANCELADO') THEN 1 ELSE 0 END,scheduled_at,id",
+    });
+    const items = await presentOrders(pool, result.items, {
+      technicianId: t.id,
+    });
+    res.json({ ...result, items: items.map(portal.publicOrder) });
   });
   app.get(prefix + "/orders/:id", async (req, res) => {
     const { order } = await portal.ownOrder(pool, req.user.id, req.params.id);
+    const [presented] = await presentOrders(pool, [order], {
+      technicianId: order.technician_id,
+    });
     const history = await d.rows(
       pool,
       "SELECT id,state,version,order_version,vehicle,notes,imeis,expected_count,submitted_at,reviewed_at,reviewed_by,rejection_reason,reason,capture_version,checklist_signed,executed_on FROM zc_batches WHERE order_id=$1 AND source='portal' ORDER BY created_at DESC",
@@ -113,17 +106,13 @@ function configurePortal(app, pool, cfg, auth) {
     );
     for (const b of history) b.files = await files(pool, b.id);
     res.json({
-      order: portal.publicOrder(order),
+      order: portal.publicOrder(presented),
       document: orderDocument(order, true, {
         portalUrl: cfg.TECHNICIAN_PORTAL_URL || cfg.PUBLIC_URL,
       }),
       required_equipment: portal.requiredEquipment(order),
       rule: await portal.rule(pool, order.service, order),
-      additional_orders: await d.rows(
-        pool,
-        "SELECT id,service,status,additional_equipment FROM zc_orders WHERE parent_order_id=$1 AND technician_id=$2 AND deleted_at='' ORDER BY id",
-        [order.id, order.technician_id],
-      ),
+      additional_orders: presented.additional_orders.map(portal.publicOrder),
       submissions: history,
     });
   });

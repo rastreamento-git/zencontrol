@@ -260,6 +260,9 @@ async function main() {
     .setInputFiles(path.join(directory, "fixtures/checklist-ficticio.pdf"));
   assert.equal((await checklistResponse).status(), 201);
   await page
+    .getByLabel("Observações do técnico (obrigatórias)", { exact: true })
+    .fill("Instalação realizada, equipamentos testados e cliente orientado.");
+  await page
     .getByLabel("O checklist anexado está preenchido e assinado.", {
       exact: true,
     })
@@ -295,10 +298,7 @@ async function main() {
   assert.equal(planned.additional_orders.length, 1);
   await page
     .getByRole("button", {
-      name:
-        "Abrir OS adicional " +
-        planned.additional_orders[0].id +
-        " · RASTREADOR",
+      name: "Registrar equipamento adicional · RASTREADOR · AGENDADO",
       exact: true,
     })
     .click();

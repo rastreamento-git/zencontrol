@@ -3,6 +3,7 @@ import {
   passwordRequirements,
 } from "@zen/ui/lib/password-policy";
 import { useEffect, useState } from "react";
+import { classifyFipe, fipeRegions } from "@zen/domain/fipe.mjs";
 import {
   Plus,
   Search,
@@ -189,17 +190,35 @@ export function Orders({ agenda, meta, revision, openOrder, globalQuery }) {
                         <span className="zc-plate">
                           {o.vehicle || "Sem identificação"}
                         </span>
+                        {!!o.group_imeis?.length && (
+                          <small>
+                            IMEI/serial: {o.group_imeis.join(" · ")}
+                          </small>
+                        )}
+                        {o.vehicle_electric && <small>Veículo elétrico</small>}
                       </td>
                       <td data-label="Serviço / técnico">
                         <strong>{o.service || "Não informado"}</strong>
                         <small>{o.technician_name || "Sem técnico"}</small>
+                        {o.additional_orders?.map((extra) => (
+                          <button
+                            className="zc-link"
+                            key={extra.id}
+                            onClick={() => openOrder(extra.id)}
+                          >
+                            + {extra.additional_equipment} · {extra.status}
+                          </button>
+                        ))}
                       </td>
                       <td data-label="Agendamento">
                         <strong>{format(o.scheduled_at, true)}</strong>
                         <small>{o.location || "Local não informado"}</small>
                       </td>
                       <td data-label="Situação">
-                        <Badge value={o.status} />
+                        <Badge value={o.group_status || o.status} />
+                        {o.group_status && o.group_status !== o.status && (
+                          <small>OS principal: {o.status}</small>
+                        )}
                         {o.legacy_status &&
                           !meta.statuses.includes(o.legacy_status) && (
                             <small>Legado: {o.legacy_status}</small>
@@ -278,6 +297,11 @@ export function OrderEditor({
   const change = (e) =>
     setValues((v) => ({ ...v, [e.target.name]: e.target.value }));
   const documentData = values.document_data || {};
+  const fipe = classifyFipe({
+    value: values.fipe_value,
+    vehicleType: documentData.vehicle_type,
+    region: documentData.fipe_region,
+  });
   const changeDocument = (key, value) =>
     setValues((v) => ({
       ...v,
@@ -309,10 +333,7 @@ export function OrderEditor({
       "chassis",
       "sga_id",
       "fipe_value",
-      "fipe_risk",
       "volunteer",
-      "imei",
-      "term",
       "location",
       "shift",
       "notes",
@@ -346,10 +367,7 @@ export function OrderEditor({
         "chassis",
         "sga_id",
         "fipe_value",
-        "fipe_risk",
         "volunteer",
-        "imei",
-        "term",
         "location",
         "shift",
         "notes",
@@ -460,7 +478,11 @@ export function OrderEditor({
         )}
         {!!order?.additional_orders?.length && (
           <div className="zc-notice">
-            <b>Equipamentos adicionais em OS separadas</b>
+            <b>Equipamentos adicionais deste atendimento</b>
+            <p>
+              Exibidos junto à OS principal. Cada instalação mantém seu registro
+              de serviço e remuneração.
+            </p>
             {order.additional_orders.map((extra) => (
               <button
                 type="button"
@@ -596,13 +618,59 @@ export function OrderEditor({
             {documentField("Marca", "brand")}
             {documentField("Modelo", "model")}
             {documentField("Ano de fabricação/modelo", "year")}
-            {documentField("Tipo de veículo", "vehicle_type")}
+            {documentField("Tipo de veículo", "vehicle_type", {
+              options: [
+                ["", "Selecione o tipo"],
+                ["Automóvel", "Automóvel"],
+                ["Moto", "Moto"],
+                ["Outro", "Outro tipo de veículo"],
+                ...(documentData.vehicle_type &&
+                !["Automóvel", "Moto", "Outro"].includes(
+                  documentData.vehicle_type,
+                )
+                  ? [[documentData.vehicle_type, documentData.vehicle_type]]
+                  : []),
+              ],
+            })}
             {documentField("Categoria", "category")}
             {field("Código do veículo SGA", "sga_id")}
             {field("Valor FIPE", "fipe_value")}
-            {field("Tipo / risco FIPE", "fipe_risk")}
+            {documentField("Regra regional FIPE", "fipe_region", {
+              options: [["", "Selecione a regra regional"], ...fipeRegions],
+            })}
+            <label className="zc-fipe-result zc-full">
+              Tipo FIPE (automático)
+              <output aria-live="polite">
+                {fipe.label || "Não classificado"}
+              </output>
+              <small>{fipe.message}</small>
+              {!!order?.fipe_risk && fipe.status !== "classified" && (
+                <small>
+                  Registro anterior: {order.fipe_risk}. Informe os dados de
+                  classificação para atualizar.
+                </small>
+              )}
+            </label>
             {field("Voluntário", "volunteer")}
-            {field("IMEI(s)", "imei")}
+            <div className="zc-full zc-document-equipment">
+              <label className="zc-checkbox">
+                <input
+                  type="checkbox"
+                  checked={documentData.vehicle_electric === true}
+                  onChange={(e) =>
+                    changeDocument("vehicle_electric", e.target.checked)
+                  }
+                />
+                Veículo elétrico
+              </label>
+              {documentData.vehicle_electric === true && (
+                <small>
+                  Confirme com o cliente a autorização para instalar o
+                  rastreador. Se houver impedimento, registre as observações e a
+                  autorização de dispensa correspondente.
+                </small>
+              )}
+            </div>
           </div>
         </fieldset>
         <fieldset className="zc-fieldset">
@@ -616,7 +684,7 @@ export function OrderEditor({
             })}
             {!order?.parent_order_id &&
               !values.tracker_waiver_authorized &&
-              field("Equipamento adicional (gera outra OS)", "additional", {
+              field("Equipamento adicional", "additional", {
                 options: [
                   ["", "Nenhum"],
                   ["Tag Extra", "Tag extra"],
@@ -670,7 +738,6 @@ export function OrderEditor({
                 conferência da central, sem registrar instalação no estoque.
               </small>
             </div>
-            {field("Termo", "term")}
             {field("Local de atendimento", "location", { full: true })}
             {!values.tracker_waiver_authorized && (
               <div className="zc-full zc-document-equipment">
@@ -727,9 +794,81 @@ export function OrderEditor({
                 </label>
               </div>
             )}
-            {field("Observações", "notes", { type: "textarea", full: true })}
+            {field("Observações da central", "notes", {
+              type: "textarea",
+              full: true,
+            })}
           </div>
         </fieldset>
+        {order && (
+          <section className="zc-detail-section">
+            <h3>Retorno do técnico</h3>
+            <p>
+              Os IMEIs/seriais aparecem após o envio para validação no ZenField.
+            </p>
+            {[order, ...(order.additional_orders || [])].map((item) => (
+              <div className="zc-return" key={item.id}>
+                <b>
+                  {item.parent_order_id
+                    ? `Equipamento adicional · ${item.additional_equipment}`
+                    : "Equipamentos da OS principal"}
+                </b>
+                <p>
+                  {item.reported_imeis?.length
+                    ? item.reported_imeis.join(" · ")
+                    : item.imei_submitted_at
+                      ? "Nenhum equipamento instalado neste envio"
+                      : "Aguardando envio do técnico"}
+                </p>
+                {item.imei_submission_state === "rejected" && (
+                  <small>
+                    Envio devolvido para correção. Aguarde nova validação.
+                  </small>
+                )}
+                <label className="zc-field">
+                  Observações do técnico
+                  <textarea
+                    readOnly
+                    aria-label="Observações do técnico"
+                    rows={3}
+                    value={item.technician_notes || ""}
+                    placeholder="Preenchidas pelo técnico no ZenField"
+                  />
+                </label>
+              </div>
+            ))}
+          </section>
+        )}
+        {order?.audit_summary && (
+          <section className="zc-detail-section">
+            <h3>Responsáveis pela OS</h3>
+            <div className="zc-audit-summary">
+              {[
+                [
+                  "Abertura",
+                  order.audit_summary.opened_by,
+                  order.audit_summary.opened_at,
+                ],
+                [
+                  "Baixa",
+                  order.audit_summary.closed_by || "Aguardando conclusão",
+                  order.audit_summary.closed_at,
+                ],
+                [
+                  "Última modificação",
+                  order.audit_summary.last_modified_by,
+                  order.audit_summary.last_modified_at,
+                ],
+              ].map(([label, name, at]) => (
+                <div key={label}>
+                  <small>{label}</small>
+                  <b>{name}</b>
+                  {at && <small>{format(at, at.includes("T"))}</small>}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
         <div className="zc-notice zc-document-notice">
           <b>Preenchimento automático do PDF</b>
           <span>
@@ -803,7 +942,7 @@ export function OrderEditor({
         {!!order?.history?.length && (
           <div className="zc-detail-section">
             <h3>Histórico desta OS</h3>
-            {order.history.slice(0, 10).map((a) => (
+            {order.history.map((a) => (
               <div className="zc-timeline" key={a.id}>
                 <i />
                 <div>
@@ -811,6 +950,24 @@ export function OrderEditor({
                   <small>
                     {a.actor} · {format(a.created_at, true)}
                   </small>
+                  {a.order_id !== order.id && (
+                    <small>Equipamento adicional · {a.order_id}</small>
+                  )}
+                  {a.detail?.changes && (
+                    <details>
+                      <summary>Ver alterações</summary>
+                      {Object.entries(a.detail.changes).map(([key, change]) => (
+                        <div key={key} className="zc-audit-change">
+                          <b>{auditFieldLabel(key)}</b>
+                          <span>
+                            {auditValue(change.before)} →{" "}
+                            {auditValue(change.after)}
+                          </span>
+                        </div>
+                      ))}
+                    </details>
+                  )}
+                  {a.detail?.reason && <small>{a.detail.reason}</small>}
                 </div>
               </div>
             ))}
@@ -964,7 +1121,53 @@ export const actionLabel = (k) =>
     settled: "Fechamento registrado",
     deleted: "Registro arquivado",
     reopened: "OS reaberta",
+    portal_draft: "Registro iniciado pelo técnico",
+    portal_draft_updated: "Rascunho atualizado",
+    portal_photo_added: "Evidência recebida",
+    portal_photo_removed: "Evidência removida",
+    portal_submitted: "Técnico enviou para validação",
+    portal_approved: "Envio técnico aprovado",
+    portal_correction_requested: "Correção solicitada",
+    execution_finished: "Execução finalizada pelo técnico",
+    conference_started: "Conferência iniciada",
+    approved_for_stock: "Instalação aprovada",
+    stock_installation_confirmed: "Instalação confirmada no estoque",
+    additional_order_created: "Equipamento adicional incluído",
   })[k] || k.replaceAll("_", " ");
+const auditFieldLabel = (key) =>
+  ({
+    vehicle: "Veículo",
+    customer_name: "Associado",
+    service: "Serviço",
+    status: "Situação",
+    technician_id: "Código do técnico",
+    technician_name: "Técnico",
+    fipe_value: "Valor FIPE",
+    fipe_risk: "Tipo FIPE",
+    notes: "Observações da central",
+    document_data: "Dados do veículo e documento",
+    scheduled_at: "Agendamento",
+    tracker_waiver_authorized: "Dispensa de rastreador",
+    vehicle_electric: "Veículo elétrico",
+    fipe_region: "Regra regional FIPE",
+    vehicle_type: "Tipo de veículo",
+    equipment: "Equipamentos",
+  })[key] || key;
+const auditValue = (value) =>
+  value == null || value === ""
+    ? "Não informado"
+    : typeof value === "boolean"
+      ? value
+        ? "Sim"
+        : "Não"
+      : typeof value === "object"
+        ? Object.entries(value)
+            .map(
+              ([key, entry]) =>
+                `${auditFieldLabel(key)}: ${Array.isArray(entry) ? entry.join(", ") : String(entry)}`,
+            )
+            .join("; ")
+        : String(value);
 export function Technicians({ user, revision, refresh }) {
   const { data: catalog } = useLoad(
     ["admin", "operador"].includes(user.papel) ? "/stock/catalog" : "/meta",

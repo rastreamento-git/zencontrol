@@ -1,5 +1,9 @@
 const { fail } = require("./errors");
 const d = require("./domain");
+const {
+  fipeCategories,
+  fipeRegions,
+} = require("../../../packages/domain/fipe.mjs");
 const documentFields = {
   cpf_cnpj: 30,
   rg: 30,
@@ -11,6 +15,7 @@ const documentFields = {
   year: 30,
   vehicle_type: 120,
   category: 120,
+  fipe_region: 10,
 };
 const equipmentLabels = {
   tracker: "1x Rastreador",
@@ -24,6 +29,7 @@ function normalizeDocumentData(value, previous = {}) {
     ...Object.keys(documentFields),
     "equipment",
     "technician_brings_equipment",
+    "vehicle_electric",
   ];
   if (Object.keys(value).some((k) => !allowed.includes(k)))
     fail(
@@ -33,6 +39,12 @@ function normalizeDocumentData(value, previous = {}) {
   const result = { ...previous };
   for (const [key, max] of Object.entries(documentFields))
     if (value[key] !== undefined) result[key] = d.string(value[key], key, max);
+  if (
+    value.fipe_region !== undefined &&
+    result.fipe_region &&
+    !fipeRegions.some(([region]) => region === result.fipe_region)
+  )
+    fail(400, "Regra regional FIPE inválida. Selecione padrão, SP ou RJ.");
   if (value.equipment !== undefined) {
     if (
       !Array.isArray(value.equipment) ||
@@ -48,6 +60,11 @@ function normalizeDocumentData(value, previous = {}) {
     result.technician_brings_equipment = d.boolean(
       value.technician_brings_equipment,
       "Levar equipamentos",
+    );
+  if (value.vehicle_electric !== undefined)
+    result.vehicle_electric = d.boolean(
+      value.vehicle_electric,
+      "Veículo elétrico",
     );
   return result;
 }
@@ -95,6 +112,11 @@ function orderDocument(order, masked = true, { portalUrl = "" } = {}) {
     .filter((k) => (data.equipment || []).includes(k))
     .map((k) => equipmentLabels[k]);
   const instructions = [];
+  if (data.vehicle_electric === true)
+    instructions.push(
+      "VEÍCULO ELÉTRICO: confirme com o cliente a autorização para instalar o rastreador. A indicação de veículo elétrico não autoriza dispensa do equipamento.",
+      "",
+    );
   if (order.parent_order_id)
     instructions.push(
       "OS DE EQUIPAMENTO ADICIONAL: " +
@@ -145,9 +167,20 @@ function orderDocument(order, masked = true, { portalUrl = "" } = {}) {
       brand: data.brand,
       model: data.model,
       year: data.year,
-      type: data.vehicle_type || order.fipe_risk,
+      type:
+        data.vehicle_type ||
+        (fipeCategories.includes(order.fipe_risk) ? "" : order.fipe_risk),
       category: data.category,
       fipe: order.fipe_value,
+      fipe_type: fipeCategories.includes(order.fipe_risk)
+        ? order.fipe_risk
+        : "",
+      fipe_region:
+        order.fipe_risk === "Alta"
+          ? "Todas as UFs"
+          : fipeRegions.find(([region]) => region === data.fipe_region)?.[1] ||
+            "",
+      electric: data.vehicle_electric === true,
     },
     // Intentionally no editable overrides: these three values come from the OS.
     service: order.service,
@@ -252,7 +285,7 @@ function mapSgaVehicle(v) {
       scalar(v.ddd_celular, v.ddd) + scalar(v.telefone_celular, v.telefone),
     volunteer: scalar(v.voluntario_real, v.nome_voluntario, v.nome_usuario),
     fipe_value: money(scalar(v.valor_fipe, v.fipe_valor, v.valor_mercado)),
-    fipe_risk: scalar(v.tipo, v.descricao_tipo_veiculo),
+    fipe_risk: "",
     sga_classification: displaySga(
       scalar(
         v.codigo_classificacao,

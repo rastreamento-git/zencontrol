@@ -16,6 +16,11 @@ const { WPPClient, SGAClient, IntegrationError } = require("./integrations");
 const { orderPdf, settlementPdf } = require("./pdf");
 const { configurePortal } = require("./portal-routes");
 const portal = require("./portal-service");
+const {
+  groupedPage,
+  presentOrders,
+  orderHistory,
+} = require("./order-presentation");
 function createApp(pool, env = process.env) {
   const cfg = configuration(env),
     app = express();
@@ -141,7 +146,7 @@ function createApp(pool, env = process.env) {
   });
   app.get("/api/orders", async (req, res) => {
     const p = page(req),
-      conditions = ["deleted_at=''"],
+      conditions = [],
       args = [];
     const where = (s, v) => {
       args.push(v);
@@ -152,7 +157,7 @@ function createApp(pool, env = process.env) {
     if (req.query.q) {
       args.push("%" + String(req.query.q).slice(0, 200) + "%");
       conditions.push(
-        `(id ILIKE $${args.length} OR vehicle ILIKE $${args.length} OR customer_name ILIKE $${args.length} OR technician_name ILIKE $${args.length})`,
+        `(id ILIKE $${args.length} OR vehicle ILIKE $${args.length} OR customer_name ILIKE $${args.length} OR technician_name ILIKE $${args.length} OR EXISTS(SELECT 1 FROM zc_batches b WHERE b.order_id=eligible.id AND b.source='portal' AND b.submitted_at<>'' AND b.imeis::text ILIKE $${args.length}))`,
       );
     }
     if (req.query.day) {
@@ -165,21 +170,14 @@ function createApp(pool, env = process.env) {
         d.today(),
       );
     const clause = conditions.join(" AND ");
-    const total = Number(
-      (
-        await d.one(
-          pool,
-          "SELECT count(*) n FROM zc_orders WHERE " + clause,
-          args,
-        )
-      ).n,
-    );
-    const list = await d.rows(
-      pool,
-      `SELECT * FROM zc_orders WHERE ${clause} ORDER BY ${req.query.day ? "scheduled_at,id" : "updated_at DESC,id DESC"} LIMIT $${args.length + 1} OFFSET $${args.length + 2}`,
-      [...args, p.limit, (p.page - 1) * p.limit],
-    );
-    res.json({ items: list.map(d.publicOrder), total, ...p });
+    const result = await groupedPage(pool, {
+      base: "deleted_at=''",
+      conditions: clause,
+      args,
+      ...p,
+      sort: req.query.day ? "scheduled_at,id" : "updated_at DESC,id DESC",
+    });
+    res.json({ ...result, items: await presentOrders(pool, result.items) });
   });
   app.post("/api/orders", async (req, res) =>
     res
@@ -187,12 +185,10 @@ function createApp(pool, env = process.env) {
       .json(d.publicOrder(await o.create(pool, req.body, actor(req)))),
   );
   app.get("/api/orders/:id", async (req, res) => {
-    const order = d.publicOrder(await o.get(pool, req.params.id));
-    order.history = await d.rows(
-      pool,
-      "SELECT * FROM zc_audit WHERE entity_type='order' AND entity_id=$1 ORDER BY id DESC LIMIT 50",
-      [order.id],
-    );
+    const [order] = await presentOrders(pool, [
+      await o.get(pool, req.params.id),
+    ]);
+    Object.assign(order, await orderHistory(pool, order));
     order.jobs = await d.rows(
       pool,
       "SELECT id,kind,state,last_error,created_at FROM zc_jobs WHERE order_id=$1 ORDER BY created_at DESC LIMIT 20",
@@ -203,11 +199,6 @@ function createApp(pool, env = process.env) {
           order.id,
         ])
       : [];
-    order.additional_orders = await d.rows(
-      pool,
-      "SELECT id,service,status,additional_equipment FROM zc_orders WHERE parent_order_id=$1 AND deleted_at='' ORDER BY id",
-      [order.id],
-    );
     order.submissions = await d.rows(
       pool,
       "SELECT id,state,version,submitted_at FROM zc_batches WHERE order_id=$1 ORDER BY created_at DESC",

@@ -4,6 +4,7 @@ const { fail } = require("./errors");
 const d = require("./domain");
 const { normalizeDocumentData } = require("./order-document");
 const { prepareEquipment } = require("./equipment-plan");
+const { classifyFipe } = require("../../../packages/domain/fipe.mjs");
 const textFields = {
   customer_name: 200,
   contact: 100,
@@ -12,7 +13,6 @@ const textFields = {
   fipe_risk: 100,
   volunteer: 200,
   imei: 500,
-  term: 300,
   location: 500,
   shift: 40,
   notes: 6000,
@@ -84,6 +84,14 @@ async function validate(db, input, old = null) {
   const out = {};
   for (const [key, max] of Object.entries(textFields))
     if (input[key] !== undefined) out[key] = d.string(input[key], key, max);
+  if ((!old || old.workflow_mode === "controlled") && out.imei !== undefined) {
+    if (out.imei !== (old?.imei || ""))
+      fail(
+        400,
+        "O IMEI é informado pelo técnico no ZenField ao enviar para validação.",
+      );
+    delete out.imei;
+  }
   if (out.vehicle !== undefined) {
     out.vehicle = d.vehicle(out.vehicle);
     if (out.vehicle.length < 7 || out.vehicle.length > 30)
@@ -144,6 +152,24 @@ async function validate(db, input, old = null) {
       normalizeDocumentData(input.document_data, old?.document_data || {}),
     );
   const merged = { ...old, ...out };
+  const document = out.document_data
+    ? JSON.parse(out.document_data)
+    : old?.document_data || {};
+  const fipeChanged =
+    !old ||
+    (out.fipe_value !== undefined && out.fipe_value !== old.fipe_value) ||
+    ["vehicle_type", "fipe_region"].some(
+      (key) => (document[key] || "") !== (old?.document_data?.[key] || ""),
+    );
+  const fipe = classifyFipe({
+    value: merged.fipe_value,
+    vehicleType: document.vehicle_type,
+    region: document.fipe_region,
+  });
+  if (fipeChanged && fipe.status === "invalid_value") fail(400, fipe.message);
+  // Historical free text survives unrelated edits; clients cannot override a calculated category.
+  out.fipe_risk =
+    fipeChanged || fipe.status === "classified" ? fipe.label : old.fipe_risk;
   if (!old) {
     for (const key of ["vehicle", "service", "customer_name"])
       if (!merged[key]) fail(400, "Informe veículo, associado e serviço.");
@@ -336,6 +362,15 @@ async function edit(pool, id, input, actor) {
       );
     await d.audit(db, actor, "updated", "order", id, {
       ...changes,
+      changes: Object.fromEntries(
+        Object.entries(changes).map(([key, value]) => [
+          key,
+          {
+            before: old[key],
+            after: key === "document_data" ? JSON.parse(value) : value,
+          },
+        ]),
+      ),
       ...(changes.document_data
         ? {
             document_data: {

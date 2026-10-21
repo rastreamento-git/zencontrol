@@ -50,3 +50,32 @@ A OS marcada fica fora dos valores estimados, confirmados e dos fechamentos do t
 O atendimento com dispensa exige fotos da vistoria, checklist preenchido e assinado e conferência da central. Não exige fotos de instalação/etiqueta nem IMEI, não aceita registro de instalação e não gera movimento no Estoque Pro. A conclusão não envia a classificação padrão de instalação concluída ao SGA.
 
 A migração `007_tracker_waiver.sql` inicializa o campo como `false` nas OS existentes. Execute as migrações antes de subir o backend atualizado; backups passam a incluir o campo junto da OS. Valide a interface com `node scripts/tracker-waiver-ui.cjs` após `npm run homologation:build` e as regras com `node --test apps/api/test/tracker-waiver.test.js apps/api/test/order-document.test.js`.
+
+## Classificação FIPE e veículo elétrico
+
+O **Tipo FIPE** é calculado pelo valor, tipo do veículo e regra regional escolhida (padrão, SP ou RJ). O limite inicial da categoria Média está incluído; R$ 80.000,00 permanece Média. **Alta** vale acima de R$ 80.000,00 para qualquer veículo e UF.
+
+| Tipo | Regra | Baixa | Média |
+| --- | --- | --- | --- |
+| Automóvel | Padrão | Abaixo de R$ 70.000 | R$ 70.000 a R$ 80.000 |
+| Automóvel | SP | Abaixo de R$ 40.000 | R$ 40.000 a R$ 80.000 |
+| Automóvel | RJ | Abaixo de R$ 30.000 | R$ 30.000 a R$ 80.000 |
+| Moto | Padrão | Abaixo de R$ 40.000 | R$ 40.000 a R$ 80.000 |
+| Moto | SP | Abaixo de R$ 25.000 | R$ 25.000 a R$ 80.000 |
+| Moto | RJ | Abaixo de R$ 20.000 | R$ 20.000 a R$ 80.000 |
+
+O backend usa o mesmo cálculo do formulário, em centavos, e ignora substituições manuais da categoria. Valores inválidos são recusados. Abaixo ou igual a R$ 80 mil, outros tipos ou dados incompletos ficam sem classificação automática. A consulta SGA não usa o endereço do associado para presumir a regra regional. Rótulos históricos sem dados suficientes são preservados nas edições que não alteram os dados de classificação.
+
+**Veículo elétrico** é uma indicação independente da **Dispensa de rastreador autorizada**. A indicação aparece no ZenField e nas instruções do PDF e pede confirmação do cliente para instalação. Ela não altera automaticamente os equipamentos, a remuneração ou a dispensa.
+
+## Retorno, equipamentos adicionais e auditoria
+
+O IMEI deixa de ser um campo de digitação na central. Os códigos informados pelo técnico aparecem na OS e na listagem depois do envio para validação, inclusive durante a conferência. O rascunho não publica IMEIs. Um envio devolvido continua identificado como pendente de correção, preservando o histórico.
+
+O atendimento permanece em **Em atendimento** enquanto houver uma instalação adicional pendente, mesmo que a OS principal esteja concluída. A OS principal e seus equipamentos adicionais ocupam **uma linha** nas listagens operacionais; busca, paginação e filtros consideram também os adicionais. Os adicionais são acessíveis dentro do atendimento para registrar suas evidências. Cada registro continua com conferência, estoque e composição financeira próprios, permitindo contabilizar cada instalação uma única vez. Se um adicional for reatribuído, o ZenField mostra apenas os registros do técnico selecionado.
+
+O campo **Termo** foi retirado do formulário e das respostas públicas da OS. O histórico legado permanece no banco e nos backups. As **Observações da central** ficam separadas das **Observações do técnico**, que são obrigatórias para finalizar a execução e enviar para conferência no ZenField. A central consulta o relato no retorno técnico, sem editar o original.
+
+A OS mostra responsáveis pela abertura, baixa e última modificação, usando o nome de exibição do usuário. O histórico reúne eventos da OS, evidências e adicionais. As edições da central registram os valores anteriores e novos; a supervisão no ZenField mantém a identidade real do administrador/operador e o técnico selecionado. Eventos novos guardam também o identificador e login para manter rastreabilidade. Autoria antiga desconhecida é explicitada como legado.
+
+Esta atualização usa `document_data`, envios e auditoria já existentes, sem nova migração de estrutura. Ela deve publicar a API e os dois frontends juntos na homologação. Validação: `npm test --workspace apps/api`, builds dos dois frontends e `ZEN_CHROMIUM_PATH=/caminho/chromium node scripts/order-management-ui.cjs` após `npm run homologation:build`.

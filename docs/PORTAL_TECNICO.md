@@ -11,7 +11,7 @@ Os dois aplicativos se comunicam com a mesma API autenticada. Banco Aiven, fotos
 3. Tocar em **Começar registro** e enviar as fotos exigidas para o serviço e as fotos da vistoria. Há botões separados para tirar uma foto e escolher uma foto já existente no celular.
 4. Nas instalações/reinstalações, fotografar a etiqueta de **cada** rastreador/TAG. O servidor lê códigos de barras, QR Code e DataMatrix, consulta a carga do técnico no Estoque Pro e salva automaticamente o serial, o tipo e o modelo. Não é necessário escanear ao vivo, digitar IMEI ou classificar o aparelho.
 5. Anexar o próprio checklist preenchido e assinado, em PDF ou fotos de todas as páginas. Confirmar que o documento está assinado.
-6. Conferir o quadro **Falta completar**, revisar os arquivos e enviar. O retorno é **Confirmação pendente**.
+6. Preencher as **Observações do técnico (obrigatórias)**, conferir o quadro **Falta completar**, revisar os arquivos e enviar. O retorno é **Confirmação pendente**.
 7. A central abre as evidências em **Validações**, verifica as fotos e o checklist, confirma a assinatura e aprova ou solicita correção com um motivo claro.
 8. O serviço aprovado entra no fechamento financeiro após ficar **CONCLUÍDO**. Nas instalações, essa conclusão também exige o recibo real do Estoque Pro. O portal não registra pagamento automático.
 
@@ -27,7 +27,7 @@ Os dois aplicativos se comunicam com a mesma API autenticada. Banco Aiven, fotos
 
 ## Checklist e fotos
 
-- Novos registros exigem pelo menos uma foto de vistoria e um checklist, além das evidências configuradas por serviço. A central pode aumentar as fotos da vistoria em **Configurações → Evidências**.
+- Fotos gerais são opcionais, sem quantidade mínima. São exigidos o checklist assinado e as etiquetas dos equipamentos previstos na OS. As observações do técnico são obrigatórias para finalizar e enviar o atendimento.
 - Checklist: PDF sem senha, até 8 MB e 30 páginas, ou fotos JPEG/PNG/WebP. O PDF original é preservado, inclusive para conferência de assinatura digital pelo operador quando aplicável. A aplicação não valida assinatura digital nem detecta assinatura manuscrita automaticamente.
 - Fotos: escolha arquivos de até 24 MB no celular; a interface converte para JPEG com lado máximo de 2400 px. O servidor valida e normaliza a imagem antes de armazenar.
 - Limite total de 30 arquivos por registro. Arquivos ficam no bucket privado configurado e integram o backup/restauração operacional.
@@ -75,3 +75,5 @@ O frontend tem apenas uma configuração pública de API. Não recebe banco ou s
 5. Testar o fluxo entre o endereço do ZenField e o da central, conferindo a conclusão e a inclusão no financeiro.
 
 A suíte do ZenControl usa PostgreSQL/PGlite e Supabase simulado. A homologação no Render/Supabase reais continua necessária antes do uso em produção.
+
+As listagens agrupam equipamentos adicionais com a OS principal. A conferência, o estoque e a remuneração continuam separados por instalação. A indicação de veículo elétrico aparece no atendimento e exige atenção à autorização do cliente; a dispensa continua sendo autorizada pela central. Consulte [as regras da OS](ORDEM_DE_SERVICO.md) para FIPE, IMEIs e auditoria.

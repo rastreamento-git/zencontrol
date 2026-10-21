@@ -93,6 +93,19 @@ const one = async (db, sql, args = []) =>
 const rows = async (db, sql, args = []) => (await db.query(sql, args)).rows;
 async function audit(db, actor, action, type, id, detail = {}) {
   const scope = require("./field-access").context.getStore();
+  if (
+    scope?.actor &&
+    (scope.delegated ||
+      [String(scope.actor.id), scope.actor.login, scope.actor.nome].includes(
+        actor,
+      ))
+  ) {
+    actor = scope.actor.nome || scope.actor.login;
+    detail = {
+      ...detail,
+      user: { id: scope.actor.id, login: scope.actor.login, name: actor },
+    };
+  }
   if (scope?.delegated) {
     actor = scope.actor.nome || scope.actor.login;
     detail = {
@@ -113,7 +126,7 @@ async function audit(db, actor, action, type, id, detail = {}) {
   );
 }
 function publicOrder(o) {
-  const { raw_legacy, ...rest } = o;
+  const { raw_legacy, term, ...rest } = o;
   return rest;
 }
 module.exports = {

@@ -219,6 +219,9 @@ async function main() {
     }).format(new Date()),
   );
   await page
+    .getByLabel("Observações do técnico (obrigatórias)", { exact: true })
+    .fill("Instalação realizada, equipamentos testados e cliente orientado.");
+  await page
     .getByLabel("O checklist anexado está preenchido e assinado.", {
       exact: true,
     })

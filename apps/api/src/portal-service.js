@@ -112,7 +112,16 @@ const publicOrder = (order) =>
       "executed_on",
       "execution_finished_at",
       "conference_started_at",
-    ].map((k) => [k, order[k]]),
+      "vehicle_electric",
+      "reported_imeis",
+      "technician_notes",
+      "additional_orders",
+      "group_imeis",
+      "group_status",
+    ].map((k) => [
+      k,
+      k === "additional_orders" ? order[k]?.map(publicOrder) : order[k],
+    ]),
   );
 async function ownBatch(db, userId, id) {
   const b = await batch(db, id);
@@ -383,7 +392,12 @@ async function submit(pool, userId, id, input) {
     if (codes.length > 20) fail(400, "Limite de 20 equipamentos por serviço.");
     const r = await rule(db, order.service, order);
     await verifyEvidence(db, b, r, codes, order);
-    const notes = d.string(input.notes || "", "Relato do serviço", 6000);
+    const notes = d.string(
+      input.notes || "",
+      "Observações do técnico",
+      6000,
+      true,
+    );
     const executedOn =
       input.executed_on || b.executed_on || order.executed_on || d.today();
     require("./financial-calendar").date(executedOn);

@@ -107,14 +107,30 @@ function configureEcosystem(app, pool, cfg, auth) {
         fail(409, "Serviço indisponível. Atualize a tela.");
       const day = cal.date(req.body.executed_on);
       if (day > d.today()) fail(400, "Execução não pode ter data futura.");
+      const notes = d.string(
+        req.body.notes || "",
+        "Observações do técnico",
+        6000,
+        true,
+      );
+      const draft = await d.one(
+        db,
+        "SELECT id FROM zc_batches WHERE order_id=$1 AND state='draft' AND source='portal'",
+        [order.id],
+      );
+      if (!draft)
+        fail(
+          409,
+          "Inicie o registro no ZenField antes de finalizar a execução.",
+        );
       await f.capture(db, order, day);
       await db.query(
-        "UPDATE zc_orders SET status='EXECUÇÃO FINALIZADA',executed_on=$2,execution_finished_at=$3,version=version+1 WHERE id=$1",
+        "UPDATE zc_orders SET status='EXECUÇÃO FINALIZADA',executed_on=$2,execution_finished_at=$3,updated_at=$3,version=version+1 WHERE id=$1",
         [order.id, day, d.now()],
       );
       await db.query(
-        "UPDATE zc_batches SET order_version=order_version+1 WHERE order_id=$1 AND state='draft'",
-        [order.id],
+        "UPDATE zc_batches SET order_version=order_version+1,notes=$2,version=version+1 WHERE order_id=$1 AND state='draft'",
+        [order.id, notes],
       );
       await d.audit(db, actor(req), "execution_finished", "order", order.id, {
         executed_on: day,

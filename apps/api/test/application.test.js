@@ -1078,6 +1078,92 @@ test("cadastro e troca aceitam oito caracteres completos e recusam cada categori
   );
   assert.equal(again.status, 200);
 });
+test("FIPE is authoritative, electric indication persists independently, and edits log friendly names and before/after values", async () => {
+  const made = await request(
+    "/api/orders",
+    "POST",
+    {
+      vehicle: "FIP1A23",
+      service: "Instalação",
+      customer_name: "Cliente FIPE",
+      fipe_value: "R$ 40.000,00",
+      fipe_risk: "Categoria forjada",
+      term: "Termo removido",
+      document_data: {
+        vehicle_type: "Automóvel",
+        fipe_region: "SP",
+        vehicle_electric: true,
+      },
+    },
+    operatorToken,
+  );
+  assert.equal(made.status, 201, JSON.stringify(made.data));
+  assert.equal(made.data.fipe_risk, "Média SP");
+  assert.equal(made.data.document_data.vehicle_electric, true);
+  assert.equal(made.data.tracker_waiver_authorized, false);
+  assert.equal(made.data.term, undefined);
+  const edited = await request(
+    "/api/orders/" + made.data.id,
+    "PATCH",
+    {
+      version: made.data.version,
+      fipe_value: "80.000,01",
+      notes: "Cliente consultado sobre instalação.",
+    },
+    operatorToken,
+  );
+  assert.equal(edited.status, 200, JSON.stringify(edited.data));
+  assert.equal(edited.data.fipe_risk, "Alta");
+  const detail = await fresh(made.data.id);
+  assert.equal(detail.audit_summary.opened_by, "Operador de teste");
+  assert.equal(
+    detail.audit_summary.opened_at,
+    detail.history.find((e) => e.action === "created").created_at,
+  );
+  assert.equal(detail.audit_summary.last_modified_by, "Operador de teste");
+  assert.equal(detail.history[0].detail.changes.fipe_risk.before, "Média SP");
+  assert.equal(detail.history[0].detail.changes.fipe_risk.after, "Alta");
+  assert.equal(detail.history[0].detail.user.name, "Operador de teste");
+  assert.equal(
+    (
+      await request("/api/orders/" + detail.id, "PATCH", {
+        version: detail.version,
+        imei: "123456789012345",
+      })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await request("/api/orders/" + detail.id, "PATCH", {
+        version: detail.version,
+        fipe_value: "-1",
+      })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await request("/api/orders/" + detail.id, "PATCH", {
+        version: detail.version,
+        document_data: { vehicle_electric: "true" },
+      })
+    ).status,
+    400,
+  );
+  // Unknown historical labels survive unrelated edits until the classification inputs change.
+  await pool.query(
+    "UPDATE zc_orders SET fipe_value='',fipe_risk='Classificação histórica',document_data='{}'::jsonb WHERE id=$1",
+    [detail.id],
+  );
+  const historical = await request("/api/orders/" + detail.id, "PATCH", {
+    version: detail.version,
+    notes: "Ajuste de contato legado.",
+  });
+  assert.equal(historical.status, 200, JSON.stringify(historical.data));
+  assert.equal(historical.data.fipe_risk, "Classificação histórica");
+});
+
 test("alteração de senha revoga a sessão anterior e não afeta outras contas", async () => {
   assert.equal(
     (

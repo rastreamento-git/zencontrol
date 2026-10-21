@@ -107,6 +107,8 @@ test("document validation rejects execution metadata, unknown keys and invalid e
     { token: "secret" },
     { equipment: ["unknown"] },
     { technician_brings_equipment: "false" },
+    { vehicle_electric: "false" },
+    { fipe_region: "XX" },
     [],
   ])
     assert.throws(
@@ -119,6 +121,25 @@ test("document validation rejects execution metadata, unknown keys and invalid e
   );
   assert.equal(updated.cpf_cnpj, fixture.document_data.cpf_cnpj);
   assert.equal(updated.brand, "Marca corrigida");
+});
+test("PDF includes FIPE category and electric vehicle warning without granting a tracker waiver", async () => {
+  const pdf = await readPdf(
+    await orderPdf({
+      ...fixture,
+      fipe_risk: "Média RJ",
+      document_data: {
+        ...fixture.document_data,
+        vehicle_type: "Moto",
+        fipe_region: "RJ",
+        vehicle_electric: true,
+      },
+    }),
+  );
+  assert.match(pdf.text, /TIPO FIPE/);
+  assert.match(pdf.text, /Média RJ/);
+  assert.match(pdf.text, /VEÍCULO ELÉTRICO/);
+  assert.match(pdf.text, /não autoriza dispensa/);
+  assert.match(pdf.text, /DEVERÁ LEVAR/);
 });
 test("PDF apresenta dispensa autorizada e exclusão financeira sem instruir instalação", async () => {
   const pdf = await readPdf(
