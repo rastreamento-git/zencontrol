@@ -100,7 +100,7 @@ function matchEquipment(texts, items) {
     equipment_model: item.produto,
   };
 }
-async function identifyEquipment(bytes, technician, cfg) {
+async function identifyEquipment(bytes, technician, cfg, reuse = false) {
   let texts;
   try {
     texts = await decodeEquipmentPhoto(bytes);
@@ -118,14 +118,34 @@ async function identifyEquipment(bytes, technician, cfg) {
       "Peça à central para vincular seu cadastro ao Estoque Pro antes de fotografar o equipamento.",
     );
   let load;
+  const possible = reuse
+    ? [...new Set(texts.flatMap((text) => [...candidates(text)]))]
+        .filter(
+          (code) => code && code.length <= 128 && !/[\x00-\x1f\x7f]/.test(code),
+        )
+        .slice(0, 40)
+    : [];
+  if (reuse && !possible.length)
+    fail(
+      400,
+      "O código lido não identifica um IMEI ou serial válido para reaproveitamento. Fotografe novamente a etiqueta.",
+    );
   try {
-    load = await new StockClient(cfg).items(technician.stock_technician_id);
+    const client = new StockClient(cfg);
+    load = reuse
+      ? await client.reusableItems(possible)
+      : await client.items(technician.stock_technician_id);
   } catch {
     fail(
       503,
       "A consulta ao estoque está indisponível. Sua foto ainda não foi salva. Aguarde um pouco e envie novamente.",
     );
   }
+  if (reuse && !load.items?.length)
+    fail(
+      400,
+      "O código não corresponde a um equipamento já instalado para reaproveitamento. Confira a etiqueta e a modalidade da reinstalação com a central.",
+    );
   return matchEquipment(texts, load.items || []);
 }
 module.exports = { decodeEquipmentPhoto, matchEquipment, identifyEquipment };

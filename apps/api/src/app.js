@@ -16,6 +16,7 @@ const { WPPClient, SGAClient, IntegrationError } = require("./integrations");
 const { orderPdf, settlementPdf } = require("./pdf");
 const { configurePortal } = require("./portal-routes");
 const portal = require("./portal-service");
+const { documentOrder } = require("./order-document-load");
 const {
   groupedPage,
   presentOrders,
@@ -115,16 +116,16 @@ function createApp(pool, env = process.env) {
     const today = d.today();
     const totals = await d.one(
       pool,
-      "SELECT count(*)::int total,count(*) FILTER(WHERE substring(scheduled_at,1,10)=$1)::int today,count(*) FILTER(WHERE scheduled_at<>'' AND substring(scheduled_at,1,10)<$1 AND status NOT IN ('CONCLUÍDO','CANCELADO'))::int overdue FROM zc_orders WHERE deleted_at=''",
+      "SELECT count(*)::int total,count(*) FILTER(WHERE substring(scheduled_at,1,10)=$1)::int today,count(*) FILTER(WHERE scheduled_at<>'' AND substring(scheduled_at,1,10)<$1 AND status NOT IN ('CONCLUÍDO','CANCELADO'))::int overdue FROM zc_orders WHERE deleted_at='' AND parent_order_id IS NULL",
       [today],
     );
     const status = await d.rows(
       pool,
-      "SELECT status,count(*)::int n FROM zc_orders WHERE deleted_at='' GROUP BY status",
+      "SELECT status,count(*)::int n FROM zc_orders WHERE deleted_at='' AND parent_order_id IS NULL GROUP BY status",
     );
     const technicians = await d.rows(
       pool,
-      "SELECT t.id,t.name,count(o.id)::int open_orders FROM zc_technicians t LEFT JOIN zc_orders o ON o.technician_id=t.id AND o.deleted_at='' AND o.status NOT IN ('CONCLUÍDO','CANCELADO') WHERE t.active=true GROUP BY t.id ORDER BY open_orders DESC,t.name LIMIT 8",
+      "SELECT t.id,t.name,count(o.id)::int open_orders FROM zc_technicians t LEFT JOIN zc_orders o ON o.technician_id=t.id AND o.deleted_at='' AND o.parent_order_id IS NULL AND o.status NOT IN ('CONCLUÍDO','CANCELADO') WHERE t.active=true GROUP BY t.id ORDER BY open_orders DESC,t.name LIMIT 8",
     );
     res.json({
       totals,
@@ -138,7 +139,7 @@ function createApp(pool, env = process.env) {
         (
           await d.one(
             pool,
-            "SELECT count(*) n FROM zc_batches WHERE state IN ('needs_review','ready','submitted','stock_failed')",
+            "SELECT count(*) n FROM zc_batches WHERE source<>'bundle' AND state IN ('needs_review','ready','submitted','stock_failed')",
           )
         ).n,
       ),
@@ -270,12 +271,14 @@ function createApp(pool, env = process.env) {
   app.delete("/api/orders/:id", admin, async (req, res) => {
     await transaction(pool, async (db) => {
       const order = await o.get(db, req.params.id);
+      if (order.parent_order_id && order.document_data?.equipment_counts)
+        fail(409, "Arquive o atendimento pela OS principal.");
       await o.guard(db, order.id);
       if (req.body.version !== order.version) fail(409, "A OS mudou.");
       if (
         await d.one(
           db,
-          "SELECT 1 FROM zc_settlement_orders WHERE order_id=$1",
+          "SELECT 1 FROM zc_settlement_orders WHERE order_id=$1 OR order_id IN (SELECT id FROM zc_orders WHERE parent_order_id=$1)",
           [order.id],
         )
       )
@@ -290,8 +293,13 @@ function createApp(pool, env = process.env) {
         { deleted_at: d.now() },
         true,
       );
+      if (order.document_data?.equipment_counts)
+        await db.query(
+          "UPDATE zc_orders SET deleted_at=$2,status='CANCELADO',updated_at=$2,version=version+1 WHERE parent_order_id=$1 AND deleted_at=''",
+          [order.id, d.now()],
+        );
       await db.query(
-        "UPDATE zc_financial_ledger SET state='cancelled' WHERE order_id=$1",
+        "UPDATE zc_financial_ledger SET state='cancelled' WHERE order_id=$1 OR order_id IN (SELECT id FROM zc_orders WHERE parent_order_id=$1)",
         [order.id],
       );
       await require("./notifications").orderEvent(
@@ -320,7 +328,7 @@ function createApp(pool, env = process.env) {
     });
   });
   app.get("/api/orders/:id/pdf", async (req, res) => {
-    const order = await o.get(pool, req.params.id);
+    const order = await documentOrder(pool, await o.get(pool, req.params.id));
     res
       .type("pdf")
       .attachment(order.id + ".pdf")
@@ -631,7 +639,7 @@ function createApp(pool, env = process.env) {
     res.json({
       items: await d.rows(
         pool,
-        "SELECT b.*,t.name technician_name,(SELECT count(*)::int FROM zc_evidence e WHERE e.batch_id=b.id AND e.state='ready') ready_count FROM zc_batches b JOIN zc_technicians t ON t.id=b.technician_id ORDER BY b.created_at DESC LIMIT 100",
+        "SELECT b.*,t.name technician_name,(SELECT count(*)::int FROM zc_evidence e WHERE e.batch_id=b.id AND e.state='ready') ready_count FROM zc_batches b JOIN zc_technicians t ON t.id=b.technician_id WHERE b.source<>'bundle' ORDER BY b.created_at DESC LIMIT 100",
       ),
     }),
   );

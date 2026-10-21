@@ -241,3 +241,106 @@ test("reused serial keeps each historical installation linked to its own OS with
     "OS-HISTORY-TWO",
   ]);
 });
+
+test("reused devices require installed inventory, preserve load quantities and record an idempotent reinstallation event", async () => {
+  const code = "reuse-contract-001";
+  await move(pool, "entrada", { produto_id: pid, seriais: [code] });
+  await move(pool, "transferir", {
+    produto_id: pid,
+    tecnico_id: tid,
+    seriais: [code],
+  });
+  const payload = {
+    source_system: "zencontrol",
+    order_id: "REUSE-ORIGINAL",
+    submission_id: "REUSE-ORIGINAL-SUB",
+    technician_id: tid,
+    serials: [code],
+    operator: "Operador original",
+  };
+  assert.equal(
+    (await request("/installations", payload, "reuse-original-key-1234"))
+      .status,
+    200,
+  );
+  assert.equal(
+    (await request("/reusable-items", { serials: [code] }, null, "invalid"))
+      .status,
+    401,
+  );
+  const available = await request("/reusable-items", {
+    serials: [code, "zero-003"],
+  });
+  assert.equal(available.status, 200);
+  assert.deepEqual(
+    available.data.items.map((item) => item.codigo_serial),
+    [code],
+  );
+  const balances = (
+    await pool.query("SELECT * FROM estoque_tecnicos ORDER BY id")
+  ).rows;
+  const moves = (await pool.query("SELECT count(*)::int n FROM movimentacoes"))
+    .rows[0].n;
+  const reuse = {
+    ...payload,
+    order_id: "REUSE-SECOND",
+    submission_id: "REUSE-SECOND-SUB",
+    technician_id: other,
+    operator: "Outro operador",
+    reuse: true,
+  };
+  const results = await Promise.all([
+    request("/installations", reuse, "reuse-second-key-1234"),
+    request("/installations", reuse, "reuse-second-key-1234"),
+  ]);
+  assert.ok(
+    results.every(
+      (result) => result.status === 200 && result.data.reused === true,
+    ),
+  );
+  assert.equal(results[0].data.receipt_id, results[1].data.receipt_id);
+  assert.deepEqual(
+    (await pool.query("SELECT * FROM estoque_tecnicos ORDER BY id")).rows,
+    balances,
+  );
+  assert.equal(
+    (await pool.query("SELECT count(*)::int n FROM movimentacoes")).rows[0].n,
+    moves,
+  );
+  const events = (
+    await pool.query(
+      "SELECT * FROM eventos_seriais WHERE zen_order_id='REUSE-SECOND'",
+    )
+  ).rows;
+  assert.equal(events.length, 1);
+  assert.equal(events[0].status_anterior, "INSTALADO");
+  assert.equal(events[0].status_novo, "INSTALADO");
+  assert.equal(events[0].tecnico_id, other);
+  assert.equal(events[0].movimentacao_id, null);
+  const history = await request("/technicians/" + other + "/history");
+  assert.ok(
+    history.data.items.some(
+      (item) =>
+        item.order_id === "REUSE-SECOND" && item.tipo === "REINSTALACAO",
+    ),
+  );
+  const invalid = await request(
+    "/installations",
+    {
+      ...reuse,
+      order_id: "REUSE-INVALID",
+      submission_id: "REUSE-INVALID-SUB",
+      serials: ["zero-003"],
+    },
+    "reuse-invalid-key-1234",
+  );
+  assert.equal(invalid.status, 409);
+  assert.equal(
+    (
+      await pool.query(
+        "SELECT count(*)::int n FROM zencontrol_installations WHERE order_id='REUSE-INVALID'",
+      )
+    ).rows[0].n,
+    0,
+  );
+});

@@ -27,7 +27,6 @@ test("standalone layout preserves four sections and uses OS assignment instead o
     "20/10/2026 às 14:30",
     "1x Rastreador",
     "1x Tag",
-    "DEVERÁ LEVAR",
     "portal do técnico",
   ])
     assert.ok(pdf.text.includes(text), text);
@@ -53,7 +52,13 @@ test("default document really omits identifiers while integral document retains 
   }
   assert.ok(masked.text.includes("Associado Fictício ***"));
   assert.ok(masked.text.includes("***.***.***-**"));
-  assert.ok(masked.text.includes(fixture.contact));
+  assert.ok(
+    masked.text.includes(
+      require("../../../packages/domain/order-fields.mjs").formatPhone(
+        fixture.contact,
+      ),
+    ),
+  );
   assert.ok(masked.text.includes(fixture.document_data.customer_address));
 });
 test("long instructions paginate without clipped text, missing continuation or empty pages", async () => {
@@ -79,7 +84,7 @@ test("long instructions paginate without clipped text, missing continuation or e
     }
   }
 });
-test("incomplete appointments stay explicit and installation instructions respect who carries equipment", async () => {
+test("incomplete appointments stay explicit and carrying equipment is implicit", async () => {
   const pdf = await readPdf(
     await orderPdf({
       ...fixture,
@@ -94,7 +99,8 @@ test("incomplete appointments stay explicit and installation instructions respec
   );
   assert.ok(pdf.text.includes("A combinar"));
   assert.ok(pdf.text.includes("NÃO ATRIBUÍDO"));
-  assert.ok(pdf.text.includes("NÃO levará"));
+  assert.ok(!pdf.text.includes("NÃO levará"));
+  assert.ok(!pdf.text.includes("DEVERÁ LEVAR"));
   assert.ok(pdf.text.includes("pendente de definição"));
   assert.equal(appointment("2026-10-20T14:30"), "20/10/2026 às 14:30");
   assert.equal(appointment("2026-10-20T17:30:00Z"), "20/10/2026 às 14:30");
@@ -139,7 +145,7 @@ test("PDF includes FIPE category and electric vehicle warning without granting a
   assert.match(pdf.text, /Média RJ/);
   assert.match(pdf.text, /VEÍCULO ELÉTRICO/);
   assert.match(pdf.text, /não autoriza dispensa/);
-  assert.match(pdf.text, /DEVERÁ LEVAR/);
+  assert.doesNotMatch(pdf.text, /DEVERÁ LEVAR/);
 });
 test("PDF apresenta dispensa autorizada e exclusão financeira sem instruir instalação", async () => {
   const pdf = await readPdf(

@@ -123,7 +123,9 @@ function configureEcosystem(app, pool, cfg, auth) {
           409,
           "Inicie o registro no ZenField antes de finalizar a execução.",
         );
-      await f.capture(db, order, day);
+      if (order.parent_order_id && require("./equipment-plan").bundled(order))
+        fail(409, "Registre a execução na OS principal.");
+      await require("./bundled-service").captureGroup(db, order, day);
       await db.query(
         "UPDATE zc_orders SET status='EXECUÇÃO FINALIZADA',executed_on=$2,execution_finished_at=$3,updated_at=$3,version=version+1 WHERE id=$1",
         [order.id, day, d.now()],

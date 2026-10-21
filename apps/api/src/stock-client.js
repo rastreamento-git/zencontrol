@@ -79,6 +79,9 @@ class StockClient {
   items(technicianId) {
     return this.request("/technicians/" + technicianId + "/items");
   }
+  reusableItems(codes) {
+    return this.request("/reusable-items", { serials: codes });
+  }
   history(id, page = 1) {
     return this.request(`/technicians/${id}/history?page=${page}`);
   }
@@ -92,6 +95,7 @@ class StockClient {
       r.submission_id !== payload.submission_id ||
       r.technician_id !== payload.technician_id ||
       r.status !== "INSTALADO" ||
+      (payload.reuse === true && r.reused !== true) ||
       typeof r.receipt_id !== "string" ||
       JSON.stringify(r.serials) !== JSON.stringify(payload.serials)
     )

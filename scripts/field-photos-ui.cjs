@@ -72,8 +72,7 @@ async function main() {
     "/orders/" + assigned.id,
     {
       version: assigned.version,
-      document_data: { equipment: ["tracker", "tag"] },
-      additional: "Rastreador Extra",
+      document_data: { equipment_counts: { tracker: 1, tag: 1 } },
     },
     admin,
     "PATCH",
@@ -296,41 +295,42 @@ async function main() {
   assert.equal(batch.files.filter((f) => f.kind === "other").length, 0);
   assert.equal(batch.files.filter((f) => f.kind === "label").length, 2);
   assert.equal(planned.additional_orders.length, 1);
+  assert.equal(
+    await page
+      .getByRole("button", { name: /Registrar equipamento adicional/ })
+      .count(),
+    0,
+  );
   await page
-    .getByRole("button", {
-      name: "Registrar equipamento adicional · RASTREADOR · AGENDADO",
-      exact: true,
-    })
-    .click();
-  await page
-    .getByText("OS de equipamento adicional · RASTREADOR", { exact: true })
+    .getByText("Atendimento com equipamentos adicionais", { exact: true })
     .waitFor();
-  await page
-    .getByRole("button", { name: "Começar registro", exact: true })
-    .click();
-  await page
-    .getByRole("heading", {
-      name: "Equipamentos previstos nesta OS",
-      exact: true,
-    })
-    .waitFor();
-  assert.equal(await page.locator(".portal-equipment-requirement").count(), 1);
-  await page
-    .locator(".portal-equipment-requirement")
-    .getByText("1 rastreador", { exact: true })
-    .waitFor();
-  await page
-    .locator("section.portal-step")
-    .filter({
-      has: page.getByRole("heading", {
-        name: "Equipamentos previstos nesta OS",
-        exact: true,
-      }),
-    })
-    .screenshot({
-      path: path.join(directory, "additional-equipment-os.png"),
-      timeout: 60000,
-    });
+  const submittedOrder = await api("/orders/" + order.id, undefined, admin);
+  assert.deepEqual(submittedOrder.group_imeis, [
+    "123456789012345",
+    "TAG-HOMO-001",
+  ]);
+  const review = await api("/batches/" + batch.id, undefined, admin);
+  await api(
+    "/batches/" + batch.id + "/approve",
+    {
+      version: review.version,
+      order_version: review.current_order.version,
+      serials: review.imeis,
+      checklist_reviewed: true,
+      reason: "Etiquetas, veículo e checklist conferidos no navegador.",
+    },
+    admin,
+  );
+  for (let i = 0; i < 60; i++) {
+    const complete = await api("/orders/" + order.id, undefined, admin);
+    if (complete.status === "CONCLUÍDO") {
+      assert.equal(complete.additional_orders.length, 1);
+      assert.equal(complete.additional_orders[0].status, "CONCLUÍDO");
+      break;
+    }
+    if (i === 59) throw Error("Confirmação do estoque não finalizou.");
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
   assert.deepEqual(errors, []);
   console.log(
     JSON.stringify({

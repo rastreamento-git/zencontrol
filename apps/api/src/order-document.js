@@ -4,6 +4,15 @@ const {
   fipeCategories,
   fipeRegions,
 } = require("../../../packages/domain/fipe.mjs");
+const {
+  addressFields,
+  brazilStates,
+  formatAddress,
+  formatPhone,
+  phoneDigits,
+  displayedService,
+  schedulingServices,
+} = require("../../../packages/domain/order-fields.mjs");
 const documentFields = {
   cpf_cnpj: 30,
   rg: 30,
@@ -16,6 +25,13 @@ const documentFields = {
   vehicle_type: 120,
   category: 120,
   fipe_region: 10,
+  scheduled_service: 30,
+  visit_outcome: 30,
+  ...Object.fromEntries(
+    ["customer", "service"].flatMap((prefix) =>
+      addressFields.map(([key, , max]) => [prefix + "_" + key, max]),
+    ),
+  ),
 };
 const equipmentLabels = {
   tracker: "1x Rastreador",
@@ -30,6 +46,10 @@ function normalizeDocumentData(value, previous = {}) {
     "equipment",
     "technician_brings_equipment",
     "vehicle_electric",
+    "service_address_same",
+    "equipment_counts",
+    "reinstallation",
+    "reuse_equipment",
   ];
   if (Object.keys(value).some((k) => !allowed.includes(k)))
     fail(
@@ -66,6 +86,50 @@ function normalizeDocumentData(value, previous = {}) {
       value.vehicle_electric,
       "Veículo elétrico",
     );
+  for (const key of [
+    "service_address_same",
+    "reinstallation",
+    "reuse_equipment",
+  ])
+    if (value[key] !== undefined) result[key] = d.boolean(value[key], key);
+  if (
+    value.scheduled_service !== undefined &&
+    !schedulingServices.includes(result.scheduled_service)
+  )
+    fail(400, "Selecione Instalação, Manutenção ou Retirada.");
+  if (
+    value.visit_outcome !== undefined &&
+    !["", "unproductive", "reschedule"].includes(result.visit_outcome)
+  )
+    fail(400, "Sinalização de atendimento inválida.");
+  for (const prefix of ["customer", "service"]) {
+    const key = prefix + "_state";
+    if (result[key]) {
+      result[key] = result[key].toUpperCase();
+      if (!brazilStates.includes(result[key]))
+        fail(400, "Selecione uma UF válida.");
+    }
+  }
+  if (addressFields.some(([key]) => Object.hasOwn(result, "customer_" + key)))
+    result.customer_address = formatAddress(result);
+  if (value.equipment_counts !== undefined) {
+    const counts = value.equipment_counts;
+    if (
+      !counts ||
+      typeof counts !== "object" ||
+      Array.isArray(counts) ||
+      Object.keys(counts).some((key) => !["tracker", "tag"].includes(key)) ||
+      [counts.tracker, counts.tag].some(
+        (n) => !Number.isSafeInteger(n) || n < 0 || n > 20,
+      ) ||
+      counts.tracker + counts.tag > 20
+    )
+      fail(
+        400,
+        "Informe as quantidades de rastreadores e TAGs, com até 20 equipamentos no atendimento.",
+      );
+    result.equipment_counts = { tracker: counts.tracker, tag: counts.tag };
+  }
   return result;
 }
 function appointment(value) {
@@ -108,22 +172,20 @@ function hidden(value, kind, masked) {
 }
 function orderDocument(order, masked = true, { portalUrl = "" } = {}) {
   const data = order.document_data || {};
-  const equipment = Object.keys(equipmentLabels)
-    .filter((k) => (data.equipment || []).includes(k))
-    .map((k) => equipmentLabels[k]);
+  const equipment = data.equipment_counts
+    ? Object.entries(data.equipment_counts)
+        .filter(([, count]) => count > 0)
+        .map(
+          ([key, count]) =>
+            `${count}x ${key === "tracker" ? "Rastreador" : "TAG"}`,
+        )
+    : Object.keys(equipmentLabels)
+        .filter((k) => (data.equipment || []).includes(k))
+        .map((k) => equipmentLabels[k]);
   const instructions = [];
   if (data.vehicle_electric === true)
     instructions.push(
       "VEÍCULO ELÉTRICO: confirme com o cliente a autorização para instalar o rastreador. A indicação de veículo elétrico não autoriza dispensa do equipamento.",
-      "",
-    );
-  if (order.parent_order_id)
-    instructions.push(
-      "OS DE EQUIPAMENTO ADICIONAL: " +
-        order.additional_equipment +
-        ". OS principal: " +
-        order.parent_order_id +
-        ". Atendimento e remuneração registrados separadamente.",
       "",
     );
   if (order.tracker_waiver_authorized) {
@@ -136,13 +198,25 @@ function orderDocument(order, masked = true, { portalUrl = "" } = {}) {
     instructions.push(
       "EQUIPAMENTOS SELECIONADOS: " + equipment.join(" | ") + ".",
     );
-    instructions.push(
-      data.technician_brings_equipment !== false
-        ? "STATUS: O técnico DEVERÁ LEVAR os equipamentos para o local."
-        : "STATUS: O técnico NÃO levará os equipamentos (já se encontram com o cliente).",
-    );
     instructions.push("");
   }
+  if (data.reinstallation)
+    instructions.push(
+      data.reuse_equipment
+        ? "REINSTALAÇÃO COM REAPROVEITAMENTO: fotografar as etiquetas dos aparelhos existentes. Não retirar novos equipamentos da carga."
+        : "REINSTALAÇÃO SEM REAPROVEITAMENTO: instalar equipamentos da carga do técnico.",
+      "",
+    );
+  if (data.visit_outcome === "unproductive")
+    instructions.push(
+      "VISITA IMPRODUTIVA: registrar o motivo nas observações. A remuneração segue a tarifa de visita improdutiva.",
+      "",
+    );
+  if (data.visit_outcome === "reschedule")
+    instructions.push(
+      "REAGENDAMENTO: aguardar a confirmação de uma nova data pela central.",
+      "",
+    );
   instructions.push(order.notes || "Sem observações adicionais.");
   const controlled = order.workflow_mode === "controlled";
   return {
@@ -151,7 +225,9 @@ function orderDocument(order, masked = true, { portalUrl = "" } = {}) {
     draft: !order.technician_id || !order.scheduled_at,
     customer: {
       name: masked ? maskedName(order.customer_name) : order.customer_name,
-      contact: order.contact,
+      contact: [10, 11].includes(phoneDigits(order.contact).length)
+        ? formatPhone(order.contact)
+        : order.contact,
       document: hidden(data.cpf_cnpj, "cpf_cnpj", masked),
       rg: hidden(data.rg, "rg", masked),
       address: data.customer_address,
@@ -183,7 +259,7 @@ function orderDocument(order, masked = true, { portalUrl = "" } = {}) {
       electric: data.vehicle_electric === true,
     },
     // Intentionally no editable overrides: these three values come from the OS.
-    service: order.service,
+    service: displayedService(order),
     technician: order.technician_name || "NÃO ATRIBUÍDO",
     appointment: appointment(order.scheduled_at),
     location: order.location,
@@ -305,6 +381,13 @@ function mapSgaVehicle(v) {
       cpf_cnpj: scalar(v.cpf, v.cnpj, v.cpf_cnpj),
       rg: scalar(v.rg),
       customer_address: address,
+      customer_street: scalar(v.logradouro),
+      customer_number: scalar(v.numero),
+      customer_block: scalar(v.bloco),
+      customer_complement: scalar(v.complemento),
+      customer_neighborhood: scalar(v.bairro),
+      customer_city: scalar(v.cidade, v.municipio),
+      customer_state: scalar(v.estado, v.uf).toUpperCase(),
       plate: scalar(v.placa),
       renavam: scalar(v.renavam),
       brand: scalar(v.marca, v.descricao_marca),

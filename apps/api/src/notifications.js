@@ -23,6 +23,7 @@ async function notify(
 }
 async function orderEvent(db, order, action, detail = {}) {
   if (order.workflow_mode !== "controlled") return;
+  if (order.parent_order_id && order.document_data?.equipment_counts) return;
   const key = `${action}:${order.id}:${order.version}`;
   const info = {
     order_id: order.id,

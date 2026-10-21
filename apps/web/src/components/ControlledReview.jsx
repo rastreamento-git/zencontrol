@@ -83,6 +83,14 @@ export default function ControlledReview({ batch, reload, onSaved }) {
         .catch(() => {});
   }, [batch.id]);
   const [checklistReviewed, setChecklistReviewed] = useState(false);
+  const [reuseConfirmed, setReuseConfirmed] = useState(false);
+  const reuse =
+    batch.current_order?.document_data?.reinstallation &&
+    batch.current_order?.document_data?.reuse_equipment;
+  useEffect(() => {
+    setReuseConfirmed(false);
+    setChecklistReviewed(false);
+  }, [batch.id, batch.version]);
   const [codes, setCodes] = useState(batch.imeis || []),
     [reason, setReason] = useState(""),
     [confirmed, setConfirmed] = useState(false),
@@ -124,9 +132,11 @@ export default function ControlledReview({ batch, reload, onSaved }) {
         </div>
       )}
       <div className="zc-notice">
-        {batch.rule?.stock_action === "install"
-          ? "Ao aprovar, o Estoque Pro valida os IMEIs na carga do técnico e registra a instalação. A OS será concluída após o recibo de confirmação."
-          : "A conclusão deste serviço exige sua conferência das evidências. Este serviço não registra instalação no estoque."}
+        {reuse
+          ? "Confira se as etiquetas e fotos correspondem aos equipamentos reaproveitados neste veículo. A aprovação registra a reinstalação sem consumir novamente a carga do técnico."
+          : batch.rule?.stock_action === "install"
+            ? "Ao aprovar, o Estoque Pro valida os IMEIs na carga do técnico e registra a instalação. A OS será concluída após o recibo de confirmação."
+            : "A conclusão deste serviço exige sua conferência das evidências. Este serviço não registra instalação no estoque."}
       </div>
       {batch.state === "stock_failed" && (
         <div className="zc-notice amber">
@@ -193,12 +203,14 @@ export default function ControlledReview({ batch, reload, onSaved }) {
               setSeriais={(next) => {
                 setCodes(next);
                 setConfirmed(false);
+                setReuseConfirmed(false);
               }}
             />
           </fieldset>
           <p className="zc-muted">
-            Cada código precisa corresponder à foto de etiqueta e à carga do
-            técnico responsável.
+            {reuse
+              ? "Cada código deve corresponder a um equipamento existente, já instalado, e às fotos deste veículo."
+              : "Cada código precisa corresponder à foto de etiqueta e à carga do técnico responsável."}
           </p>
         </div>
       )}
@@ -234,6 +246,17 @@ export default function ControlledReview({ batch, reload, onSaved }) {
             onChange={(e) => setChecklistReviewed(e.target.checked)}
           />
           Abri o checklist e conferi o preenchimento e a assinatura.
+        </label>
+      )}
+      {reviewable && reuse && (
+        <label className="zc-checkbox">
+          <input
+            type="checkbox"
+            checked={reuseConfirmed}
+            disabled={busy}
+            onChange={(e) => setReuseConfirmed(e.target.checked)}
+          />
+          Conferi que os equipamentos foram reaproveitados neste veículo.
         </label>
       )}
       {reviewable && (
@@ -284,7 +307,8 @@ export default function ControlledReview({ batch, reload, onSaved }) {
               busy ||
               !confirmed ||
               reason.trim().length < 5 ||
-              (batch.capture_version >= 2 && !checklistReviewed)
+              (batch.capture_version >= 2 && !checklistReviewed) ||
+              (reuse && !reuseConfirmed)
             }
             onClick={() =>
               act(async () => {
@@ -294,6 +318,7 @@ export default function ControlledReview({ batch, reload, onSaved }) {
                   reason,
                   serials: codes,
                   checklist_reviewed: checklistReviewed,
+                  reuse_confirmed: reuseConfirmed,
                 });
                 notify(
                   r.data.status === "AGUARDANDO ESTOQUE"

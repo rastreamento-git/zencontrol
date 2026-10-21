@@ -1,4 +1,9 @@
 const d = require("./domain");
+const {
+  displayedService,
+  formatPhone,
+  phoneDigits,
+} = require("../../../packages/domain/order-fields.mjs");
 
 // An additional OS keeps its own stock and financial records, but belongs to
 // the same attendance in operational lists. A technician only groups records
@@ -47,7 +52,7 @@ async function presentOrders(db, orders, { technicianId = null } = {}) {
   const all = [...orders, ...children];
   const batches = await d.rows(
     db,
-    "SELECT id,order_id,state,imeis,notes,submitted_at,created_at FROM zc_batches WHERE order_id=ANY($1::text[]) AND source='portal' AND (submitted_at<>'' OR state='draft') ORDER BY created_at DESC,id DESC",
+    "SELECT id,order_id,state,imeis,notes,submitted_at,created_at FROM zc_batches WHERE order_id=ANY($1::text[]) AND source IN ('portal','bundle') AND (submitted_at<>'' OR state='draft') ORDER BY created_at DESC,id DESC",
     [all.map((o) => o.id)],
   );
   const present = (order) => {
@@ -61,7 +66,16 @@ async function presentOrders(db, orders, { technicianId = null } = {}) {
     const codes = submitted?.imeis || [];
     return {
       ...d.publicOrder(order),
+      service_label: displayedService(order),
+      contact: [10, 11].includes(phoneDigits(order.contact).length)
+        ? formatPhone(order.contact)
+        : order.contact,
       vehicle_electric: order.document_data?.vehicle_electric === true,
+      bundled_equipment: !!order.document_data?.equipment_counts,
+      reuse_equipment:
+        order.document_data?.reinstallation === true &&
+        order.document_data?.reuse_equipment === true,
+      visit_outcome: order.document_data?.visit_outcome || "",
       imei:
         order.workflow_mode === "controlled" ? codes.join(", ") : order.imei,
       reported_imeis: codes,

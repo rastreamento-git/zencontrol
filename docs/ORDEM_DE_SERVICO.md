@@ -9,7 +9,7 @@ A emissão usa o modelo funcional do gerador independente fornecido como referê
 | Dados do associado | Nome, contato, CPF/CNPJ, RG e endereço do associado |
 | Informações do veículo | Placa, Renavam, chassi, marca/modelo, ano, categoria/tipo e FIPE |
 | Detalhes do atendimento | Serviço, técnico responsável, data/horário e local do serviço |
-| Instruções / observações | Equipamentos previstos, orientação de transporte e relato/instruções da OS |
+| Instruções / observações | Quantidades de equipamentos e relato/instruções da OS |
 
 O identificador da OS aparece no cabeçalho. O retorno é orientado pelo portal do técnico nas novas OS e mantém o fluxo compatível nas OS legadas. Instruções longas recebem páginas de continuação; as fontes são incorporadas para manter a aparência do documento nos diferentes leitores.
 
@@ -72,10 +72,25 @@ O backend usa o mesmo cálculo do formulário, em centavos, e ignora substituiç
 
 O IMEI deixa de ser um campo de digitação na central. Os códigos informados pelo técnico aparecem na OS e na listagem depois do envio para validação, inclusive durante a conferência. O rascunho não publica IMEIs. Um envio devolvido continua identificado como pendente de correção, preservando o histórico.
 
-O atendimento permanece em **Em atendimento** enquanto houver uma instalação adicional pendente, mesmo que a OS principal esteja concluída. A OS principal e seus equipamentos adicionais ocupam **uma linha** nas listagens operacionais; busca, paginação e filtros consideram também os adicionais. Os adicionais são acessíveis dentro do atendimento para registrar suas evidências. Cada registro continua com conferência, estoque e composição financeira próprios, permitindo contabilizar cada instalação uma única vez. Se um adicional for reatribuído, o ZenField mostra apenas os registros do técnico selecionado.
+O atendimento permanece em **Em atendimento** enquanto houver uma instalação adicional pendente, mesmo que a OS principal esteja concluída. A OS principal e seus equipamentos adicionais ocupam **uma linha** nas listagens operacionais; busca, paginação e filtros consideram também os adicionais. Nas novas OS com quantidades, todas as etiquetas, fotos e observações são enviadas no mesmo atendimento e passam por uma única conferência. Uma transação de estoque instala todos os aparelhos e seu recibo confirma também os registros financeiros internos, um por equipamento. Registros antigos mantêm a rastreabilidade do fluxo anterior. Se um adicional for reatribuído, o ZenField mostra apenas os registros do técnico selecionado.
 
 O campo **Termo** foi retirado do formulário e das respostas públicas da OS. O histórico legado permanece no banco e nos backups. As **Observações da central** ficam separadas das **Observações do técnico**, que são obrigatórias para finalizar a execução e enviar para conferência no ZenField. A central consulta o relato no retorno técnico, sem editar o original.
 
 A OS mostra responsáveis pela abertura, baixa e última modificação, usando o nome de exibição do usuário. O histórico reúne eventos da OS, evidências e adicionais. As edições da central registram os valores anteriores e novos; a supervisão no ZenField mantém a identidade real do administrador/operador e o técnico selecionado. Eventos novos guardam também o identificador e login para manter rastreabilidade. Autoria antiga desconhecida é explicitada como legado.
 
-Esta atualização usa `document_data`, envios e auditoria já existentes, sem nova migração de estrutura. Ela deve publicar a API e os dois frontends juntos na homologação. Validação: `npm test --workspace apps/api`, builds dos dois frontends e `ZEN_CHROMIUM_PATH=/caminho/chromium node scripts/order-management-ui.cjs` após `npm run homologation:build`.
+A migração `009_equipment_quantities.sql` permite múltiplos adicionais do mesmo tipo sem alterar OS, fotos, recibos ou valores históricos. Ela deve publicar a API e os dois frontends juntos na homologação. Validação: `npm test --workspace apps/api`, builds dos dois frontends e `ZEN_CHROMIUM_PATH=/caminho/chromium node scripts/order-management-ui.cjs` após `npm run homologation:build`.
+
+
+## Cadastro e PDF único do atendimento
+
+- O formulário de agendamento oferece **Instalação, Manutenção e Retirada**. Instalação permite marcar **Reinstalação**, com ou sem reaproveitamento. Registros antigos de outros tipos continuam legíveis.
+- **Visita improdutiva** preserva o serviço previsto e usa a tarifa cadastrada de improdutiva, sem instalação ou adicionais de equipamento. **Reagendamento** mantém a OS em REAGENDAR, sem permitir finalizar/enviar execução até a central confirmar a nova data e retirar a sinalização.
+- Instalações começam com **1 rastreador e 0 TAGs**. Os dois campos de quantidade aceitam até 20 aparelhos no total; 2 rastreadores e 2 TAGs significam 1 serviço base + 3 adicionais. As tarifas do técnico definem os valores; não há preço inventado por equipamento.
+- Cada unidade adicional tem um registro interno de serviço/financeiro. O técnico fotografa todos os equipamentos na mesma OS, anexa um checklist e envia uma única vez. A central aprova uma vez, e o Estoque Pro confirma todos os seriais atomicamente, sem duplicar movimentos.
+- O PDF da OS principal ou de um adicional reúne o atendimento completo, sob o identificador principal. Quantidades, endereço, contato, serviço e data saem no mesmo documento; não são gerados PDFs separados por equipamento. O acesso do técnico continua restrito ao seu atendimento.
+- Endereço do associado: **Logradouro, Número, Bloco, Complemento, Bairro, Município e Estado**. O atendimento usa esse endereço por padrão; desmarcar a opção abre os mesmos campos para outro local. Endereços legados não são divididos por suposição e permanecem disponíveis para conferência.
+- O contato recebe a máscara **(xx)xxxxx-xxxx**; números fixos de dez dígitos também são formatados. A informação sobre levar equipamentos foi retirada do formulário e do PDF: o transporte pelo técnico é implícito.
+
+No reaproveitamento, a identificação da foto consulta apenas os códigos lidos entre aparelhos já instalados. A central confirma explicitamente que são os equipamentos reaproveitados naquele veículo. O estoque registra o evento de reinstalação e um recibo idempotente, sem consumir novamente a carga ou gerar outra movimentação de uso final. Sem reaproveitamento, os aparelhos precisam estar disponíveis na carga, como numa instalação normal.
+
+O adicional de instalação de bloqueio fica previsto para uma etapa futura.

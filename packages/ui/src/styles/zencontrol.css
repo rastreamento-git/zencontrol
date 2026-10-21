@@ -1,4 +1,13 @@
 /* Componentes de domínio. Cores e estrutura vêm do tema Estoque Pro 1.4. */
+.zc-equipment-quantities {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  max-width: 440px;
+}
+.zc-equipment-quantities input {
+  width: 100%;
+}
 .zc-audit-summary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

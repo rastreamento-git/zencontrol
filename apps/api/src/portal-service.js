@@ -2,7 +2,7 @@ const { randomUUID, createHash } = require("node:crypto");
 const sharp = require("sharp");
 const { createMediaStore } = require("./media-store");
 const { identifyEquipment } = require("./equipment-photo");
-const { requiredEquipment } = require("./equipment-plan");
+const { requiredEquipment, bundled, reused } = require("./equipment-plan");
 const { PDFDocument } = require("pdf-lib");
 const { transaction } = require("./database");
 const { fail, integer, serials } = require("./errors");
@@ -89,6 +89,10 @@ const snapshot = (order) => ({
   technician_id: order.technician_id,
   customer_name: order.customer_name,
   scheduled_at: order.scheduled_at,
+  equipment_counts: order.document_data?.equipment_counts,
+  reinstallation: order.document_data?.reinstallation,
+  reuse_equipment: order.document_data?.reuse_equipment,
+  visit_outcome: order.document_data?.visit_outcome,
 });
 const publicOrder = (order) =>
   Object.fromEntries(
@@ -99,6 +103,7 @@ const publicOrder = (order) =>
       "customer_name",
       "contact",
       "service",
+      "service_label",
       "location",
       "scheduled_at",
       "notes",
@@ -118,6 +123,9 @@ const publicOrder = (order) =>
       "additional_orders",
       "group_imeis",
       "group_status",
+      "bundled_equipment",
+      "reuse_equipment",
+      "visit_outcome",
     ].map((k) => [
       k,
       k === "additional_orders" ? order[k]?.map(publicOrder) : order[k],
@@ -144,6 +152,13 @@ function editable(b, order, version) {
 async function startDraft(pool, userId, id, version) {
   return transaction(pool, async (db) => {
     const { t, order } = await ownOrder(db, userId, id);
+    if (order.parent_order_id && bundled(order))
+      fail(409, "Registre todas as fotos e equipamentos na OS principal.");
+    if (
+      order.status === "REAGENDAR" ||
+      order.document_data?.visit_outcome === "reschedule"
+    )
+      fail(409, "Aguarde a confirmação de uma nova data pela central.");
     if (order.workflow_mode !== "controlled")
       fail(
         409,
@@ -258,7 +273,7 @@ async function upload(pool, cfg, userId, id, input) {
   }
   const equipment =
     kind === "label"
-      ? await identifyEquipment(bytes, initial.t, cfg)
+      ? await identifyEquipment(bytes, initial.t, cfg, reused(initial.order))
       : { serial_code: "", equipment_type: "", equipment_model: "" };
   return transaction(pool, async (db) => {
     const { b, order } = await ownBatch(db, userId, id);
@@ -363,7 +378,9 @@ async function verifyEvidence(db, b, r, codes, order) {
       if (received.size > min)
         fail(
           400,
-          "Equipamento além do previsto na OS: solicite uma OS de equipamento adicional à central para registrar serviço e remuneração separadamente.",
+          bundled(order)
+            ? "Equipamento além da quantidade prevista. Peça à central para atualizar as quantidades da OS antes de enviar."
+            : "Equipamento além do previsto na OS: solicite uma OS de equipamento adicional à central para registrar serviço e remuneração separadamente.",
         );
       if (received.size < min)
         fail(
@@ -402,7 +419,7 @@ async function submit(pool, userId, id, input) {
       input.executed_on || b.executed_on || order.executed_on || d.today();
     require("./financial-calendar").date(executedOn);
     if (executedOn > d.today()) fail(400, "Execução não pode ter data futura.");
-    await require("./finance-engine").capture(db, order, executedOn);
+    await require("./bundled-service").captureGroup(db, order, executedOn);
     const updated = await o.update(
       db,
       "zc_orders",
@@ -486,6 +503,11 @@ async function approve(pool, cfg, id, input, actor) {
     );
     if (!tech) fail(409, "Técnico inativo.");
     if (r.stock_action === "install") {
+      if (reused(order) && input.reuse_confirmed !== true)
+        fail(
+          400,
+          "Confirme que os equipamentos fotografados foram reaproveitados neste veículo.",
+        );
       if (!cfg.STOCK_ENABLED)
         fail(
           409,
@@ -500,7 +522,18 @@ async function approve(pool, cfg, id, input, actor) {
         technician_id: tech.stock_technician_id,
         serials: codes,
         operator: actor,
+        ...(reused(order) ? { reuse: true } : {}),
       };
+      if (bundled(order) && !order.parent_order_id)
+        await require("./bundled-service").recordApproval(
+          db,
+          cfg,
+          order,
+          b,
+          codes,
+          reason,
+          actor,
+        );
       await o.update(
         db,
         "zc_batches",
@@ -630,6 +663,7 @@ async function reject(pool, id, input, actor) {
     await d.audit(db, actor, "portal_correction_requested", "batch", id, {
       reason,
     });
+    await require("./bundled-service").rejectChildren(db, order, b, reason);
     return { ok: true };
   });
 }
@@ -667,6 +701,14 @@ async function confirmStock(pool, cfg, job, stock) {
       true,
     );
     await o.update(db, "zc_batches", "id", b.id, { state: "completed" }, true);
+    await require("./bundled-service").completeChildren(
+      db,
+      cfg,
+      order,
+      current,
+      receipt,
+      job.id,
+    );
     await o.complete(db, order.id, b.reviewed_by, b.reason, cfg, b.id, {
       confirmedSubmission: b.id,
       stockReceipt: receipt,

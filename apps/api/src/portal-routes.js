@@ -7,6 +7,7 @@ const d = require("./domain"),
 const { StockClient } = require("./stock-client");
 const { orderDocument } = require("./order-document");
 const { orderPdf } = require("./pdf");
+const { documentOrder } = require("./order-document-load");
 const { groupedPage, presentOrders } = require("./order-presentation");
 const safeBatch = (b) =>
   Object.fromEntries(
@@ -107,9 +108,13 @@ function configurePortal(app, pool, cfg, auth) {
     for (const b of history) b.files = await files(pool, b.id);
     res.json({
       order: portal.publicOrder(presented),
-      document: orderDocument(order, true, {
-        portalUrl: cfg.TECHNICIAN_PORTAL_URL || cfg.PUBLIC_URL,
-      }),
+      document: orderDocument(
+        await documentOrder(pool, order, order.technician_id),
+        true,
+        {
+          portalUrl: cfg.TECHNICIAN_PORTAL_URL || cfg.PUBLIC_URL,
+        },
+      ),
       required_equipment: portal.requiredEquipment(order),
       rule: await portal.rule(pool, order.service, order),
       additional_orders: presented.additional_orders.map(portal.publicOrder),
@@ -118,11 +123,12 @@ function configurePortal(app, pool, cfg, auth) {
   });
   app.get(prefix + "/orders/:id/pdf", async (req, res) => {
     const { order } = await portal.ownOrder(pool, req.user.id, req.params.id);
+    const document = await documentOrder(pool, order, order.technician_id);
     res
       .type("pdf")
-      .attachment(order.id + ".pdf")
+      .attachment(document.id + ".pdf")
       .send(
-        await orderPdf(order, true, {
+        await orderPdf(document, true, {
           portalUrl: cfg.TECHNICIAN_PORTAL_URL || cfg.PUBLIC_URL,
         }),
       );
@@ -133,7 +139,7 @@ function configurePortal(app, pool, cfg, auth) {
     const load = await new StockClient(cfg).items(t.stock_technician_id);
     const associations = await d.rows(
       pool,
-      "SELECT b.order_id,b.state,b.imeis FROM zc_batches b WHERE b.technician_id=$1 AND b.state IN ('draft','submitted','approved_sync','stock_failed')",
+      "SELECT b.order_id,b.state,b.imeis FROM zc_batches b WHERE b.technician_id=$1 AND b.source<>'bundle' AND b.state IN ('draft','submitted','approved_sync','stock_failed')",
       [t.id],
     );
     res.json({

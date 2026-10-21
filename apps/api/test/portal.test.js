@@ -1736,3 +1736,478 @@ test("additional equipment shares a paginated operational row and filters, while
     404,
   );
 });
+
+async function plannedSubmission(
+  item,
+  devices,
+  notes = "Equipamentos instalados, testados e conferidos no veículo.",
+) {
+  let b = await ok(
+    "/api/technician/orders/" + item.id + "/draft",
+    "POST",
+    { version: item.version },
+    ta,
+    201,
+  );
+  for (const code of devices) {
+    const f = await ok(
+      "/api/technician/batches/" + b.id + "/photos",
+      "POST",
+      {
+        version: b.version,
+        kind: "label",
+        image: await photo(code, code.includes("TAG") ? "QRCode" : "Code128"),
+      },
+      ta,
+      201,
+    );
+    b.version = f.version;
+  }
+  const f = await ok(
+    "/api/technician/batches/" + b.id + "/photos",
+    "POST",
+    { version: b.version, kind: "checklist", image: jpg },
+    ta,
+    201,
+  );
+  await ok(
+    "/api/technician/batches/" + b.id + "/submit",
+    "POST",
+    {
+      version: f.version,
+      serials: devices,
+      confirmed: true,
+      checklist_signed: true,
+      notes,
+    },
+    ta,
+  );
+  return ok("/api/batches/" + b.id);
+}
+async function confirmPlanned(id) {
+  for (let n = 0; n < 30; n++) {
+    const current = await ok("/api/orders/" + id);
+    if (current.status === "CONCLUÍDO") return current;
+    assert.equal(await runOne(pool, cfg), true);
+  }
+  assert.fail("Atendimento não foi confirmado.");
+}
+test("one attendance and PDF accept 2 trackers and 2 TAGs, atomically consume stock, and pay exactly four services", async () => {
+  const d = require("../src/domain");
+  if (
+    !(
+      await pool.query(
+        "SELECT 1 FROM zc_rates WHERE technician_id=$1 AND effective_on=$2",
+        [tida, d.today()],
+      )
+    ).rowCount
+  )
+    await ok(
+      "/api/finance-v2/technicians/" + tida + "/rates",
+      "POST",
+      {
+        effective_on: d.today(),
+        prices: Object.fromEntries(
+          d.services.map((service) => [service, 9000]),
+        ),
+      },
+      admin,
+      201,
+    );
+  const devices = ["QTY-R1", "QTY-R2", "QTY-TAG1", "QTY-TAG2"];
+  const tagModel = (
+    await spool.query(
+      "INSERT INTO produtos(nome,categoria) VALUES('TAG quantidade','TAG') RETURNING id",
+    )
+  ).rows[0].id;
+  await serials(devices.slice(0, 2));
+  await serials(devices.slice(2), stockA, tagModel);
+  const item = await ok(
+    "/api/orders",
+    "POST",
+    {
+      vehicle: "QTY1A23",
+      customer_name: "Cliente quantidades",
+      service: "Instalação",
+      contact: "11987654321",
+      technician_id: tida,
+      scheduled_at: d.today() + "T10:00",
+      document_data: {
+        scheduled_service: "Instalação",
+        equipment_counts: { tracker: 2, tag: 2 },
+        service_address_same: true,
+        customer_street: "Rua Teste",
+        customer_number: "120",
+        customer_block: "B",
+        customer_complement: "Sala 2",
+        customer_neighborhood: "Centro",
+        customer_city: "São Paulo",
+        customer_state: "SP",
+      },
+    },
+    admin,
+    201,
+  );
+  assert.equal(item.additional_orders.length, 3);
+  assert.equal(item.contact, "(11)98765-4321");
+  assert.match(
+    item.location,
+    /Rua Teste, 120 - Bloco B · Sala 2 - Centro - São Paulo \/ SP/,
+  );
+  assert.equal(
+    item.additional_orders.filter((x) => x.additional_equipment === "TAG")
+      .length,
+    2,
+  );
+  const detail = await ok(
+    "/api/technician/orders/" + item.id,
+    "GET",
+    undefined,
+    ta,
+  );
+  assert.deepEqual(detail.required_equipment, { RASTREADOR: 2, TAG: 2 });
+  assert.equal(
+    (
+      await req(
+        "/api/technician/orders/" + item.additional_orders[0].id + "/draft",
+        "POST",
+        { version: 1 },
+        ta,
+      )
+    ).status,
+    409,
+  );
+  assert.equal(
+    (
+      await req("/api/orders/" + item.additional_orders[0].id, "PATCH", {
+        version: 1,
+        technician_id: tidb,
+      })
+    ).status,
+    409,
+  );
+  const { readPdf } = require("./helpers/pdf.cjs");
+  for (const id of [item.id, item.additional_orders[0].id]) {
+    const pdf = await req("/api/orders/" + id + "/pdf");
+    assert.equal(pdf.status, 200);
+    const text = (await readPdf(pdf.data)).text;
+    assert.ok(text.includes(item.id));
+    assert.ok(!text.includes(item.additional_orders[0].id));
+    assert.match(text, /2x Rastreador/);
+    assert.match(text, /2x TAG/);
+    assert.doesNotMatch(text, /DEVERÁ LEVAR|NÃO levará/);
+  }
+  const b = await plannedSubmission(item, devices);
+  const ids = [item.id, ...item.additional_orders.map((o) => o.id)];
+  assert.equal(
+    (
+      await pool.query(
+        "SELECT count(*)::int n FROM zc_financial_ledger WHERE order_id=ANY($1::text[])",
+        [ids],
+      )
+    ).rows[0].n,
+    4,
+  );
+  await approve(b);
+  assert.equal(
+    (
+      await pool.query(
+        "SELECT count(*)::int n FROM zc_jobs WHERE order_id=ANY($1::text[]) AND kind='stock_installation'",
+        [ids],
+      )
+    ).rows[0].n,
+    1,
+  );
+  const batches = await ok("/api/batches");
+  assert.ok(batches.items.every((batch) => batch.source !== "bundle"));
+  const completed = await confirmPlanned(item.id);
+  assert.deepEqual(completed.group_imeis.sort(), [...devices].sort());
+  assert.ok(
+    completed.additional_orders.every((extra) => extra.status === "CONCLUÍDO"),
+  );
+  const ledger = (
+    await pool.query(
+      "SELECT * FROM zc_financial_ledger WHERE order_id=ANY($1::text[])",
+      [ids],
+    )
+  ).rows;
+  assert.equal(ledger.length, 4);
+  assert.ok(
+    ledger.every((row) => row.state === "approved" && row.total_cents === 9000),
+  );
+  const receipts = (
+    await spool.query(
+      "SELECT * FROM zencontrol_installations WHERE order_id=ANY($1::text[])",
+      [ids],
+    )
+  ).rows;
+  assert.equal(receipts.length, 1);
+  assert.deepEqual(receipts[0].result.serials.sort(), [...devices].sort());
+  const moves = (
+    await spool.query(
+      "SELECT codigo_serial,count(*)::int n FROM eventos_seriais WHERE codigo_serial=ANY($1::text[]) AND status_novo='INSTALADO' GROUP BY codigo_serial",
+      [devices],
+    )
+  ).rows;
+  assert.ok(moves.length === 4 && moves.every((row) => row.n === 1));
+  const list = await ok(
+    "/api/technician/orders?vehicle=QTY1A23&view=closed",
+    "GET",
+    undefined,
+    ta,
+  );
+  assert.equal(list.total, 1);
+  assert.equal(list.items[0].id, item.id);
+  assert.equal(
+    (
+      await req(
+        "/api/batches/" + b.id + "/approve",
+        "POST",
+        {
+          version: b.version,
+          order_version: b.current_order.version,
+          checklist_reviewed: true,
+          reason: "Repetição não autorizada.",
+        },
+        operator,
+      )
+    ).status,
+    409,
+  );
+});
+
+test("reinstallation can reuse existing devices after explicit central confirmation, without another load consumption", async () => {
+  const d = require("../src/domain");
+  const devices = ["REUSE-R1", "REUSE-TAG1"];
+  const tagModel = (
+    await spool.query(
+      "INSERT INTO produtos(nome,categoria) VALUES('TAG reaproveitada','TAG') RETURNING id",
+    )
+  ).rows[0].id;
+  await serials([devices[0]]);
+  await serials([devices[1]], stockA, tagModel);
+  const installed = await stockRequest(
+    {
+      source_system: cfg.STOCK_SOURCE_SYSTEM,
+      order_id: "EXISTING-REUSE",
+      submission_id: "EXISTING-REUSE-SUB",
+      technician_id: stockA,
+      serials: devices,
+      operator: "Conferente anterior",
+    },
+    "preexisting-reuse-key-1234",
+  );
+  assert.equal(installed.status, 200);
+  const balances = (
+    await spool.query("SELECT * FROM estoque_tecnicos ORDER BY id")
+  ).rows;
+  const movementCount = (
+    await spool.query("SELECT count(*)::int n FROM movimentacoes")
+  ).rows[0].n;
+  const item = await ok(
+    "/api/orders",
+    "POST",
+    {
+      vehicle: "REU1A23",
+      customer_name: "Cliente reinstalação",
+      service: "Instalação",
+      technician_id: tida,
+      scheduled_at: d.today() + "T10:00",
+      document_data: {
+        scheduled_service: "Instalação",
+        reinstallation: true,
+        reuse_equipment: true,
+        equipment_counts: { tracker: 1, tag: 1 },
+      },
+    },
+    admin,
+    201,
+  );
+  assert.equal(item.service, "Reinstalação");
+  const b = await plannedSubmission(
+    item,
+    devices,
+    "Aparelhos existentes reaproveitados e testados no mesmo veículo.",
+  );
+  const payload = {
+    version: b.version,
+    order_version: b.current_order.version,
+    serials: devices,
+    checklist_reviewed: true,
+    reason: "Reaproveitamento conferido pelas fotos do veículo.",
+  };
+  const refused = await req(
+    "/api/batches/" + b.id + "/approve",
+    "POST",
+    payload,
+    operator,
+  );
+  assert.equal(refused.status, 400);
+  assert.match(refused.data.error, /reaproveitados/);
+  await ok(
+    "/api/batches/" + b.id + "/approve",
+    "POST",
+    { ...payload, reuse_confirmed: true },
+    operator,
+  );
+  const completed = await confirmPlanned(item.id);
+  assert.equal(completed.stock_receipt.reused, true);
+  assert.ok(
+    completed.additional_orders.every((extra) => extra.status === "CONCLUÍDO"),
+  );
+  assert.deepEqual(
+    (await spool.query("SELECT * FROM estoque_tecnicos ORDER BY id")).rows,
+    balances,
+  );
+  assert.equal(
+    (await spool.query("SELECT count(*)::int n FROM movimentacoes")).rows[0].n,
+    movementCount,
+  );
+  const events = (
+    await spool.query("SELECT * FROM eventos_seriais WHERE zen_order_id=$1", [
+      item.id,
+    ])
+  ).rows;
+  assert.equal(events.length, 2);
+  assert.ok(
+    events.every(
+      (event) =>
+        event.status_anterior === "INSTALADO" &&
+        event.status_novo === "INSTALADO",
+    ),
+  );
+  const approved = await ok("/api/batches/" + b.id);
+  const receipt = await new StockClient(cfg).install(
+    approved.approval_payload,
+    "stock:" + cfg.STOCK_SOURCE_SYSTEM + ":" + b.id,
+  );
+  assert.equal(receipt.receipt_id, completed.stock_receipt.receipt_id);
+  assert.equal(
+    (
+      await spool.query(
+        "SELECT count(*)::int n FROM eventos_seriais WHERE zen_order_id=$1",
+        [item.id],
+      )
+    ).rows[0].n,
+    2,
+  );
+  const ledger = (
+    await pool.query(
+      "SELECT state FROM zc_financial_ledger WHERE order_id=$1 OR order_id IN (SELECT id FROM zc_orders WHERE parent_order_id=$1)",
+      [item.id],
+    )
+  ).rows;
+  assert.equal(ledger.length, 2);
+  assert.ok(ledger.every((row) => row.state === "approved"));
+  await serials(["REUSE-NOT-INSTALLED"]);
+  const invalid = await stockRequest(
+    {
+      ...approved.approval_payload,
+      order_id: "INVALID-REUSE",
+      submission_id: "INVALID-REUSE-SUB",
+      serials: ["REUSE-NOT-INSTALLED"],
+    },
+    "invalid-reuse-key-1234",
+  );
+  assert.equal(invalid.status, 409);
+  assert.equal(
+    (
+      await spool.query(
+        "SELECT status FROM equipamentos_seriais WHERE codigo_serial='REUSE-NOT-INSTALLED'",
+      )
+    ).rows[0].status,
+    "TECNICO",
+  );
+  assert.equal(
+    (
+      await spool.query(
+        "SELECT count(*)::int n FROM zencontrol_installations WHERE order_id='INVALID-REUSE'",
+      )
+    ).rows[0].n,
+    0,
+  );
+});
+
+test("scheduling keeps three main services, unproductive visit uses its own tariff and rescheduling blocks execution until confirmed", async () => {
+  const d = require("../src/domain");
+  const body = {
+    vehicle: "SIN1A23",
+    customer_name: "Cliente sinalização",
+    service: "Instalação",
+    technician_id: tida,
+    scheduled_at: d.today() + "T10:00",
+    document_data: {
+      scheduled_service: "Instalação",
+      equipment_counts: { tracker: 2, tag: 0 },
+      visit_outcome: "unproductive",
+    },
+  };
+  const unproductive = await ok("/api/orders", "POST", body, admin, 201);
+  assert.equal(unproductive.service, "Improdutiva");
+  assert.equal(unproductive.additional_orders.length, 0);
+  const detail = await ok(
+    "/api/technician/orders/" + unproductive.id,
+    "GET",
+    undefined,
+    ta,
+  );
+  assert.equal(detail.rule.stock_action, "none");
+  assert.deepEqual(detail.required_equipment, { RASTREADOR: 0, TAG: 0 });
+  const b = await plannedSubmission(
+    unproductive,
+    [],
+    "Cliente não estava disponível. Visita improdutiva registrada.",
+  );
+  await approve(b);
+  assert.equal(
+    (await ok("/api/orders/" + unproductive.id)).status,
+    "CONCLUÍDO",
+  );
+  assert.equal(
+    (
+      await pool.query(
+        "SELECT count(*)::int n FROM zc_jobs WHERE order_id=$1 AND kind='stock_installation'",
+        [unproductive.id],
+      )
+    ).rows[0].n,
+    0,
+  );
+  const pending = await ok(
+    "/api/orders",
+    "POST",
+    {
+      ...body,
+      document_data: { ...body.document_data, visit_outcome: "reschedule" },
+    },
+    admin,
+    201,
+  );
+  assert.equal(pending.status, "REAGENDAR");
+  assert.equal(
+    (
+      await req(
+        "/api/technician/orders/" + pending.id + "/draft",
+        "POST",
+        { version: pending.version },
+        ta,
+      )
+    ).status,
+    409,
+  );
+  const confirmed = await ok("/api/orders/" + pending.id, "PATCH", {
+    version: pending.version,
+    document_data: { visit_outcome: "" },
+    scheduled_at: d.today() + "T14:00",
+  });
+  assert.equal(confirmed.status, "AGENDADO");
+  assert.equal(confirmed.additional_orders.length, 1);
+  for (const document_data of [
+    { scheduled_service: "Reinstalação" },
+    { scheduled_service: "Manutenção", reinstallation: true },
+    { scheduled_service: "Instalação", reuse_equipment: true },
+  ])
+    assert.equal(
+      (await req("/api/orders", "POST", { ...body, document_data })).status,
+      400,
+    );
+});

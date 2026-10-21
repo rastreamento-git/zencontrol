@@ -9,7 +9,7 @@ Os dois aplicativos se comunicam com a mesma API autenticada. Banco Aiven, fotos
 1. Entrar com a conta individual criada pela central.
 2. Abrir o serviço atribuído e conferir a OS completa: associado, veículo, endereço, serviço, agendamento, técnico e instruções. O PDF continua disponível; documentos pessoais permanecem protegidos.
 3. Tocar em **Começar registro** e enviar as fotos exigidas para o serviço e as fotos da vistoria. Há botões separados para tirar uma foto e escolher uma foto já existente no celular.
-4. Nas instalações/reinstalações, fotografar a etiqueta de **cada** rastreador/TAG. O servidor lê códigos de barras, QR Code e DataMatrix, consulta a carga do técnico no Estoque Pro e salva automaticamente o serial, o tipo e o modelo. Não é necessário escanear ao vivo, digitar IMEI ou classificar o aparelho.
+4. Nas instalações/reinstalações, fotografar a etiqueta de **cada** rastreador/TAG. O servidor lê códigos de barras, QR Code e DataMatrix, consulta a carga do técnico no Estoque Pro (ou os aparelhos já instalados, no reaproveitamento) e salva automaticamente o serial, o tipo e o modelo. Não é necessário escanear ao vivo, digitar IMEI ou classificar o aparelho.
 5. Anexar o próprio checklist preenchido e assinado, em PDF ou fotos de todas as páginas. Confirmar que o documento está assinado.
 6. Preencher as **Observações do técnico (obrigatórias)**, conferir o quadro **Falta completar**, revisar os arquivos e enviar. O retorno é **Confirmação pendente**.
 7. A central abre as evidências em **Validações**, verifica as fotos e o checklist, confirma a assinatura e aprova ou solicita correção com um motivo claro.
@@ -19,6 +19,7 @@ Os dois aplicativos se comunicam com a mesma API autenticada. Banco Aiven, fotos
 
 - O código precisa estar visível e legível na foto; uma foto sem etiqueta/código legível será recusada com orientações para fotografar novamente.
 - O tipo do aparelho vem do cadastro correspondente no estoque, não de uma estimativa pela aparência. O cadastro deve ter categoria `RASTREADOR` ou `TAG`.
+- Na reinstalação com reaproveitamento, os códigos precisam estar cadastrados como instalados e a central confirma sua correspondência com o veículo. Não é feita uma segunda baixa da carga.
 - A foto pode ter códigos auxiliares (por exemplo, SIM/ICCID); só é aceito o serial correspondente à carga do técnico. Fotos com mais de um equipamento correspondente são recusadas: envie uma foto por equipamento.
 - Aceita códigos simples e payloads QR comuns com `imei`, `serial`, `codigo_serial` ou `sn`, em JSON, parâmetros de URL ou texto identificado. O servidor nunca visita URLs lidas nas etiquetas.
 - Se a OS especificar rastreador, rastreador extra e/ou TAG, as quantidades por tipo precisam estar presentes. O mesmo equipamento fotografado duas vezes não satisfaz dois aparelhos.
@@ -76,4 +77,4 @@ O frontend tem apenas uma configuração pública de API. Não recebe banco ou s
 
 A suíte do ZenControl usa PostgreSQL/PGlite e Supabase simulado. A homologação no Render/Supabase reais continua necessária antes do uso em produção.
 
-As listagens agrupam equipamentos adicionais com a OS principal. A conferência, o estoque e a remuneração continuam separados por instalação. A indicação de veículo elétrico aparece no atendimento e exige atenção à autorização do cliente; a dispensa continua sendo autorizada pela central. Consulte [as regras da OS](ORDEM_DE_SERVICO.md) para FIPE, IMEIs e auditoria.
+As novas OS agrupam todos os equipamentos em um atendimento e um PDF. As fotos, o envio e a conferência são únicos; os registros financeiros internos contabilizam cada unidade extra. A confirmação de estoque é atômica para todos os seriais do atendimento. A indicação de veículo elétrico aparece no atendimento e exige atenção à autorização do cliente; a dispensa continua sendo autorizada pela central. Consulte [as regras da OS](ORDEM_DE_SERVICO.md) para FIPE, IMEIs e auditoria.

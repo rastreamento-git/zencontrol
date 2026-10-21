@@ -117,9 +117,13 @@ async function execute(pool, cfg, job, wpp, sga) {
       });
     await wpp.document(
       tech.send_group || tech.phone,
-      await orderPdf(order, p.masked, {
-        portalUrl: cfg.TECHNICIAN_PORTAL_URL || cfg.PUBLIC_URL,
-      }),
+      await orderPdf(
+        await require("./order-document-load").documentOrder(pool, order),
+        p.masked,
+        {
+          portalUrl: cfg.TECHNICIAN_PORTAL_URL || cfg.PUBLIC_URL,
+        },
+      ),
       order.id + ".pdf",
       `NOVA ORDEM DE SERVIÇO\nOS: ${order.id}\nServiço: ${order.service}\nPlaca ou Chassi: ${order.vehicle}`,
     );

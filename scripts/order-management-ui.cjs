@@ -118,7 +118,48 @@ async function main() {
   await central.getByLabel("Veículo elétrico", { exact: true }).check();
   assert.equal(await central.getByLabel("Termo", { exact: true }).count(), 0);
   assert.equal(await central.locator('input[name="imei"]').count(), 0);
-  await central.getByLabel("Serviço", { exact: true }).selectOption("Visita");
+  assert.equal(
+    await central.getByLabel("Rastreadores", { exact: true }).inputValue(),
+    "1",
+  );
+  assert.equal(
+    await central.getByLabel("TAGs", { exact: true }).inputValue(),
+    "0",
+  );
+  await central.getByLabel("Rastreadores", { exact: true }).fill("2");
+  await central.getByLabel("TAGs", { exact: true }).fill("2");
+  await central
+    .getByText("3 instalação(ões) adicional(is)", { exact: false })
+    .waitFor();
+  await central.getByLabel("Reinstalação", { exact: true }).check();
+  await central
+    .getByLabel("Reaproveitar os equipamentos existentes", { exact: true })
+    .check();
+  await central.getByLabel("Reinstalação", { exact: true }).uncheck();
+  await central.getByLabel("Contato", { exact: true }).fill("11987654321");
+  assert.equal(
+    await central.getByLabel("Contato", { exact: true }).inputValue(),
+    "(11)98765-4321",
+  );
+  for (const [label, value] of [
+    ["Logradouro", "Rua Exemplo"],
+    ["Número", "120"],
+    ["Bloco", "B"],
+    ["Complemento", "Sala 2"],
+    ["Bairro", "Centro"],
+    ["Município", "Niterói"],
+  ])
+    await central.getByLabel(label, { exact: true }).fill(value);
+  await central.getByLabel("Estado", { exact: true }).selectOption("RJ");
+  assert.equal(
+    await central
+      .getByLabel("O técnico deverá levar os equipamentos", { exact: true })
+      .count(),
+    0,
+  );
+  await central
+    .getByLabel("Serviço", { exact: true })
+    .selectOption("Manutenção");
   await central.locator('select[name="technician_id"]').selectOption("1");
   await central
     .getByLabel("Data e horário", { exact: true })
@@ -139,6 +180,11 @@ async function main() {
   assert.equal(order.fipe_risk, "Média RJ");
   assert.equal(order.vehicle_electric, true);
   assert.equal(order.tracker_waiver_authorized, false);
+  assert.match(
+    order.location,
+    /Rua Exemplo, 120 - Bloco B · Sala 2 - Centro - Niterói \/ RJ/,
+  );
+  assert.equal(order.contact, "(11)98765-4321");
   const ctx = await browser.newContext({
     viewport: { width: 390, height: 844 },
   });

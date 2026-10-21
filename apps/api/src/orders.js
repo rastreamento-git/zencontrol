@@ -3,7 +3,13 @@ const { transaction } = require("./database");
 const { fail } = require("./errors");
 const d = require("./domain");
 const { normalizeDocumentData } = require("./order-document");
-const { prepareEquipment } = require("./equipment-plan");
+const { prepareEquipment, bundled } = require("./equipment-plan");
+const {
+  formatPhone,
+  phoneDigits,
+  formatAddress,
+  schedulingServices,
+} = require("../../../packages/domain/order-fields.mjs");
 const { classifyFipe } = require("../../../packages/domain/fipe.mjs");
 const textFields = {
   customer_name: 200,
@@ -151,10 +157,66 @@ async function validate(db, input, old = null) {
     out.document_data = JSON.stringify(
       normalizeDocumentData(input.document_data, old?.document_data || {}),
     );
-  const merged = { ...old, ...out };
+  if (
+    out.contact !== undefined &&
+    out.contact !== old?.contact &&
+    out.contact
+  ) {
+    if (
+      !/^[\d\s()+.-]+$/.test(out.contact) ||
+      ![10, 11].includes(phoneDigits(out.contact).length)
+    )
+      fail(400, "Informe o telefone com DDD e 10 ou 11 dígitos.");
+    out.contact = formatPhone(out.contact);
+  }
   const document = out.document_data
     ? JSON.parse(out.document_data)
-    : old?.document_data || {};
+    : { ...old?.document_data };
+  if (
+    !document.scheduled_service &&
+    (document.visit_outcome || document.reinstallation)
+  ) {
+    const service = out.service || old?.service || "Instalação";
+    document.scheduled_service = service.startsWith("Reinstalação")
+      ? "Instalação"
+      : schedulingServices.find((s) => service.startsWith(s));
+    if (!document.scheduled_service)
+      fail(
+        400,
+        "Selecione o serviço previsto: Instalação, Manutenção ou Retirada.",
+      );
+  }
+  if (document.reuse_equipment && !document.reinstallation)
+    fail(400, "Reaproveitamento exige reinstalação.");
+  if (document.scheduled_service) {
+    const base = document.scheduled_service;
+    if (document.reinstallation && base !== "Instalação")
+      fail(400, "Reinstalação é uma modalidade de Instalação.");
+    if (document.reuse_equipment && !document.reinstallation)
+      fail(400, "Reaproveitamento exige reinstalação.");
+    out.service =
+      document.visit_outcome === "unproductive"
+        ? "Improdutiva"
+        : document.reinstallation
+          ? "Reinstalação"
+          : base;
+    if (document.visit_outcome === "reschedule") out.status = "REAGENDAR";
+    else if (
+      old?.document_data?.visit_outcome === "reschedule" &&
+      (!input.status || input.status === old.status)
+    )
+      out.status =
+        (out.technician_id ?? old.technician_id) &&
+        (out.scheduled_at ?? old.scheduled_at)
+          ? "AGENDADO"
+          : "PENDENTE";
+  }
+  if (document.service_address_same !== undefined)
+    out.location = document.service_address_same
+      ? document.customer_address || ""
+      : formatAddress(document, "service");
+  if (out.document_data) out.document_data = JSON.stringify(document);
+  const merged = { ...old, ...out };
   const fipeChanged =
     !old ||
     (out.fipe_value !== undefined && out.fipe_value !== old.fipe_value) ||
@@ -192,11 +254,15 @@ const additionalSummary = (row) => ({
 });
 async function ensureAdditionalOrders(db, parent, types, actor) {
   const result = [];
+  const available = await d.rows(
+    db,
+    "SELECT * FROM zc_orders WHERE parent_order_id=$1 AND deleted_at='' ORDER BY created_date,id",
+    [parent.id],
+  );
+  const used = new Set();
   for (const type of types) {
-    const existing = await d.one(
-      db,
-      "SELECT * FROM zc_orders WHERE parent_order_id=$1 AND additional_equipment=$2",
-      [parent.id, type],
+    const existing = available.find(
+      (row) => row.additional_equipment === type && !used.has(row.id),
     );
     if (existing) {
       if (existing.deleted_at)
@@ -204,6 +270,46 @@ async function ensureAdditionalOrders(db, parent, types, actor) {
           409,
           "Já existe uma OS adicional removida para este equipamento. Revise o histórico com a central.",
         );
+      used.add(existing.id);
+      if (bundled(parent) && existing.status !== "CONCLUÍDO") {
+        await guard(db, existing.id);
+        await update(
+          db,
+          "zc_orders",
+          "id",
+          existing.id,
+          {
+            vehicle: parent.vehicle,
+            chassis: parent.chassis,
+            customer_name: parent.customer_name,
+            contact: parent.contact,
+            location: parent.location,
+            scheduled_at: parent.scheduled_at,
+            technician_id: parent.technician_id,
+            technician_name: parent.technician_name,
+            service: parent.service + " (Equipamento adicional)",
+            ...(["CANCELADO", "REAGENDAR"].includes(parent.status)
+              ? { status: parent.status }
+              : ["AGENDADO", "PENDENTE", "REAGENDAR"].includes(existing.status)
+                ? {
+                    status:
+                      parent.technician_id && parent.scheduled_at
+                        ? "AGENDADO"
+                        : "PENDENTE",
+                  }
+                : {}),
+            document_data: JSON.stringify({
+              ...parent.document_data,
+              equipment: [type === "TAG" ? "tag" : "tracker"],
+              equipment_counts: {
+                tracker: type === "RASTREADOR" ? 1 : 0,
+                tag: type === "TAG" ? 1 : 0,
+              },
+            }),
+          },
+          true,
+        );
+      }
       result.push(additionalSummary(existing));
       continue;
     }
@@ -213,11 +319,12 @@ async function ensureAdditionalOrders(db, parent, types, actor) {
         .map((k) => [k, parent[k]]),
     );
     const firstId = parent.id + "_EXTRA";
-    const id = (await d.one(db, "SELECT 1 FROM zc_orders WHERE id=$1", [
-      firstId,
-    ]))
+    let id = (await d.one(db, "SELECT 1 FROM zc_orders WHERE id=$1", [firstId]))
       ? firstId + "_" + type
       : firstId;
+    let sequence = 2;
+    while (await d.one(db, "SELECT 1 FROM zc_orders WHERE id=$1", [id]))
+      id = firstId + "_" + type + "_" + sequence++;
     const baseService = d.services.find((s) => parent.service.startsWith(s));
     const extra = await insert(db, "zc_orders", {
       ...data,
@@ -229,7 +336,11 @@ async function ensureAdditionalOrders(db, parent, types, actor) {
       technician_id: parent.technician_id,
       technician_name: parent.technician_name,
       status:
-        parent.technician_id && parent.scheduled_at ? "AGENDADO" : "PENDENTE",
+        parent.status === "CANCELADO"
+          ? "CANCELADO"
+          : parent.technician_id && parent.scheduled_at
+            ? "AGENDADO"
+            : "PENDENTE",
       imei: "",
       notes: (
         "Equipamento adicional: " +
@@ -242,6 +353,14 @@ async function ensureAdditionalOrders(db, parent, types, actor) {
       document_data: JSON.stringify({
         ...parent.document_data,
         equipment: [type === "TAG" ? "tag" : "tracker"],
+        ...(bundled(parent)
+          ? {
+              equipment_counts: {
+                tracker: type === "RASTREADOR" ? 1 : 0,
+                tag: type === "TAG" ? 1 : 0,
+              },
+            }
+          : {}),
       }),
       created_date: d.today(),
       created_by: actor,
@@ -258,6 +377,32 @@ async function ensureAdditionalOrders(db, parent, types, actor) {
     });
     result.push(additionalSummary(extra));
   }
+  if (bundled(parent))
+    for (const obsolete of available.filter((row) => !used.has(row.id))) {
+      if (
+        await d.one(
+          db,
+          "SELECT 1 FROM zc_financial_ledger WHERE order_id=$1 UNION ALL SELECT 1 FROM zc_batches WHERE order_id=$1 LIMIT 1",
+          [obsolete.id],
+        )
+      )
+        fail(
+          409,
+          "Um equipamento adicional já possui execução ou evidências. Preserve o histórico antes de alterar a quantidade.",
+        );
+      await update(
+        db,
+        "zc_orders",
+        "id",
+        obsolete.id,
+        { status: "CANCELADO", deleted_at: d.now(), updated_at: d.now() },
+        true,
+      );
+      await d.audit(db, actor, "additional_order_removed", "order", parent.id, {
+        additional_order_id: obsolete.id,
+        reason: "Quantidade ou sinalização do atendimento atualizada.",
+      });
+    }
   return result;
 }
 async function create(pool, input, actor) {
@@ -286,6 +431,8 @@ async function create(pool, input, actor) {
 async function edit(pool, id, input, actor) {
   return transaction(pool, async (db) => {
     const old = await get(db, id);
+    if (old.parent_order_id && bundled(old))
+      fail(409, "Edite o atendimento e as quantidades na OS principal.");
     await guard(db, id);
     if (old.workflow_mode === "controlled" && old.status === "CONCLUÍDO")
       fail(
@@ -308,6 +455,18 @@ async function edit(pool, id, input, actor) {
       fail(409, "Uma OS concluída exige reabertura pela administração.");
     const data = await validate(db, input, old);
     const additional = prepareEquipment(data, input, old);
+    if (
+      bundled(old) &&
+      JSON.stringify(old.document_data.equipment_counts) !==
+        JSON.stringify(JSON.parse(data.document_data).equipment_counts) &&
+      (await d.one(db, "SELECT 1 FROM zc_financial_ledger WHERE order_id=$1", [
+        old.id,
+      ]))
+    )
+      fail(
+        409,
+        "As quantidades já foram registradas na execução. Preserve a composição e solicite ajuste à central.",
+      );
     if (
       ((data.technician_id !== undefined &&
         data.technician_id !== old.technician_id) ||
@@ -345,7 +504,7 @@ async function edit(pool, id, input, actor) {
     );
     if (result.status === "CANCELADO")
       await db.query(
-        "UPDATE zc_financial_ledger SET state='cancelled' WHERE order_id=$1",
+        "UPDATE zc_financial_ledger SET state='cancelled' WHERE order_id=$1 OR order_id IN (SELECT id FROM zc_orders WHERE parent_order_id=$1)",
         [id],
       );
     await require("./notifications").orderEvent(

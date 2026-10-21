@@ -5,6 +5,12 @@ import {
 import { useEffect, useState } from "react";
 import { classifyFipe, fipeRegions } from "@zen/domain/fipe.mjs";
 import {
+  addressFields,
+  brazilStates,
+  formatPhone,
+  schedulingServices,
+} from "@zen/domain/order-fields.mjs";
+import {
   Plus,
   Search,
   Download,
@@ -198,7 +204,9 @@ export function Orders({ agenda, meta, revision, openOrder, globalQuery }) {
                         {o.vehicle_electric && <small>Veículo elétrico</small>}
                       </td>
                       <td data-label="Serviço / técnico">
-                        <strong>{o.service || "Não informado"}</strong>
+                        <strong>
+                          {o.service_label || o.service || "Não informado"}
+                        </strong>
                         <small>{o.technician_name || "Sem técnico"}</small>
                         {o.additional_orders?.map((extra) => (
                           <button
@@ -264,6 +272,14 @@ export function OrderEditor({
       scheduled_at: "",
       additional: "",
       tracker_waiver_authorized: false,
+      document_data: {
+        scheduled_service: "Instalação",
+        service_address_same: true,
+        equipment_counts: { tracker: 1, tag: 0 },
+        reinstallation: false,
+        reuse_equipment: false,
+        visit_outcome: "",
+      },
     }),
     [techs, setTechs] = useState([]),
     [busy, setBusy] = useState(false),
@@ -295,8 +311,35 @@ export function OrderEditor({
     };
   }, [id]);
   const change = (e) =>
-    setValues((v) => ({ ...v, [e.target.name]: e.target.value }));
+    setValues((v) => ({
+      ...v,
+      [e.target.name]:
+        e.target.name === "contact"
+          ? formatPhone(e.target.value)
+          : e.target.value,
+    }));
   const documentData = values.document_data || {};
+  const equipmentCounts =
+    documentData.equipment_counts ||
+    [order, ...(order?.additional_orders || [])].filter(Boolean).reduce(
+      (counts, item) => {
+        for (const key of item.document_data?.equipment ||
+          (item.service.startsWith("Instalação") ||
+          item.service.startsWith("Reinstalação")
+            ? ["tracker"]
+            : []))
+          counts[key === "tag" ? "tag" : "tracker"]++;
+        return counts;
+      },
+      { tracker: 0, tag: 0 },
+    );
+  const scheduleType =
+    documentData.scheduled_service ||
+    (values.service?.startsWith("Reinstalação")
+      ? "Instalação"
+      : values.service);
+  const installation =
+    scheduleType === "Instalação" && !documentData.visit_outcome;
   const fipe = classifyFipe({
     value: values.fipe_value,
     vehicleType: documentData.vehicle_type,
@@ -305,7 +348,19 @@ export function OrderEditor({
   const changeDocument = (key, value) =>
     setValues((v) => ({
       ...v,
-      document_data: { ...v.document_data, [key]: value },
+      document_data: {
+        ...v.document_data,
+        [key]: value,
+        ...(["customer_", "service_"].some((prefix) =>
+          addressFields.some(([field]) => key === prefix + field),
+        ) && v.document_data?.service_address_same === undefined
+          ? {
+              service_address_same:
+                !order?.location ||
+                order.location === order.document_data?.customer_address,
+            }
+          : {}),
+      },
     }));
   const documentField = (label, key, opts = {}) => (
     <Field
@@ -317,6 +372,21 @@ export function OrderEditor({
       {...opts}
     />
   );
+  const addressInputs = (prefix) =>
+    addressFields.map(([key, label, max]) =>
+      documentField(
+        label + (prefix === "service" ? " do atendimento" : ""),
+        prefix + "_" + key,
+        key === "state"
+          ? {
+              options: [
+                ["", "Selecione a UF"],
+                ...brazilStates.map((uf) => [uf, uf]),
+              ],
+            }
+          : { maxLength: max },
+      ),
+    );
   const technician = techs.find(
     (t) => String(t.id) === String(values.technician_id),
   );
@@ -483,17 +553,24 @@ export function OrderEditor({
               Exibidos junto à OS principal. Cada instalação mantém seu registro
               de serviço e remuneração.
             </p>
-            {order.additional_orders.map((extra) => (
-              <button
-                type="button"
-                className="secondary-button"
-                key={extra.id}
-                disabled={busy}
-                onClick={() => openOrder(extra.id)}
-              >
-                {extra.id} · {extra.additional_equipment} · {extra.status}
-              </button>
-            ))}
+            {order.document_data?.equipment_counts ? (
+              <p>
+                {order.additional_orders.length} instalação(ões) adicional(is)
+                para contabilização. O atendimento e o PDF são únicos.
+              </p>
+            ) : (
+              order.additional_orders.map((extra) => (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  key={extra.id}
+                  disabled={busy}
+                  onClick={() => openOrder(extra.id)}
+                >
+                  {extra.id} · {extra.additional_equipment} · {extra.status}
+                </button>
+              ))
+            )}
           </div>
         )}
         {id && order && (
@@ -607,12 +684,24 @@ export function OrderEditor({
               </button>
             </div>
             {field("Associado", "customer_name", { required: true })}
-            {field("Contato", "contact")}
+            {field("Contato", "contact", {
+              type: "tel",
+              autoComplete: "tel-national",
+              maxLength: 20,
+            })}
             {documentField("CPF / CNPJ", "cpf_cnpj")}
             {documentField("RG", "rg")}
-            {documentField("Endereço do associado", "customer_address", {
-              full: true,
-            })}
+            <div className="zc-full">
+              <b>Endereço do associado</b>
+              {documentData.customer_address &&
+                !documentData.customer_street && (
+                  <small className="zc-muted">
+                    Endereço anterior: {documentData.customer_address}. Preencha
+                    os campos abaixo para atualizar.
+                  </small>
+                )}
+            </div>
+            {addressInputs("customer")}
             {field("Chassi", "chassis")}
             {documentField("Renavam", "renavam")}
             {documentField("Marca", "brand")}
@@ -676,21 +765,92 @@ export function OrderEditor({
         <fieldset className="zc-fieldset">
           <legend>02 · Atendimento e responsável</legend>
           <div className="zc-form-grid">
-            {field("Serviço", "service", {
-              disabled: !!order?.parent_order_id,
-              options: [...new Set([...meta.services, values.service])]
-                .filter(Boolean)
-                .map((s) => [s, s]),
+            <Field
+              label="Serviço"
+              name="service"
+              value={scheduleType}
+              disabled={!!order?.parent_order_id}
+              options={[
+                ...schedulingServices,
+                ...(scheduleType && !schedulingServices.includes(scheduleType)
+                  ? [scheduleType]
+                  : []),
+              ].map((service) => [service, service])}
+              onChange={(e) =>
+                setValues((v) => ({
+                  ...v,
+                  service: e.target.value,
+                  document_data: {
+                    ...v.document_data,
+                    scheduled_service: e.target.value,
+                    equipment_counts:
+                      e.target.value === "Instalação"
+                        ? v.document_data?.equipment_counts?.tracker +
+                            v.document_data?.equipment_counts?.tag >
+                          0
+                          ? v.document_data.equipment_counts
+                          : { tracker: 1, tag: 0 }
+                        : { tracker: 0, tag: 0 },
+                    reinstallation: false,
+                    reuse_equipment: false,
+                    visit_outcome: "",
+                  },
+                }))
+              }
+            />
+            {documentField("Sinalização do atendimento", "visit_outcome", {
+              options: [
+                ["", "Atendimento previsto"],
+                ["unproductive", "Visita improdutiva"],
+                ["reschedule", "Reagendamento"],
+              ],
             })}
-            {!order?.parent_order_id &&
-              !values.tracker_waiver_authorized &&
-              field("Equipamento adicional", "additional", {
-                options: [
-                  ["", "Nenhum"],
-                  ["Tag Extra", "Tag extra"],
-                  ["Rastreador Extra", "Rastreador extra"],
-                ],
-              })}
+            {scheduleType === "Instalação" && (
+              <div className="zc-full zc-document-equipment">
+                <label className="zc-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={
+                      documentData.reinstallation ??
+                      values.service?.startsWith("Reinstalação")
+                    }
+                    onChange={(e) =>
+                      setValues((v) => ({
+                        ...v,
+                        document_data: {
+                          ...v.document_data,
+                          scheduled_service: "Instalação",
+                          reinstallation: e.target.checked,
+                          reuse_equipment: false,
+                        },
+                      }))
+                    }
+                  />
+                  Reinstalação
+                </label>
+                {(documentData.reinstallation ??
+                  values.service?.startsWith("Reinstalação")) && (
+                  <label className="zc-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={documentData.reuse_equipment === true}
+                      onChange={(e) =>
+                        changeDocument("reuse_equipment", e.target.checked)
+                      }
+                    />
+                    Reaproveitar os equipamentos existentes
+                  </label>
+                )}
+                {(documentData.reinstallation ??
+                  values.service?.startsWith("Reinstalação")) && (
+                  <small>
+                    {documentData.reuse_equipment
+                      ? "A central conferirá as fotos dos equipamentos existentes. O reaproveitamento não consome novos aparelhos da carga."
+                      : "Serão utilizados equipamentos da carga do técnico."}
+                  </small>
+                )}
+              </div>
+            )}
             {field("Técnico", "technician_id", {
               options: [
                 ["", "Ainda não definido"],
@@ -738,60 +898,73 @@ export function OrderEditor({
                 conferência da central, sem registrar instalação no estoque.
               </small>
             </div>
-            {field("Local de atendimento", "location", { full: true })}
-            {!values.tracker_waiver_authorized && (
+            <div className="zc-full zc-document-equipment">
+              <b>Endereço do atendimento</b>
+              <label className="zc-checkbox">
+                <input
+                  type="checkbox"
+                  checked={
+                    documentData.service_address_same ??
+                    (!order?.location ||
+                      order.location === documentData.customer_address)
+                  }
+                  onChange={(e) =>
+                    changeDocument("service_address_same", e.target.checked)
+                  }
+                />
+                Atendimento no endereço do associado
+              </label>
+              {documentData.service_address_same === undefined &&
+                order?.location && (
+                  <small>Local anterior: {order.location}</small>
+                )}
+            </div>
+            {(documentData.service_address_same === false ||
+              (documentData.service_address_same === undefined &&
+                order?.location &&
+                order.location !== documentData.customer_address)) &&
+              addressInputs("service")}
+            {installation && !values.tracker_waiver_authorized && (
               <div className="zc-full zc-document-equipment">
-                <span>Equipamentos previstos no atendimento</span>
-                <div>
+                <b>Quantidade de equipamentos a instalar</b>
+                <div className="zc-equipment-quantities">
                   {[
-                    ["tracker", "Rastreador"],
-                    ["tag", "Tag"],
+                    ["tracker", "Rastreadores"],
+                    ["tag", "TAGs"],
                   ].map(([key, label]) => (
-                    <label className="zc-checkbox" key={key}>
+                    <label key={key}>
+                      {label}
                       <input
-                        type="checkbox"
-                        checked={
-                          (documentData.equipment || []).includes(key) ||
-                          (key === "tracker" &&
-                            order?.additional_equipment === "RASTREADOR" &&
-                            (documentData.equipment || []).includes(
-                              "tracker_extra",
-                            ))
-                        }
+                        type="number"
+                        min="0"
+                        max="20"
+                        step="1"
+                        value={equipmentCounts[key]}
                         disabled={!!order?.parent_order_id}
                         onChange={(e) =>
-                          changeDocument(
-                            "equipment",
-                            e.target.checked
-                              ? [...(documentData.equipment || []), key]
-                              : (documentData.equipment || []).filter(
-                                  (v) => v !== key,
-                                ),
-                          )
+                          changeDocument("equipment_counts", {
+                            ...equipmentCounts,
+                            [key]:
+                              e.target.value === ""
+                                ? 0
+                                : Number(e.target.value),
+                          })
                         }
                       />
-                      {label}
                     </label>
                   ))}
                 </div>
                 <small>
-                  As fotos são exigidas somente para os equipamentos previstos
-                  nesta OS. Equipamento extra gera outra OS, com serviço e
-                  remuneração separados.
+                  {equipmentCounts.tracker + equipmentCounts.tag}{" "}
+                  equipamento(s): 1 serviço principal e{" "}
+                  {Math.max(
+                    0,
+                    equipmentCounts.tracker + equipmentCounts.tag - 1,
+                  )}{" "}
+                  instalação(ões) adicional(is), conforme as tarifas do técnico.
+                  Todas as fotos e equipamentos são registrados na mesma OS e no
+                  mesmo PDF.
                 </small>
-                <label className="zc-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={documentData.technician_brings_equipment !== false}
-                    onChange={(e) =>
-                      changeDocument(
-                        "technician_brings_equipment",
-                        e.target.checked,
-                      )
-                    }
-                  />
-                  O técnico deverá levar os equipamentos
-                </label>
               </div>
             )}
             {field("Observações da central", "notes", {
@@ -806,7 +979,10 @@ export function OrderEditor({
             <p>
               Os IMEIs/seriais aparecem após o envio para validação no ZenField.
             </p>
-            {[order, ...(order.additional_orders || [])].map((item) => (
+            {(order.document_data?.equipment_counts
+              ? [order]
+              : [order, ...(order.additional_orders || [])]
+            ).map((item) => (
               <div className="zc-return" key={item.id}>
                 <b>
                   {item.parent_order_id
