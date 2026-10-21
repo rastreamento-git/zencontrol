@@ -64,6 +64,34 @@ export default function Dashboard({
           Nova ordem de serviço
         </button>
       </div>
+      <section className="zen-priorities" aria-label="Ações prioritárias">
+        <button className="zen-priority" onClick={() => navigate("batches")}>
+          <CheckCheck size={23} />
+          <div>
+            <strong>
+              {data.validations
+                ? `${data.validations} retorno(s) para conferir`
+                : "Conferências em dia"}
+            </strong>
+            <span>
+              {data.validations
+                ? "Abra as evidências e dê sequência à conclusão."
+                : "Acompanhe os próximos envios dos técnicos."}
+            </span>
+          </div>
+          <ArrowRight size={18} />
+        </button>
+        <button className="zen-priority" onClick={() => navigate("agenda")}>
+          <CalendarDays size={23} />
+          <div>
+            <strong>Agenda da equipe</strong>
+            <span>
+              {data.totals.today || 0} atendimento(s) previsto(s) para hoje.
+            </span>
+          </div>
+          <ArrowRight size={18} />
+        </button>
+      </section>
       <div className="stat-grid">
         {stats.map(([label, value, caption, color]) => (
           <article className={"stat-card " + color} key={label}>
@@ -78,27 +106,10 @@ export default function Dashboard({
           </article>
         ))}
       </div>
-      <section className="stock-overview">
-        {[
-          ["Ordens registradas", data.totals.total, ClipboardList],
-          ["Retornos para conferir", data.validations, CheckCheck],
-          ["Técnicos em destaque", data.technicians.length, Users],
-        ].map(([label, value, Icon]) => (
-          <div className="stock-item" key={label}>
-            <span className="stock-icon">
-              <Icon size={19} />
-            </span>
-            <div>
-              <span>{label}</span>
-              <strong>{value || 0}</strong>
-            </div>
-          </div>
-        ))}
-      </section>
       <div className="dashboard-columns">
         <Panel
           title="Situação dos atendimentos"
-          subtitle="Distribuição em todas as bases"
+          subtitle={`${data.totals.total} ordens registradas em todas as bases`}
           className="chart-panel"
         >
           <div className="chart-container">
@@ -184,7 +195,7 @@ export default function Dashboard({
           <Loading error={error} />
         ) : (
           <div className="zc-table-scroll">
-            <table className="zc-table">
+            <table className="zc-table zc-responsive-table">
               <thead>
                 <tr>
                   <th>ORDEM / ASSOCIADO</th>
@@ -197,7 +208,7 @@ export default function Dashboard({
               <tbody>
                 {orders.items.map((o) => (
                   <tr key={o.id}>
-                    <td>
+                    <td data-label="Ordem / associado">
                       <button
                         className="zc-link zc-mono"
                         onClick={() => openOrder(o.id)}
@@ -208,19 +219,19 @@ export default function Dashboard({
                         {o.customer_name || "Associado não informado"}
                       </small>
                     </td>
-                    <td>
+                    <td data-label="Veículo">
                       <span className="zc-plate">
                         {o.vehicle || "Sem identificação"}
                       </span>
                     </td>
-                    <td>
+                    <td data-label="Agendamento / técnico">
                       <strong>{format(o.scheduled_at, true)}</strong>
                       <small>{o.technician_name || "Sem técnico"}</small>
                     </td>
-                    <td>
+                    <td data-label="Situação">
                       <Badge value={o.status} />
                     </td>
-                    <td>
+                    <td data-label="Ações">
                       <button
                         className="icon-button"
                         aria-label={"Abrir " + o.id}
@@ -260,7 +271,10 @@ export default function Dashboard({
             CheckCheck,
           ],
         ].map(([id, title, description, Icon]) => (
-          <button key={id} onClick={() => navigate(id)}>
+          <button
+            key={id}
+            onClick={() => (id === "orders" ? openOrder() : navigate(id))}
+          >
             <span className="quick-action-icon">
               <Icon size={21} />
             </span>

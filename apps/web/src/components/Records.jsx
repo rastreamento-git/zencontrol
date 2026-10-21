@@ -160,7 +160,7 @@ export function Orders({ agenda, meta, revision, openOrder, globalQuery }) {
         ) : (
           <>
             <div className="zc-table-scroll">
-              <table className="zc-table">
+              <table className="zc-table zc-responsive-table">
                 <thead>
                   <tr>
                     <th>ORDEM / ASSOCIADO</th>
@@ -174,7 +174,7 @@ export function Orders({ agenda, meta, revision, openOrder, globalQuery }) {
                 <tbody>
                   {data.items.map((o) => (
                     <tr key={o.id}>
-                      <td>
+                      <td data-label="Ordem / associado">
                         <button
                           className="zc-link zc-mono"
                           onClick={() => openOrder(o.id)}
@@ -185,20 +185,20 @@ export function Orders({ agenda, meta, revision, openOrder, globalQuery }) {
                           {o.customer_name || "Associado não informado"}
                         </small>
                       </td>
-                      <td>
+                      <td data-label="Veículo">
                         <span className="zc-plate">
                           {o.vehicle || "Sem identificação"}
                         </span>
                       </td>
-                      <td>
+                      <td data-label="Serviço / técnico">
                         <strong>{o.service || "Não informado"}</strong>
                         <small>{o.technician_name || "Sem técnico"}</small>
                       </td>
-                      <td>
+                      <td data-label="Agendamento">
                         <strong>{format(o.scheduled_at, true)}</strong>
                         <small>{o.location || "Local não informado"}</small>
                       </td>
-                      <td>
+                      <td data-label="Situação">
                         <Badge value={o.status} />
                         {o.legacy_status &&
                           !meta.statuses.includes(o.legacy_status) && (

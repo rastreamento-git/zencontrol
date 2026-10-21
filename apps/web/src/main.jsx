@@ -8,6 +8,7 @@ import AuthGate from "@zen/ui/components/AuthGate";
 import Feedback from "@zen/ui/components/Feedback";
 import TrackingEntry from "./TrackingEntry";
 import "@zen/ui/styles/appearance.css";
+import "@zen/ui/styles/experience.css";
 initializeAppearance();
 createRoot(document.getElementById("root")).render(
   <StrictMode>

@@ -1,4 +1,5 @@
 import ThemeControl from "./ThemeControl";
+import AuthStory from "./AuthStory";
 import ZenMark from "./ZenMark";
 import {
   passwordInputProps,
@@ -148,6 +149,7 @@ export default function AuthGate({ children, audience = "central" }) {
         <ThemeControl />
       </div>
       <div className="auth-layout">
+        <AuthStory />
         <section className="auth-card" aria-labelledby="auth-title">
           <div className="auth-brand">
             <span className="brand-mark">

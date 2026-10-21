@@ -149,6 +149,9 @@ export default function App() {
   };
   return (
     <div className="inventory-app">
+      <a className="skip-link" href="#zencontrol-content">
+        Ir para o conteúdo
+      </a>
       {menu && (
         <button
           className="sidebar-backdrop"
@@ -168,7 +171,7 @@ export default function App() {
             <strong>
               Zen<span>Control</span>
             </strong>
-            <small>Agendamentos & atendimento</small>
+            <small>Gestão de serviços</small>
           </div>
           <button
             className="icon-button sidebar-close"
@@ -247,6 +250,7 @@ export default function App() {
               className="icon-button menu-toggle"
               aria-label="Abrir menu"
               aria-expanded={menu}
+              aria-controls="zencontrol-menu"
               onClick={() => setMenu(true)}
             >
               <Menu size={22} />
@@ -317,7 +321,12 @@ export default function App() {
             </span>
           </div>
         </header>
-        <div className="app-content" ref={body}>
+        <div
+          className="app-content"
+          id="zencontrol-content"
+          tabIndex={-1}
+          ref={body}
+        >
           <div className="sync-toolbar">
             <span
               className={"sync-status " + (error ? "has-error" : "")}

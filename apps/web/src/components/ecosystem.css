@@ -114,8 +114,8 @@
   position: absolute;
   top: -5px;
   right: -8px;
-  background: #2563eb;
-  color: white;
+  background: var(--ep-primary);
+  color: #fff;
   border-radius: 20px;
   font-size: 11px;
   min-width: 19px;
@@ -180,9 +180,9 @@
   font-weight: 600;
 }
 .eco-nav button.is-active {
-  background: #1e5bbd;
-  color: white;
-  border-color: #1e5bbd;
+  background: var(--ep-primary);
+  color: #fff;
+  border-color: var(--ep-primary);
 }
 .eco-filters {
   display: grid;

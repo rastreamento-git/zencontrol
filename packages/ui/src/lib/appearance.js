@@ -14,7 +14,7 @@ function apply() {
   document.documentElement.dataset.theme = dark ? "dark" : "light";
   document.documentElement.style.colorScheme = dark ? "dark" : "light";
   const color = document.querySelector('meta[name="theme-color"]');
-  if (color) color.content = dark ? "#101a2c" : "#f3f6fb";
+  if (color) color.content = dark ? "#0e1729" : "#f4f7fb";
   window.dispatchEvent(new Event("zen:appearance"));
 }
 export function setAppearance(value) {

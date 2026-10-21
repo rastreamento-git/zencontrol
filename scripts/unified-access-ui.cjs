@@ -104,7 +104,7 @@ async function main() {
       await page.evaluate(
         () => getComputedStyle(document.body).backgroundColor,
       ),
-      expected === "dark" ? "rgb(16, 26, 44)" : "rgb(243, 246, 251)",
+      expected === "dark" ? "rgb(14, 23, 41)" : "rgb(244, 247, 251)",
     );
     const images = page.locator(".zen-mark");
     if (await images.count())

@@ -1,7 +1,15 @@
 import ThemeControl from "@zen/ui/components/ThemeControl";
 import ZenMark from "@zen/ui/components/ZenMark";
 import { useState } from "react";
-import { ArrowUpRight, KeyRound, LogOut } from "lucide-react";
+import {
+  ArrowUpRight,
+  KeyRound,
+  LogOut,
+  Layers3,
+  CalendarCheck2,
+  Smartphone,
+  PackageCheck,
+} from "lucide-react";
 import { useSession } from "@zen/ui/lib/session";
 import { api, errorMessage, saveToken } from "@zen/ui/lib/api";
 import { openApp } from "@zen/ui/lib/sso";
@@ -236,6 +244,7 @@ const apps = [
     description:
       "Organize ordens de serviço, agendamentos, equipe e conferências.",
     detail: "Central de atendimento",
+    features: ["Agendamentos", "Conferências", "Financeiro"],
     className: "control",
   },
   {
@@ -245,6 +254,7 @@ const apps = [
     description:
       "Acesse o ambiente de um técnico e acompanhe ou realize os atendimentos.",
     detail: "Seleção de técnico",
+    features: ["Serviços", "Evidências", "Equipe em campo"],
     className: "field",
   },
   {
@@ -254,6 +264,7 @@ const apps = [
     description:
       "Gerencie equipamentos, cargas dos técnicos e movimentações de estoque.",
     detail: "Controle de equipamentos",
+    features: ["Inventário", "Cargas", "Rastreabilidade"],
     className: "stock",
   },
 ];
@@ -291,6 +302,9 @@ export default function TrackingHome() {
   }
   return (
     <div className="tracking-app">
+      <a className="skip-link" href="#tracking-content">
+        Ir para o conteúdo
+      </a>
       <header className="tracking-header">
         <a
           className="tracking-brand"
@@ -302,7 +316,7 @@ export default function TrackingHome() {
           </span>
           <span>
             <strong>ZenTracking</strong>
-            <small>Setor de rastreamento</small>
+            <small>Ecossistema Zen Seguros</small>
           </span>
         </a>
         <div className="tracking-account">
@@ -333,18 +347,45 @@ export default function TrackingHome() {
           </button>
         </div>
       </header>
-      <main className="tracking-main">
+      <main className="tracking-main" id="tracking-content" tabIndex={-1}>
         <div className="tracking-intro">
-          <p className="tracking-eyebrow">UM ACESSO. TODA A OPERAÇÃO.</p>
-          <h1>Seu setor, em um só lugar.</h1>
-          <p>Escolha o aplicativo para continuar seu trabalho.</p>
+          <div>
+            <p className="tracking-eyebrow">
+              <Layers3 size={15} /> SEU ESPAÇO DE TRABALHO
+            </p>
+            <h1>Seu setor, em um só lugar.</h1>
+            <p>
+              Olá, {user.nome?.split(" ")[0] || "bem-vindo"}. Qual etapa vamos
+              acompanhar agora?
+            </p>
+          </div>
+          <div className="tracking-profile">
+            <span className="avatar">
+              {(user.nome || "ZT")
+                .split(/\s+/)
+                .slice(0, 2)
+                .map((part) => part[0])
+                .join("")}
+            </span>
+            <div>
+              <strong>{user.nome}</strong>
+              <span>
+                {user.papel === "admin" ? "Administrador" : "Operador"} · Acesso
+                completo
+              </span>
+            </div>
+          </div>
         </div>
         {error && (
           <div className="error-banner" role="alert">
             {error}
           </div>
         )}
-        <div className="tracking-apps">
+        <div className="tracking-section-heading">
+          <h2>Aplicativos</h2>
+          <span>3 ambientes conectados</span>
+        </div>
+        <div className="tracking-apps" aria-label="Aplicativos ZenTracking">
           {apps.map((app) => (
             <button
               key={app.id}
@@ -373,17 +414,44 @@ export default function TrackingHome() {
                 <small>{app.category}</small>
                 <h2>{app.name}</h2>
                 <p>{app.description}</p>
+                <ul className="tracking-features">
+                  {app.features.map((feature) => (
+                    <li key={feature}>{feature}</li>
+                  ))}
+                </ul>
                 <span className="tracking-card-action">
-                  {busy === app.id ? "Abrindo…" : app.detail}
+                  <span>
+                    {busy === app.id ? "Abrindo…" : `Acessar ${app.name}`}
+                  </span>
                   <ArrowUpRight size={20} />
                 </span>
               </div>
             </button>
           ))}
         </div>
-        <p className="tracking-access-note">
-          Acesso completo aos aplicativos para administradores e operadores.
-        </p>
+        <section className="tracking-workflow" aria-label="Etapas da operação">
+          <div>
+            <CalendarCheck2 size={22} />
+            <span>
+              <strong>Planeje na central</strong>
+              <small>Organize a agenda e atribua os serviços.</small>
+            </span>
+          </div>
+          <div>
+            <Smartphone size={22} />
+            <span>
+              <strong>Acompanhe em campo</strong>
+              <small>Registre a execução e confira as evidências.</small>
+            </span>
+          </div>
+          <div>
+            <PackageCheck size={22} />
+            <span>
+              <strong>Conclua com controle</strong>
+              <small>Confirme estoque e fechamento dos serviços.</small>
+            </span>
+          </div>
+        </section>
       </main>
       <AppFooter product="ZenTracking" />
       {password && (
