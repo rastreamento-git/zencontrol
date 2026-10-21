@@ -1,12 +1,37 @@
 const { randomUUID, createHash } = require("node:crypto");
 const sharp = require("sharp");
 const { createMediaStore } = require("./media-store");
+const { identifyEquipment } = require("./equipment-photo");
+const { requiredEquipment, bundled, reused } = require("./equipment-plan");
+const { PDFDocument } = require("pdf-lib");
 const { transaction } = require("./database");
 const { fail, integer, serials } = require("./errors");
 const d = require("./domain"),
   o = require("./orders");
-const kinds = ["vehicle", "label", "installed", "service", "other"];
+const kinds = [
+  "vehicle",
+  "label",
+  "installed",
+  "service",
+  "other",
+  "inspection",
+  "checklist",
+];
 async function technician(db, userId) {
+  const scope = require("./field-access").context.getStore();
+  if (
+    scope?.delegated &&
+    scope.actor.id === userId &&
+    ["admin", "operador"].includes(scope.actor.papel)
+  ) {
+    const selected = await d.one(
+      db,
+      "SELECT * FROM zc_technicians WHERE id=$1 AND active=true",
+      [scope.technician.id],
+    );
+    if (!selected) fail(403, "Técnico selecionado está inativo.");
+    return selected;
+  }
   const t = await d.one(
     db,
     "SELECT t.* FROM zc_technician_accounts a JOIN zc_technicians t ON t.id=a.technician_id WHERE a.user_id=$1 AND t.active=true",
@@ -27,22 +52,47 @@ async function batch(db, id) {
   if (!b) fail(404, "Envio não encontrado.");
   return b;
 }
-async function rule(db, service) {
+async function rule(db, service, order = null) {
   const key = d.services.find((s) => service.startsWith(s));
-  const r = await d.one(db, "SELECT * FROM zc_service_rules WHERE service=$1", [
+  let r = await d.one(db, "SELECT * FROM zc_service_rules WHERE service=$1", [
     key || service,
   ]);
   if (!r) fail(409, "Defina as regras deste serviço antes de continuar.");
-  return r;
+  if (order?.tracker_waiver_authorized)
+    r = {
+      ...r,
+      stock_action: "none",
+      min_serials: 0,
+      required_photos: r.required_photos.filter(
+        (p) => !["label", "installed"].includes(p.kind),
+      ),
+    };
+  return {
+    ...r,
+    general_photo_min: 0,
+    min_serials:
+      r.stock_action === "install" && order
+        ? Object.values(requiredEquipment(order)).reduce((a, b) => a + b, 0)
+        : r.min_serials,
+    required_photos: r.required_photos.map((p) => ({
+      ...p,
+      min: ["label", "checklist"].includes(p.kind) ? p.min : 0,
+    })),
+  };
 }
 const snapshot = (order) => ({
   id: order.id,
   vehicle: order.vehicle,
   chassis: order.chassis,
   service: order.service,
+  tracker_waiver_authorized: order.tracker_waiver_authorized,
   technician_id: order.technician_id,
   customer_name: order.customer_name,
   scheduled_at: order.scheduled_at,
+  equipment_counts: order.document_data?.equipment_counts,
+  reinstallation: order.document_data?.reinstallation,
+  reuse_equipment: order.document_data?.reuse_equipment,
+  visit_outcome: order.document_data?.visit_outcome,
 });
 const publicOrder = (order) =>
   Object.fromEntries(
@@ -53,14 +103,34 @@ const publicOrder = (order) =>
       "customer_name",
       "contact",
       "service",
+      "service_label",
       "location",
       "scheduled_at",
+      "travel_fee_cents",
       "notes",
       "status",
       "version",
       "stock_sync_state",
       "workflow_mode",
-    ].map((k) => [k, order[k]]),
+      "parent_order_id",
+      "additional_equipment",
+      "tracker_waiver_authorized",
+      "executed_on",
+      "execution_finished_at",
+      "conference_started_at",
+      "vehicle_electric",
+      "reported_imeis",
+      "technician_notes",
+      "additional_orders",
+      "group_imeis",
+      "group_status",
+      "bundled_equipment",
+      "reuse_equipment",
+      "visit_outcome",
+    ].map((k) => [
+      k,
+      k === "additional_orders" ? order[k]?.map(publicOrder) : order[k],
+    ]),
   );
 async function ownBatch(db, userId, id) {
   const b = await batch(db, id);
@@ -83,6 +153,13 @@ function editable(b, order, version) {
 async function startDraft(pool, userId, id, version) {
   return transaction(pool, async (db) => {
     const { t, order } = await ownOrder(db, userId, id);
+    if (order.parent_order_id && bundled(order))
+      fail(409, "Registre todas as fotos e equipamentos na OS principal.");
+    if (
+      order.status === "REAGENDAR" ||
+      order.document_data?.visit_outcome === "reschedule"
+    )
+      fail(409, "Aguarde a confirmação de uma nova data pela central.");
     if (order.workflow_mode !== "controlled")
       fail(
         409,
@@ -128,6 +205,7 @@ async function startDraft(pool, userId, id, version) {
       order_id: id,
       technician_id: t.id,
       source: "portal",
+      capture_version: 2,
       source_user_id: userId,
       sender: "portal",
       vehicle: order.vehicle,
@@ -143,30 +221,61 @@ async function startDraft(pool, userId, id, version) {
   });
 }
 async function upload(pool, cfg, userId, id, input) {
-  if (!kinds.includes(input.kind)) fail(400, "Selecione o tipo de foto.");
-  const code = d.string(input.serial_code || "", "IMEI/serial", 128);
+  const kind = input.kind ?? "other";
+  if (!kinds.includes(kind)) fail(400, "Selecione o tipo de foto.");
+  const initial = await ownBatch(pool, userId, id);
+  editable(initial.b, initial.order, input.version);
   if (typeof input.image !== "string" || input.image.length > 12 * 1024 * 1024)
-    fail(400, "Foto inválida ou acima do limite.");
-  let bytes;
-  try {
-    const raw = Buffer.from(input.image.split(",").at(-1), "base64");
-    const image = sharp(raw, { limitInputPixels: 24000000 });
-    const metadata = await image.metadata();
-    if (!["jpeg", "png", "webp"].includes(metadata.format))
-      fail(400, "Formato de foto inválido.");
-    bytes = await image
-      .rotate()
-      .resize({
-        width: 2400,
-        height: 2400,
-        fit: "inside",
-        withoutEnlargement: true,
-      })
-      .jpeg({ quality: 90 })
-      .toBuffer();
-  } catch {
-    fail(400, "A foto não pôde ser processada. Use JPEG, PNG ou WebP.");
+    fail(400, "Arquivo inválido ou acima do limite.");
+  const raw = Buffer.from(input.image.split(",").at(-1), "base64");
+  let bytes,
+    mime = "image/jpeg",
+    extension = ".jpg";
+  if (kind === "checklist" && raw.subarray(0, 5).toString() === "%PDF-") {
+    try {
+      const pdf = await PDFDocument.load(raw);
+      if (
+        !pdf.getPageCount() ||
+        pdf.getPageCount() > 30 ||
+        raw.length > 8 * 1024 * 1024
+      )
+        throw Error();
+      // Parse the file to reject malformed and encrypted PDFs; preserve signed originals.
+      bytes = raw;
+      mime = "application/pdf";
+      extension = ".pdf";
+    } catch {
+      fail(
+        400,
+        "Checklist inválido. Envie um PDF sem senha de até 8 MB e 30 páginas, ou fotos das páginas assinadas.",
+      );
+    }
+  } else {
+    try {
+      const image = sharp(raw, { limitInputPixels: 24000000 });
+      const metadata = await image.metadata();
+      if (!["jpeg", "png", "webp"].includes(metadata.format)) throw Error();
+      bytes = await image
+        .rotate()
+        .resize({
+          width: 2400,
+          height: 2400,
+          fit: "inside",
+          withoutEnlargement: true,
+        })
+        .jpeg({ quality: 90 })
+        .toBuffer();
+    } catch {
+      fail(
+        400,
+        "A foto não pôde ser processada. Use JPEG, PNG ou WebP; o checklist também aceita PDF.",
+      );
+    }
   }
+  const equipment =
+    kind === "label"
+      ? await identifyEquipment(bytes, initial.t, cfg, reused(initial.order))
+      : { serial_code: "", equipment_type: "", equipment_model: "" };
   return transaction(pool, async (db) => {
     const { b, order } = await ownBatch(db, userId, id);
     editable(b, order, input.version);
@@ -184,18 +293,18 @@ async function upload(pool, cfg, userId, id, input) {
       fail(400, "Limite de 30 fotos por serviço.");
     const eid = randomUUID(),
       sha = createHash("sha256").update(bytes).digest("hex"),
-      name = eid + "-" + sha.slice(0, 12) + ".jpg";
+      name = eid + "-" + sha.slice(0, 12) + extension;
     await createMediaStore(cfg).put(name, bytes);
     await o.insert(db, "zc_evidence", {
       id: eid,
       batch_id: id,
       message_id: "portal:" + eid,
       path: name,
-      mime: "image/jpeg",
+      mime,
       sha256: sha,
       state: "ready",
-      kind: input.kind,
-      serial_code: code,
+      kind,
+      ...equipment,
     });
     await db.query(
       "UPDATE zc_batches SET version=version+1,expected_count=expected_count+1 WHERE id=$1",
@@ -203,28 +312,36 @@ async function upload(pool, cfg, userId, id, input) {
     );
     await d.audit(db, String(userId), "portal_photo_added", "batch", id, {
       evidence_id: eid,
-      kind: input.kind,
+      kind,
     });
-    return { id: eid, version: b.version + 1 };
+    return { id: eid, version: b.version + 1, ...equipment };
   });
 }
-async function verifyEvidence(db, b, r, codes) {
+async function verifyEvidence(db, b, r, codes, order) {
+  if (order.tracker_waiver_authorized && codes.length)
+    fail(
+      400,
+      "OS com dispensa de rastreador não registra instalação de equipamentos.",
+    );
   const files = await d.rows(
     db,
     "SELECT * FROM zc_evidence WHERE batch_id=$1",
     [b.id],
   );
   if (
-    !files.length ||
     files.some((f) => f.state !== "ready") ||
     files.length !== b.expected_count
   )
     fail(400, "Todas as fotos precisam estar prontas.");
-  for (const required of r.required_photos)
+  const requiredPhotos = r.required_photos.filter(
+    (p) =>
+      p.kind === "checklist" || (b.capture_version < 2 && p.kind === "label"),
+  );
+  for (const required of requiredPhotos)
     if (files.filter((f) => f.kind === required.kind).length < required.min)
       fail(400, "Foto obrigatória pendente: " + required.label + ".");
-  if (codes.length < r.min_serials)
-    fail(400, "Informe os IMEIs/seriais exigidos para este serviço.");
+  if (b.capture_version >= 2 && !files.some((f) => f.kind === "checklist"))
+    fail(400, "Anexe o checklist preenchido e assinado (PDF ou fotos).");
   if (
     r.stock_action === "install" &&
     codes.some(
@@ -233,6 +350,52 @@ async function verifyEvidence(db, b, r, codes) {
     )
   )
     fail(400, "Vincule uma foto da etiqueta a cada IMEI/serial informado.");
+  if (
+    b.capture_version >= 2 &&
+    r.stock_action === "install" &&
+    files.some(
+      (f) =>
+        f.kind === "label" &&
+        (!codes.includes(f.serial_code) ||
+          !["RASTREADOR", "TAG"].includes(f.equipment_type)),
+    )
+  )
+    fail(
+      400,
+      "Confira os equipamentos identificados nas fotos antes de enviar.",
+    );
+  if (b.capture_version >= 2 && r.stock_action === "install") {
+    for (const [type, min] of Object.entries(requiredEquipment(order))) {
+      const received = new Set(
+        files
+          .filter(
+            (f) =>
+              f.kind === "label" &&
+              f.equipment_type === type &&
+              codes.includes(f.serial_code),
+          )
+          .map((f) => f.serial_code),
+      );
+      if (received.size > min)
+        fail(
+          400,
+          bundled(order)
+            ? "Equipamento além da quantidade prevista. Peça à central para atualizar as quantidades da OS antes de enviar."
+            : "Equipamento além do previsto na OS: solicite uma OS de equipamento adicional à central para registrar serviço e remuneração separadamente.",
+        );
+      if (received.size < min)
+        fail(
+          400,
+          "A OS exige " +
+            min +
+            " equipamento(s) do tipo " +
+            type +
+            ". Envie a foto de cada etiqueta.",
+        );
+    }
+  }
+  if (codes.length < r.min_serials)
+    fail(400, "Envie a foto dos IMEIs/seriais previstos nesta OS.");
   return files;
 }
 async function submit(pool, userId, id, input) {
@@ -241,17 +404,34 @@ async function submit(pool, userId, id, input) {
     editable(b, order, input.version);
     if (input.confirmed !== true)
       fail(400, "Confira o veículo, as fotos e os IMEIs antes de enviar.");
+    if (b.capture_version >= 2 && input.checklist_signed !== true)
+      fail(400, "Confirme que o checklist está preenchido e assinado.");
     const codes = input.serials?.length ? serials(input.serials).sort() : [];
     if (codes.length > 20) fail(400, "Limite de 20 equipamentos por serviço.");
-    const r = await rule(db, order.service);
-    await verifyEvidence(db, b, r, codes);
-    const notes = d.string(input.notes || "", "Relato do serviço", 6000);
+    const r = await rule(db, order.service, order);
+    await verifyEvidence(db, b, r, codes, order);
+    const notes = d.string(
+      input.notes || "",
+      "Observações do técnico",
+      6000,
+      true,
+    );
+    const executedOn =
+      input.executed_on || b.executed_on || order.executed_on || d.today();
+    require("./financial-calendar").date(executedOn);
+    if (executedOn > d.today()) fail(400, "Execução não pode ter data futura.");
+    await require("./bundled-service").captureGroup(db, order, executedOn);
     const updated = await o.update(
       db,
       "zc_orders",
       "id",
       order.id,
-      { status: "AGUARDANDO VALIDAÇÃO", updated_at: d.now() },
+      {
+        status: "AGUARDANDO CONFERÊNCIA",
+        executed_on: executedOn,
+        execution_finished_at: order.execution_finished_at || d.now(),
+        updated_at: d.now(),
+      },
       true,
     );
     await o.update(
@@ -261,6 +441,7 @@ async function submit(pool, userId, id, input) {
       id,
       {
         state: "submitted",
+        checklist_signed: input.checklist_signed === true,
         submitted_at: d.now(),
         notes,
         imeis: JSON.stringify(codes),
@@ -269,6 +450,7 @@ async function submit(pool, userId, id, input) {
       },
       true,
     );
+    await require("./notifications").orderEvent(db, updated, "submitted");
     await d.audit(db, String(userId), "portal_submitted", "batch", id, {
       order_id: order.id,
       serials: codes,
@@ -297,16 +479,32 @@ async function approve(pool, cfg, id, input, actor) {
       fail(409, "Técnico ou veículo não corresponde à OS.");
     if (["CONCLUÍDO", "CANCELADO"].includes(order.status))
       fail(409, "Serviço encerrado.");
-    const reason = d.string(input.reason, "Conferência", 1000, true);
-    if (reason.length < 5) fail(400, "Descreva a conferência.");
-    const codes =
-      input.serials !== undefined
-        ? input.serials.length
-          ? serials(input.serials).sort()
-          : []
-        : [...b.imeis].sort();
-    const r = await rule(db, order.service);
-    await verifyEvidence(db, b, r, codes);
+    if (
+      b.capture_version >= 2 &&
+      (!b.checklist_signed || input.checklist_reviewed !== true)
+    )
+      fail(
+        400,
+        "Confira se o checklist anexado está preenchido e assinado antes de aprovar.",
+      );
+    const reason =
+      d.string(input.reason ?? "", "Conferência", 1000) ||
+      "Fotos e checklist conferidos na central.";
+    // Confirmation uses the immutable technical submission, never a second scan.
+    const codes = b.imeis.length ? serials(b.imeis).sort() : [];
+    if (input.serials !== undefined) {
+      const received =
+        Array.isArray(input.serials) && input.serials.length === 0
+          ? []
+          : serials(input.serials).sort();
+      if (JSON.stringify(received) !== JSON.stringify(codes))
+        fail(
+          400,
+          "Os equipamentos já foram registrados pelo técnico. Solicite correção do envio para alterar os códigos.",
+        );
+    }
+    const r = await rule(db, order.service, order);
+    await verifyEvidence(db, b, r, codes, order);
     const tech = await d.one(
       db,
       "SELECT * FROM zc_technicians WHERE id=$1 AND active=true",
@@ -314,6 +512,11 @@ async function approve(pool, cfg, id, input, actor) {
     );
     if (!tech) fail(409, "Técnico inativo.");
     if (r.stock_action === "install") {
+      if (reused(order) && input.reuse_confirmed !== true)
+        fail(
+          400,
+          "Confirme que os equipamentos fotografados foram reaproveitados neste veículo.",
+        );
       if (!cfg.STOCK_ENABLED)
         fail(
           409,
@@ -328,7 +531,18 @@ async function approve(pool, cfg, id, input, actor) {
         technician_id: tech.stock_technician_id,
         serials: codes,
         operator: actor,
+        ...(reused(order) ? { reuse: true } : {}),
       };
+      if (bundled(order) && !order.parent_order_id)
+        await require("./bundled-service").recordApproval(
+          db,
+          cfg,
+          order,
+          b,
+          codes,
+          reason,
+          actor,
+        );
       await o.update(
         db,
         "zc_batches",
@@ -368,6 +582,11 @@ async function approve(pool, cfg, id, input, actor) {
         order_id: order.id,
         serials: codes,
       });
+      await require("./notifications").orderEvent(
+        db,
+        { ...order, version: order.version + 1 },
+        "approved",
+      );
       return { ok: true, status: "AGUARDANDO ESTOQUE" };
     }
     if (codes.length)
@@ -386,6 +605,11 @@ async function approve(pool, cfg, id, input, actor) {
     await o.complete(db, order.id, actor, reason, cfg, id, {
       confirmedSubmission: id,
     });
+    await require("./notifications").orderEvent(
+      db,
+      { ...order, version: order.version + 1 },
+      "approved",
+    );
     await d.audit(db, actor, "portal_approved", "batch", id, {
       order_id: order.id,
     });
@@ -439,9 +663,16 @@ async function reject(pool, id, input, actor) {
       },
       true,
     );
+    await require("./notifications").orderEvent(
+      db,
+      { ...order, version: order.version + 1 },
+      "correction",
+      { reason },
+    );
     await d.audit(db, actor, "portal_correction_requested", "batch", id, {
       reason,
     });
+    await require("./bundled-service").rejectChildren(db, order, b, reason);
     return { ok: true };
   });
 }
@@ -479,6 +710,14 @@ async function confirmStock(pool, cfg, job, stock) {
       true,
     );
     await o.update(db, "zc_batches", "id", b.id, { state: "completed" }, true);
+    await require("./bundled-service").completeChildren(
+      db,
+      cfg,
+      order,
+      current,
+      receipt,
+      job.id,
+    );
     await o.complete(db, order.id, b.reviewed_by, b.reason, cfg, b.id, {
       confirmedSubmission: b.id,
       stockReceipt: receipt,
@@ -512,4 +751,5 @@ module.exports = {
   reject,
   confirmStock,
   kinds,
+  requiredEquipment,
 };

@@ -21,6 +21,15 @@ const tables = [
   "zc_batches",
   "zc_evidence",
   "zc_migration_runs",
+  "zc_rates",
+  "zc_closing_policies",
+  "zc_holidays",
+  "zc_financial_ledger",
+  "zc_requests",
+  "zc_adjustments",
+  "zc_payments",
+  "zc_notifications",
+  "zc_operational_services",
 ];
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 async function prepareBackup(pool, cfg) {
@@ -53,9 +62,13 @@ async function prepareBackup(pool, cfg) {
   };
   try {
     for (const name of new Set(
-      snapshot.data.zc_evidence
-        .flatMap((e) => [e.path, e.original_path])
-        .filter(Boolean),
+      [
+        ...snapshot.data.zc_evidence.flatMap((e) => [e.path, e.original_path]),
+        ...snapshot.data.zc_payments.map((p) => p.receipt_path),
+        ...snapshot.data.zc_requests
+          .filter((r) => r.kind === "expense")
+          .map((r) => r.proposed.receipt?.path),
+      ].filter(Boolean),
     )) {
       if (!photoName.test(name))
         fail(
@@ -136,6 +149,22 @@ async function restoreBackup(pool, cfg, source, apply = false) {
     Array.isArray(manifest.media)
   )
     fail(400, "Formato ou integridade do backup inválidos.");
+  const additions = [
+    "zc_rates",
+    "zc_closing_policies",
+    "zc_holidays",
+    "zc_financial_ledger",
+    "zc_requests",
+    "zc_adjustments",
+    "zc_payments",
+    "zc_notifications",
+  ];
+  // Backups from before operational services remain restorable.
+  if (!Object.hasOwn(snapshot.data, "zc_operational_services"))
+    snapshot.data.zc_operational_services = [];
+  const legacy = tables.filter((t) => !additions.includes(t));
+  if (Object.keys(snapshot.data).sort().join() === legacy.sort().join())
+    for (const table of additions) snapshot.data[table] = [];
   if (Object.keys(snapshot.data).sort().join() !== [...tables].sort().join())
     fail(400, "As tabelas do backup não correspondem a esta versão.");
   const media = new Map();
@@ -153,6 +182,15 @@ async function restoreBackup(pool, cfg, source, apply = false) {
     for (const name of [e.path, e.original_path].filter(Boolean))
       if (!media.has(name))
         fail(400, "Uma foto referenciada não está no backup.");
+  for (const p of snapshot.data.zc_payments)
+    if (p.receipt_path && !media.has(p.receipt_path))
+      fail(400, "Comprovante ausente no backup.");
+  for (const r of snapshot.data.zc_requests)
+    if (
+      r.kind === "expense" &&
+      (!r.proposed.receipt?.path || !media.has(r.proposed.receipt.path))
+    )
+      fail(400, "Comprovante de despesa ausente no backup.");
   const report = {
     dry_run: !apply,
     tables: {},
@@ -237,7 +275,7 @@ async function restoreBackup(pool, cfg, source, apply = false) {
             seen.has(r.service) ||
             !Array.isArray(r.required_photos) ||
             !r.required_photos.length ||
-            r.required_photos.length > 5
+            r.required_photos.length > 7
           )
             fail(400, "Regra do backup inválida.");
           seen.add(r.service);
@@ -258,9 +296,15 @@ async function restoreBackup(pool, cfg, source, apply = false) {
           for (const p of r.required_photos) {
             if (
               !p ||
-              !["vehicle", "label", "installed", "service", "other"].includes(
-                p.kind,
-              ) ||
+              ![
+                "vehicle",
+                "label",
+                "installed",
+                "service",
+                "other",
+                "inspection",
+                "checklist",
+              ].includes(p.kind) ||
               kinds.has(p.kind) ||
               !Number.isInteger(p.min) ||
               p.min < 1 ||

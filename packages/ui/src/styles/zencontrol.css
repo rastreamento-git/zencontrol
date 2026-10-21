@@ -1,4 +1,56 @@
 /* Componentes de domínio. Cores e estrutura vêm do tema Estoque Pro 1.4. */
+.zc-equipment-quantities {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  max-width: 440px;
+}
+.zc-equipment-quantities input {
+  width: 100%;
+}
+.zc-audit-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+.zc-audit-summary > div,
+.zc-return {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid var(--ep-line);
+  border-radius: 12px;
+  margin-bottom: 10px;
+}
+.zc-audit-summary small {
+  color: var(--ep-muted);
+}
+.zc-audit-change {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+.zc-timeline details {
+  margin-top: 8px;
+}
+.zc-fipe-result output {
+  display: block;
+  padding: 14px 16px;
+  border: 1px solid var(--ep-line);
+  border-radius: 10px;
+  background: var(--ep-primary-soft);
+  color: var(--ep-primary-ink);
+  font-size: 17px;
+  font-weight: 650;
+}
+.zc-fipe-result small {
+  display: block;
+  color: var(--ep-muted);
+  font-size: 12px;
+  line-height: 1.7;
+  margin-top: 8px;
+}
 .zc-link {
   display: inline-flex;
   align-items: center;
@@ -1230,4 +1282,125 @@
 .zc-document-notice > small {
   font-size: 12px;
   color: var(--ep-muted);
+}
+
+/* Large, explicit capture controls for field work on phones. */
+.portal-file-buttons {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 14px 0;
+}
+.portal-file-buttons label {
+  min-height: 48px;
+  cursor: pointer;
+  position: relative;
+}
+.portal-file-buttons input[type="file"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+}
+.portal-file-buttons label:focus-within {
+  outline: 3px solid #60a5fa;
+  outline-offset: 3px;
+}
+.portal-capture-group {
+  padding: 18px 0;
+  border-top: 1px solid var(--ep-line);
+}
+.portal-capture-group h3 {
+  margin: 0 0 6px;
+  font-size: 17px;
+}
+.portal-capture-group p {
+  margin: 0;
+}
+.portal-document-file {
+  min-height: 150px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  color: #2563eb;
+  background: var(--ep-primary-soft);
+}
+.portal-full-order {
+  grid-column: 1 / -1;
+  padding: 16px 0;
+  border-top: 1px solid var(--ep-line);
+}
+.portal-full-order summary {
+  cursor: pointer;
+  font-weight: 700;
+  min-height: 44px;
+}
+.portal-full-order .zc-comments {
+  white-space: pre-wrap;
+}
+.portal-photo-caption code {
+  overflow-wrap: anywhere;
+}
+.portal-progress {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 0;
+}
+.portal-progress span {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 14px;
+}
+.portal-progress b {
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  background: var(--ep-primary-soft);
+  color: var(--ep-primary-ink);
+}
+.portal-service .error-banner {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+.portal-service .zc-checkbox {
+  min-height: 52px;
+  align-items: center;
+  line-height: 1.5;
+}
+.portal-service .zc-checkbox input {
+  min-width: 22px;
+  min-height: 22px;
+}
+@media (max-width: 600px) {
+  .portal-file-buttons {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+  .portal-file-buttons label {
+    justify-content: center;
+  }
+  .portal-submit-actions {
+    flex-direction: column;
+  }
+  .portal-submit-actions button {
+    width: 100%;
+    min-height: 50px;
+    white-space: normal;
+  }
+  .portal-full-order dl {
+    grid-template-columns: 1fr;
+  }
+  .portal-progress {
+    gap: 10px 14px;
+  }
 }

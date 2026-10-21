@@ -90,7 +90,7 @@ beforeEach(async () => {
 test("migration is repeatable, all read routes work and graph has seven zero days", async () => {
   assert.equal(
     (await pool.query("SELECT * FROM schema_migrations")).rows.length,
-    3,
+    5,
   );
   for (const route of [
     "produtos",

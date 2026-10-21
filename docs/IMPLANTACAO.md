@@ -73,3 +73,7 @@ Use **Baixar backup** para exportar dados operacionais, fotos e verificação SH
 No Supabase, o backup baixa também as fotos originais e editadas para uma pasta temporária e a remove ao concluir. Falha na obtenção de uma foto impede um backup incompleto. Arquivos sem referência no banco (por exemplo, um upload concluído antes de uma transação recusada) não são apagados automaticamente; não esvazie o bucket para liberar espaço sem conferir referências e exportar backup. O comando de purge recusa a execução com mídia remota, antes de alterar tabelas, até que a limpeza coordenada do banco e do bucket seja planejada.
 
 O reset/purge é uma ferramenta administrativa opcional e não participa da instalação. Não foi executado em nenhum banco do usuário nesta entrega. Backups anteriores e arquivos SQLite históricos permanecem fora do repositório.
+
+## Portal separado
+
+O ZenField é publicado como Static Site a partir de seu próprio repositório, com `npm run build` e diretório `dist`. A central/API permanece no Web Service existente. Veja [o passo a passo de publicação e comunicação entre os endereços](PORTAL_TECNICO.md#publicação-separada-no-render).

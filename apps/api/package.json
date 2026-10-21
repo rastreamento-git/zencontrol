@@ -1,6 +1,6 @@
 {
   "name": "zencontrol-api",
-  "version": "6.2.0",
+  "version": "6.4.0",
   "private": true,
   "type": "commonjs",
   "main": "server.js",
@@ -14,7 +14,7 @@
     "migrate": "node scripts/migrate.js",
     "import:legacy": "node scripts/import-legacy.js",
     "demo": "node scripts/demo.js",
-    "check": "node --check server.js && node --check src/app.js && node --check src/orders.js && node --check src/jobs.js && node --check src/purge.js && node --check src/worker-loop.js && node --check src/portal-service.js && node --check src/portal-routes.js && node --check src/stock-client.js && node --check src/order-document.js && node --check src/order-pdf.js && node --check src/integrations.js && node --check src/media-store.js",
+    "check": "node --check server.js && node --check src/app.js && node --check src/orders.js && node --check src/jobs.js && node --check src/purge.js && node --check src/worker-loop.js && node --check src/equipment-photo.js && node --check src/portal-service.js && node --check src/portal-routes.js && node --check src/stock-client.js && node --check src/order-document.js && node --check src/order-pdf.js && node --check src/integrations.js && node --check src/media-store.js && node --check src/expense-receipt.js && node --check src/operational-routes.js && node --check src/ecosystem-routes.js && node --check src/finance-engine.js && node --check src/financial-calendar.js && node --check src/notifications.js && node --check src/technician-access.js && node --check ../../scripts/homologation.cjs",
     "test": "node --test --test-concurrency=1 test/*.test.js",
     "restore": "node scripts/restore.js",
     "db:purge": "node scripts/purge.js"
@@ -27,9 +27,11 @@
     "express": "^5.2.1",
     "express-rate-limit": "^8.7.1",
     "helmet": "^8.3.0",
+    "pdf-lib": "^1.17.1",
     "pdfkit": "^0.17.2",
     "pg": "^8.23.0",
-    "sharp": "^0.35.0"
+    "sharp": "^0.35.0",
+    "zxing-wasm": "^3.1.5"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.9",

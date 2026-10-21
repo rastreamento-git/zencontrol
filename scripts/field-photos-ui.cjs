@@ -1,0 +1,663 @@
+const fs = require("node:fs/promises"),
+  path = require("node:path"),
+  assert = require("node:assert/strict");
+const { spawn } = require("node:child_process"),
+  { once } = require("node:events"),
+  { randomUUID } = require("node:crypto");
+const { chromium } = require("playwright");
+const root = path.resolve(__dirname, ".."),
+  instance = "photos-ui-" + randomUUID().slice(0, 8),
+  directory = path.join(root, ".homologation-" + instance);
+let server, browser, page;
+async function main() {
+  server = spawn(
+    process.execPath,
+    [path.join(root, "scripts/homologation.cjs")],
+    {
+      cwd: root,
+      env: { ...process.env, ZEN_HOMOLOGY_INSTANCE: instance },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  let output = "";
+  server.stdout.on("data", (s) => (output += s));
+  server.stderr.on("data", (s) => (output += s));
+  for (let i = 0; i < 600; i++) {
+    if (output.includes("Homologação LOCAL pronta.")) break;
+    if (server.exitCode !== null) throw Error("Falha no inicializador local.");
+    if (i === 599) throw Error("Inicialização excedeu o limite.");
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  const credentials = JSON.parse(
+    await fs.readFile(path.join(directory, "access.json"), "utf8"),
+  );
+  async function api(route, body, token, method = body ? "POST" : "GET") {
+    const r = await fetch("http://127.0.0.1:4317/api" + route, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: "Bearer " + token } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await r.json();
+    assert.ok(r.ok, JSON.stringify(data));
+    return data;
+  }
+  const admin = (
+    await api("/auth/login", {
+      login: "admin",
+      password: credentials.admin_password,
+    })
+  ).token;
+  const access = await api("/technicians/1/activation", {}, admin),
+    password = "Photos1!browser";
+  await api("/auth/activate", {
+    login: access.login,
+    password: "zen123",
+    code: access.code,
+    new_password: password,
+  });
+  const token = (
+    await api("/auth/login", {
+      login: access.login,
+      password,
+      audience: "technician",
+    })
+  ).token;
+  const assigned = (
+    await api("/technician/orders?view=open", undefined, token)
+  ).items.find((o) => o.vehicle === "ZEN1A23");
+  const planned = await api(
+    "/orders/" + assigned.id,
+    {
+      version: assigned.version,
+      document_data: { equipment_counts: { tracker: 1, tag: 1 } },
+      travel_fee_cents: 3200,
+    },
+    admin,
+    "PATCH",
+  );
+  const args = process.env.ZEN_CHROMIUM_MODULE
+    ? (await import(process.env.ZEN_CHROMIUM_MODULE)).default.args.filter(
+        (a) =>
+          ![
+            "--single-process",
+            "--disable-web-security",
+            "--allow-running-insecure-content",
+            "--disable-site-isolation-trials",
+          ].includes(a),
+      )
+    : undefined;
+  browser = await chromium.launch({
+    headless: true,
+    ...(process.env.ZEN_CHROMIUM_PATH
+      ? { executablePath: process.env.ZEN_CHROMIUM_PATH }
+      : {}),
+    ...(args ? { args } : {}),
+  });
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+  });
+  await context.addInitScript(
+    (value) => sessionStorage.setItem("zenfield.session", value),
+    token,
+  );
+  page = await context.newPage();
+  page.setDefaultTimeout(20000);
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("http://127.0.0.1:4319");
+  await page
+    .getByRole("button", { name: "Meus serviços", exact: true })
+    .click();
+  await page
+    .locator(".portal-order")
+    .filter({ has: page.getByText(assigned.id, { exact: true }) })
+    .click();
+  await page
+    .getByRole("button", { name: "Começar registro", exact: true })
+    .click();
+  const general = page.locator(".portal-capture-group").filter({
+    has: page.getByRole("heading", {
+      name: "Fotos do atendimento",
+      exact: true,
+    }),
+  });
+  await general
+    .getByRole("heading", { name: "Fotos do atendimento", exact: true })
+    .waitFor();
+  assert.equal(await page.locator(".portal-capture-group").count(), 1);
+  for (const name of [
+    "Placa ou chassi",
+    "Equipamento instalado",
+    "Fotos da vistoria",
+    "Fotos complementares",
+  ])
+    assert.equal(
+      await page.getByRole("heading", { name, exact: true }).count(),
+      0,
+    );
+  async function upload(section, fixture, status, kind) {
+    const fixtures = Array.isArray(fixture) ? fixture : [fixture];
+    const statuses = Array.isArray(status) ? status : [status];
+    const collected = [];
+    let complete;
+    const responses = new Promise((resolve) => (complete = resolve));
+    const listener = (r) => {
+      if (r.url().endsWith("/photos") && r.request().method() === "POST") {
+        collected.push(r);
+        if (collected.length === fixtures.length) {
+          page.off("response", listener);
+          complete(collected);
+        }
+      }
+    };
+    page.on("response", listener);
+    await section
+      .getByLabel("Escolher fotos", { exact: true })
+      .setInputFiles(fixtures.map((f) => path.join(directory, "fixtures", f)));
+    const results = await responses;
+    for (const [i, r] of results.entries()) {
+      assert.equal(r.status(), statuses[i], await r.text());
+      assert.equal(r.request().postDataJSON().kind, kind);
+    }
+    await page.waitForFunction(
+      () =>
+        ![...document.querySelectorAll("input[type=file]")].some(
+          (e) => e.disabled,
+        ),
+    );
+    return Promise.all(results.map((r) => r.json()));
+  }
+
+  const equipment = page.locator("section.portal-step").filter({
+    has: page.getByRole("heading", {
+      name: "Equipamentos previstos nesta OS",
+      exact: true,
+    }),
+  });
+  await upload(equipment, "foto-vistoria-exemplo.jpg", 400, "label");
+  await equipment.getByRole("alert").filter({ hasText: "ilegível" }).waitFor();
+  assert.equal(await equipment.locator(".portal-photo").count(), 0);
+  await equipment.screenshot({
+    path: path.join(directory, "unreadable-warning.png"),
+    timeout: 60000,
+  });
+  await upload(equipment, "rastreador-maria.jpg", 400, "label");
+  await equipment
+    .getByRole("alert")
+    .filter({ hasText: "não corresponde" })
+    .waitFor();
+  assert.equal(await equipment.locator(".portal-photo").count(), 0);
+  const mixed = await upload(
+    equipment,
+    ["rastreador-jose.jpg", "foto-vistoria-exemplo.jpg", "tag-jose.jpg"],
+    [201, 400, 201],
+    "label",
+  );
+  assert.equal(
+    mixed[2].version,
+    mixed[0].version + 1,
+    "Rejected photo must not advance the batch version or block the next device",
+  );
+  await equipment
+    .getByText("Rastreador identificado", { exact: true })
+    .waitFor();
+  await equipment.getByText("TAG identificada", { exact: true }).waitFor();
+  assert.equal(await equipment.locator(".portal-upload-queue li").count(), 3);
+  await equipment
+    .getByRole("alert")
+    .filter({ hasText: "1 foto(s) não aceita(s)" })
+    .waitFor();
+  const retryResponse = page.waitForResponse(
+    (r) => r.url().endsWith("/photos") && r.request().method() === "POST",
+  );
+  await equipment
+    .locator(".upload-error")
+    .getByRole("button", { name: "Tentar novamente", exact: true })
+    .click();
+  assert.equal((await retryResponse).status(), 400);
+  await page.waitForFunction(
+    () =>
+      ![...document.querySelectorAll("input[type=file]")].some(
+        (e) => e.disabled,
+      ),
+  );
+  assert.equal(
+    await equipment.locator(".portal-upload-queue li").count(),
+    3,
+    "Retrying a rejected photo must retain the other results",
+  );
+  assert.equal(await equipment.locator(".upload-success").count(), 2);
+  await page.getByLabel("Aparência", { exact: true }).selectOption("dark");
+  assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
+  assert.equal(
+    await page
+      .getByAltText("ZEN SEGUROS", { exact: true })
+      .evaluate((img) => img.complete && img.naturalWidth > 0),
+    true,
+  );
+  await equipment.screenshot({
+    path: path.join(directory, "multiple-equipment-dark.png"),
+    timeout: 60000,
+  });
+  assert.equal(await general.locator(".portal-photo").count(), 0);
+  assert.ok(
+    (await general.innerText()).includes("Opcional, sem quantidade mínima"),
+  );
+  assert.equal(
+    await equipment
+      .locator(".portal-equipment-requirement.is-complete")
+      .count(),
+    2,
+  );
+  const checklistResponse = page.waitForResponse(
+    (r) => r.url().endsWith("/photos") && r.request().method() === "POST",
+  );
+  await page
+    .getByLabel("Anexar checklist assinado", { exact: true })
+    .setInputFiles(path.join(directory, "fixtures/checklist-ficticio.pdf"));
+  assert.equal((await checklistResponse).status(), 201);
+  await page
+    .getByLabel("Observações do técnico (obrigatórias)", { exact: true })
+    .fill("Instalação realizada, equipamentos testados e cliente orientado.");
+  await page
+    .getByLabel("O checklist anexado está preenchido e assinado.", {
+      exact: true,
+    })
+    .check();
+  await page
+    .getByLabel("Conferi a OS, as fotos e os equipamentos deste atendimento.", {
+      exact: true,
+    })
+    .check();
+  assert.ok(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  );
+  await equipment.screenshot({
+    path: path.join(directory, "identified-equipment.png"),
+    timeout: 60000,
+  });
+  const sent = page.waitForResponse(
+    (r) => r.url().endsWith("/submit") && r.request().method() === "POST",
+  );
+  await page
+    .getByRole("button", { name: "Enviar e aguardar confirmação", exact: true })
+    .click();
+  assert.equal((await sent).status(), 200);
+  const orders = await api("/technician/orders?view=open", undefined, token),
+    order = orders.items.find((o) => o.vehicle === "ZEN1A23");
+  const detail = await api("/technician/orders/" + order.id, undefined, token),
+    batch = detail.submissions.find((b) => b.state === "submitted");
+  assert.deepEqual(batch.imeis, ["123456789012345", "TAG-HOMO-001"]);
+  assert.equal(batch.files.filter((f) => f.kind === "other").length, 0);
+  assert.equal(batch.files.filter((f) => f.kind === "label").length, 2);
+  assert.equal(planned.additional_orders.length, 1);
+  assert.equal(
+    await page
+      .getByRole("button", { name: /Registrar equipamento adicional/ })
+      .count(),
+    0,
+  );
+  await page
+    .getByText("Atendimento com equipamentos adicionais", { exact: true })
+    .waitFor();
+  const submittedOrder = await api("/orders/" + order.id, undefined, admin);
+  assert.deepEqual(submittedOrder.group_imeis, [
+    "123456789012345",
+    "TAG-HOMO-001",
+  ]);
+  const central = await browser.newPage({
+    viewport: { width: 1280, height: 900 },
+  });
+  page = central;
+  central.setDefaultTimeout(20000);
+  central.on("pageerror", (e) => errors.push(e.message));
+  await central.goto("http://127.0.0.1:4320");
+  await central.getByLabel("Usuário", { exact: true }).fill("admin");
+  await central.getByLabel("Senha de acesso").fill(credentials.admin_password);
+  await central.getByRole("button", { name: "Entrar", exact: true }).click();
+  await central
+    .getByRole("button", { name: "Abrir ZenControl", exact: true })
+    .click();
+  await central
+    .getByRole("button", { name: "Validações", exact: true })
+    .click();
+  await central
+    .locator("tr")
+    .filter({ has: central.getByText(order.id, { exact: true }) })
+    .getByRole("button", { name: "Conferir", exact: true })
+    .click();
+  const reviewDialog = central.getByRole("dialog", {
+    name: "Conferir atendimento",
+    exact: true,
+  });
+  await reviewDialog
+    .getByRole("heading", { name: "Equipamentos registrados pelo técnico" })
+    .waitFor();
+  assert.equal(await reviewDialog.locator("input,select").count(), 0);
+  assert.equal(
+    await reviewDialog
+      .getByLabel("IMEIs e seriais registrados")
+      .locator("code")
+      .count(),
+    2,
+  );
+  await reviewDialog.locator("img").nth(1).waitFor();
+  assert.equal(await reviewDialog.locator("img").count(), 2);
+  await reviewDialog
+    .getByText("Baixar checklist assinado (PDF)", { exact: true })
+    .waitFor();
+  const approval = central.waitForResponse(
+    (r) => r.url().endsWith("/approve") && r.request().method() === "POST",
+  );
+  await reviewDialog.screenshot({
+    path: path.join(directory, "central-review.png"),
+  });
+  await reviewDialog
+    .getByRole("button", { name: "Confirmar e concluir OS", exact: true })
+    .click();
+  const approvalResponse = await approval;
+  assert.equal(approvalResponse.status(), 200, await approvalResponse.text());
+  assert.equal(
+    Object.hasOwn(approvalResponse.request().postDataJSON(), "serials"),
+    false,
+  );
+  assert.equal(approvalResponse.request().postDataJSON().reason, "");
+  for (let i = 0; i < 60; i++) {
+    const complete = await api("/orders/" + order.id, undefined, admin);
+    if (complete.status === "CONCLUÍDO") {
+      assert.equal(complete.additional_orders.length, 1);
+      assert.equal(complete.additional_orders[0].status, "CONCLUÍDO");
+      break;
+    }
+    if (i === 59) throw Error("Confirmação do estoque não finalizou.");
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  await reviewDialog.getByText("Concluído", { exact: true }).waitFor();
+  await reviewDialog
+    .getByRole("button", { name: "Fechar diálogo", exact: true })
+    .click();
+  const completedOrder = await api("/orders/" + order.id, undefined, admin);
+  const fieldBeforeBlocking = await api(
+    "/technician/orders?view=open",
+    undefined,
+    token,
+  );
+  await central.getByRole("button", { name: "Bloqueios", exact: true }).click();
+  await central
+    .getByRole("button", { name: "Registrar bloqueio", exact: true })
+    .click();
+  const createBlocking = central.getByRole("dialog", {
+    name: "Registrar bloqueio operacional",
+    exact: true,
+  });
+  await createBlocking
+    .getByLabel("Placa ou chassi", { exact: true })
+    .fill(order.vehicle);
+  await createBlocking
+    .getByLabel("OS de referência (opcional)", { exact: true })
+    .fill(order.id);
+  await createBlocking
+    .getByLabel("Protocolo da Rede Veículo (opcional)", { exact: true })
+    .fill("RV-UI-01");
+  await createBlocking
+    .getByLabel("Observações operacionais", { exact: true })
+    .fill("Solicitação registrada pela central com a operação.");
+  assert.equal(
+    await createBlocking.getByLabel("Técnico", { exact: true }).count(),
+    0,
+  );
+  await createBlocking
+    .getByRole("button", { name: "Registrar bloqueio", exact: true })
+    .click();
+  const blockingRow = central.locator("tr").filter({ hasText: "RV-UI-01" });
+  await blockingRow.getByText("Registrado", { exact: true }).waitFor();
+  await blockingRow
+    .getByRole("button", { name: "Ver bloqueio", exact: true })
+    .click();
+  const editBlocking = central.getByRole("dialog", {
+    name: "Bloqueio · " + order.vehicle,
+    exact: true,
+  });
+  await editBlocking
+    .getByLabel("Situação do bloqueio", { exact: true })
+    .selectOption("completed");
+  await editBlocking
+    .getByLabel("Observações operacionais", { exact: true })
+    .fill("Conclusão informada pela Rede Veículo.");
+  await editBlocking
+    .getByRole("button", { name: "Salvar", exact: true })
+    .click();
+  await blockingRow.getByText("Concluído", { exact: true }).waitFor();
+  assert.deepEqual(
+    await api("/orders/" + order.id, undefined, admin),
+    completedOrder,
+  );
+  assert.deepEqual(
+    await api("/technician/orders?view=open", undefined, token),
+    fieldBeforeBlocking,
+  );
+  await central
+    .getByLabel("Filtrar situação", { exact: true })
+    .selectOption("completed");
+  await blockingRow
+    .getByRole("button", { name: "Ver bloqueio", exact: true })
+    .click();
+  await central.getByText("Histórico do bloqueio", { exact: true }).click();
+  await central
+    .locator(".operational-history")
+    .getByText("Conclusão informada pela Rede Veículo.", { exact: true })
+    .waitFor();
+  await central
+    .getByRole("button", { name: "Fechar diálogo", exact: true })
+    .click();
+  for (const theme of ["dark", "light"]) {
+    await central.getByLabel("Aparência", { exact: true }).selectOption(theme);
+    await central.screenshot({
+      path: path.join(directory, "blocking-" + theme + ".png"),
+    });
+  }
+  await central.setViewportSize({ width: 390, height: 844 });
+  await central
+    .getByRole("button", { name: "Registrar bloqueio", exact: true })
+    .click();
+  assert.ok(
+    await central.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  );
+  await central
+    .getByRole("dialog")
+    .screenshot({ path: path.join(directory, "blocking-mobile.png") });
+  await central
+    .getByRole("button", { name: "Fechar diálogo", exact: true })
+    .click();
+  const fieldPage = context.pages()[0];
+  await fieldPage
+    .getByText("Taxa de deslocamento definida pela central:", { exact: false })
+    .waitFor();
+  await fieldPage
+    .getByRole("button", { name: "Declarar despesa extra", exact: true })
+    .click();
+  const expenseForm = fieldPage.locator("form").filter({
+    has: fieldPage.getByRole("heading", {
+      name: "Declarar despesa extra",
+      exact: true,
+    }),
+  });
+  assert.equal(
+    await expenseForm
+      .getByLabel("Número completo da OS", { exact: true })
+      .inputValue(),
+    order.id,
+  );
+  assert.equal(
+    await expenseForm
+      .getByLabel("Número completo da OS", { exact: true })
+      .getAttribute("readonly"),
+    "",
+  );
+  assert.equal(
+    await expenseForm
+      .getByRole("button", { name: "Enviar para aprovação", exact: true })
+      .isDisabled(),
+    true,
+  );
+  const description = "Estacionamento fictício do atendimento (homologação).";
+  await expenseForm
+    .getByLabel("Valor da despesa (R$)", { exact: true })
+    .fill("23.50");
+  await expenseForm
+    .getByLabel("Descrição do gasto (obrigatória)", { exact: true })
+    .fill(description);
+  await expenseForm
+    .getByLabel("Foto do comprovante (obrigatória)", { exact: true })
+    .setInputFiles(path.join(directory, "fixtures/foto-vistoria-exemplo.jpg"));
+  await expenseForm
+    .getByAltText("Prévia do comprovante", { exact: true })
+    .waitFor();
+  const declaration = fieldPage.waitForResponse(
+    (r) =>
+      r.url().endsWith("/technician/requests") &&
+      r.request().method() === "POST",
+  );
+  await expenseForm
+    .getByRole("button", { name: "Enviar para aprovação", exact: true })
+    .click();
+  const declarationResponse = await declaration;
+  assert.equal(
+    declarationResponse.status(),
+    201,
+    await declarationResponse.text(),
+  );
+  const expenseId = (await declarationResponse.json()).id;
+  await fieldPage
+    .getByRole("button", { name: "Meu financeiro", exact: true })
+    .click();
+  const ownExpense = fieldPage
+    .locator("article.eco-card")
+    .filter({ has: fieldPage.getByText(description, { exact: true }) });
+  await ownExpense.getByText("Aguardando decisão", { exact: true }).waitFor();
+  await ownExpense
+    .getByRole("button", { name: "Ver comprovante", exact: true })
+    .click();
+  await ownExpense
+    .getByAltText("Comprovante da despesa", { exact: true })
+    .waitFor();
+  assert.ok(
+    await fieldPage.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  );
+  await ownExpense.screenshot({
+    path: path.join(directory, "expense-mobile.png"),
+  });
+  await central.setViewportSize({ width: 1280, height: 900 });
+  await central
+    .getByRole("button", { name: "Financeiro", exact: true })
+    .click();
+  const centralExpense = central
+    .locator("article.eco-card")
+    .filter({ has: central.getByText(description, { exact: true }) });
+  await centralExpense
+    .getByRole("button", { name: "Ver comprovante", exact: true })
+    .click();
+  await centralExpense
+    .getByAltText("Comprovante da despesa", { exact: true })
+    .waitFor();
+  await centralExpense
+    .getByRole("button", { name: "Responder solicitação", exact: true })
+    .click();
+  await central
+    .getByLabel("Resposta e justificativa", { exact: true })
+    .fill("Descrição, valor e foto do comprovante conferidos pela central.");
+  const approvedExpense = central.waitForResponse((r) =>
+    r.url().endsWith("/requests/" + expenseId + "/decision"),
+  );
+  await central
+    .getByRole("button", { name: "Registrar decisão", exact: true })
+    .click();
+  assert.equal((await approvedExpense).status(), 200);
+  await centralExpense.getByText("Aprovado", { exact: true }).waitFor();
+  const finance = await api("/technician/finance", undefined, token);
+  const rootLedger = finance.ledger.find((row) => row.order_id === order.id);
+  assert.equal(
+    rootLedger.extras.find((x) => x.type === "travel").amount_cents,
+    3200,
+  );
+  assert.equal(rootLedger.adjustment_cents, 2350);
+  const childLedger = finance.ledger.find(
+    (row) => row.order_id === planned.additional_orders[0].id,
+  );
+  assert.equal(childLedger.extras.filter((x) => x.type === "travel").length, 0);
+  await fieldPage.reload();
+  await fieldPage
+    .getByRole("button", { name: "Meu financeiro", exact: true })
+    .click();
+  const totalWithExpense = (
+    (rootLedger.total_cents + 2350) /
+    100
+  ).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  const totalCell = fieldPage
+    .locator("tr")
+    .filter({ hasText: order.id })
+    .first()
+    .locator("td")
+    .nth(4);
+  await totalCell.waitFor();
+  assert.ok(
+    (await totalCell.innerText())
+      .replace(/\s/g, "")
+      .includes(totalWithExpense.replace(/\s/g, "")),
+  );
+  await centralExpense.screenshot({
+    path: path.join(directory, "expense-approved.png"),
+  });
+  assert.deepEqual(errors, []);
+  console.log(
+    JSON.stringify({
+      generalPhotos: "passed: no minimum, zero general photos",
+      multiEquipment:
+        "passed: two devices in one selection, invalid middle image rejected without blocking the next",
+      barcode: "passed: tracker IMEI",
+      qr: "passed: TAG serial",
+      warnings: "passed: unreadable and wrong technician load; neither saved",
+      submission: "passed: checklist and both identified devices",
+      centralReview:
+        "passed: readonly devices, no scanner, no typed reason, one confirmation closes the root and extra OS",
+      operationalBlocking:
+        "passed: registration, provider protocol, completion, friendly-name history, no technician task or OS mutation",
+      themes: "light and dark; 390px blocking form without overflow",
+      mobile: "390px without horizontal overflow",
+      expenses:
+        "passed: readonly travel fee, declaration on the OS with photo and description, scoped receipt and central reimbursement approval",
+      pageErrors: errors,
+    }),
+  );
+}
+main()
+  .catch(async (e) => {
+    console.error(e);
+    if (page) {
+      console.error((await page.locator("body").innerText()).slice(-7000));
+      await page
+        .screenshot({
+          path: path.join(directory, "failure.png"),
+          fullPage: true,
+          timeout: 60000,
+        })
+        .catch(() => {});
+    }
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    await browser?.close();
+    if (server && server.exitCode === null) {
+      server.kill("SIGTERM");
+      await once(server, "exit");
+    }
+  });

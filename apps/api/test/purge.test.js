@@ -110,7 +110,7 @@ test("limpeza esvazia tabelas e fotos do ZenControl e preserva inventário e ace
   );
   assert.equal(
     Number((await d.one(pool, "SELECT count(*) n FROM schema_migrations")).n),
-    3,
+    11,
   );
   await assert.rejects(fs.access(path.join(cfg.DATA_DIR, "media")));
   await assert.rejects(fs.access(path.join(cfg.DATA_DIR, "backups")));

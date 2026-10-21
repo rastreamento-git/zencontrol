@@ -25,13 +25,29 @@ function username(value) {
   return login;
 }
 function password(value) {
-  if (typeof value !== "string" || value.length < 12 || value.length > 128)
-    fail(400, "A senha deve ter entre 12 e 128 caracteres.");
+  if (
+    typeof value !== "string" ||
+    value.length < 8 ||
+    value.length > 128 ||
+    !/\p{Lu}/u.test(value) ||
+    !/\p{Ll}/u.test(value) ||
+    !/[0-9]/.test(value) ||
+    !/[\p{P}\p{S}]/u.test(value)
+  )
+    fail(
+      400,
+      "Use de 8 a 128 caracteres, com pelo menos uma letra maiúscula, uma minúscula, um número e um símbolo.",
+    );
   return value;
 }
 async function hashPassword(value) {
+  return hashCredential(password(value));
+}
+// Bootstrap reuses the already configured administrator credential. New user
+// passwords always pass through hashPassword; existing logins are not revalidated.
+async function hashCredential(value) {
   const salt = randomBytes(16).toString("hex");
-  const hash = await derive(password(value), salt, 64, options);
+  const hash = await derive(value, salt, 64, options);
   return `scrypt$${salt}$${hash.toString("hex")}`;
 }
 async function checkPassword(value, stored) {
@@ -63,11 +79,12 @@ function publicUser(row) {
 }
 function configureAuth(app, env, pool) {
   const enabled = Boolean(env.APP_PASSWORD);
+  const federation = require("./identity").identity(env, pool, publicUser);
   if (
     env.NODE_ENV === "production" &&
-    (!enabled || env.APP_PASSWORD.length < 12)
+    (!enabled || env.APP_PASSWORD.length < 8)
   )
-    throw Error("Produção exige APP_PASSWORD com pelo menos 12 caracteres.");
+    throw Error("Produção exige APP_PASSWORD com pelo menos 8 caracteres.");
   if (enabled && (!env.SESSION_SECRET || env.SESSION_SECRET.length < 32))
     throw Error("Configure SESSION_SECRET com pelo menos 32 caracteres.");
   let initialization;
@@ -78,7 +95,7 @@ function configureAuth(app, env, pool) {
       initialization = (async () => {
         const existing = await pool.query("SELECT id FROM usuarios LIMIT 1");
         if (existing.rowCount) return;
-        const hash = await hashPassword(env.APP_PASSWORD);
+        const hash = await hashCredential(env.APP_PASSWORD);
         await pool.query(
           "INSERT INTO usuarios (login,nome,senha_hash,papel) VALUES ($1,'Administrador',$2,'admin') ON CONFLICT(login) DO NOTHING",
           [initialLogin, hash],
@@ -94,6 +111,7 @@ function configureAuth(app, env, pool) {
       .update(payload)
       .digest("base64url");
   async function valid(req) {
+    if (federation.enabled) return federation.valid(req);
     if (!enabled)
       return {
         id: null,
@@ -131,6 +149,42 @@ function configureAuth(app, env, pool) {
     const row = rows[0];
     return row && data.version === row.versao_sessao ? publicUser(row) : null;
   }
+  app.get("/api/auth/config", (req, res) =>
+    res.json({
+      unified_login: federation.enabled,
+      login_url: federation.enabled ? env.ZEN_LOGIN_URL : "",
+    }),
+  );
+  app.post(
+    "/api/auth/sso/exchange",
+    rateLimit({
+      windowMs: 60000,
+      limit: 30,
+      standardHeaders: "draft-8",
+      legacyHeaders: false,
+    }),
+    async (req, res) => {
+      if (!federation.enabled) fail(503, "Acesso único não configurado.");
+      res.json(await federation.exchange(req.body));
+    },
+  );
+  app.post("/api/auth/logout", async (req, res) => {
+    if (federation.enabled) {
+      try {
+        await federation.logout(req);
+      } catch (error) {
+        if (![401, 403].includes(error.status)) throw error;
+      }
+    } else {
+      const user = await valid(req);
+      if (user?.id)
+        await pool.query(
+          "UPDATE usuarios SET versao_sessao=versao_sessao+1 WHERE id=$1",
+          [user.id],
+        );
+    }
+    res.json({ ok: true });
+  });
   app.get("/api/auth/session", async (req, res) => {
     await ready();
     const user = await valid(req);
@@ -146,6 +200,7 @@ function configureAuth(app, env, pool) {
       message: { error: "Muitas tentativas. Aguarde 15 minutos." },
     }),
     async (req, res) => {
+      if (federation.enabled) fail(409, "Entre pelo acesso único ZEN.");
       if (!enabled)
         return res.json({
           enabled: false,
@@ -202,21 +257,28 @@ function configureAuth(app, env, pool) {
     next();
   });
   function requireAdmin(req, res, next) {
-    if (req.user?.papel !== "admin")
-      fail(403, "Esta ação exige um administrador.");
+    if (!["admin", "operador"].includes(req.user?.papel))
+      fail(403, "Esta ação exige acesso da central.");
     next();
   }
   async function reauthenticate(req) {
+    if (federation.enabled) return federation.reauthenticate(req);
     if (!enabled)
       fail(403, "Configure acesso por senha para usar ações administrativas.");
     const { rows } = await pool.query(
-      "SELECT senha_hash FROM usuarios WHERE id=$1 AND ativo=true AND papel='admin'",
+      "SELECT senha_hash FROM usuarios WHERE id=$1 AND ativo=true AND papel IN ('admin','operador')",
       [req.user.id],
     );
     if (!(await checkPassword(req.body?.password, rows[0]?.senha_hash)))
       fail(400, "A senha atual não confere.");
   }
-  return { ready, requireAdmin, reauthenticate, enabled };
+  return {
+    ready,
+    requireAdmin,
+    reauthenticate,
+    enabled,
+    federated: federation.enabled,
+  };
 }
 module.exports = {
   configureAuth,

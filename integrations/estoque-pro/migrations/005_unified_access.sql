@@ -1,0 +1,1 @@
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS zen_identity_id INTEGER UNIQUE;

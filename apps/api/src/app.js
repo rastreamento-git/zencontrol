@@ -16,6 +16,12 @@ const { WPPClient, SGAClient, IntegrationError } = require("./integrations");
 const { orderPdf, settlementPdf } = require("./pdf");
 const { configurePortal } = require("./portal-routes");
 const portal = require("./portal-service");
+const { documentOrder } = require("./order-document-load");
+const {
+  groupedPage,
+  presentOrders,
+  orderHistory,
+} = require("./order-presentation");
 function createApp(pool, env = process.env) {
   const cfg = configuration(env),
     app = express();
@@ -29,6 +35,8 @@ function createApp(pool, env = process.env) {
   if (origins.includes("*"))
     throw Error("CORS_ORIGINS exige origens explícitas.");
   origins.push(new URL(cfg.PUBLIC_URL).origin);
+  if (cfg.TECHNICIAN_PORTAL_URL)
+    origins.push(new URL(cfg.TECHNICIAN_PORTAL_URL).origin);
   if (cfg.TRUST_PROXY)
     app.set("trust proxy", integer(cfg.TRUST_PROXY, "TRUST_PROXY"));
   app.use(
@@ -56,15 +64,21 @@ function createApp(pool, env = process.env) {
     }),
   );
   app.use("/api/technician/batches", express.json({ limit: "12mb" }));
+  app.use("/api/technician/requests", express.json({ limit: "6mb" }));
   app.use("/api/evidence", express.json({ limit: "24mb" }));
+  app.use("/api/finance-v2/closings", express.json({ limit: "6mb" }));
   app.use(express.json({ limit: "512kb" }));
   app.get("/healthz", async (req, res) => {
-    await pool.query("SELECT 1");
-    res.json({
-      status: "ok",
-      version: "6.2.0",
-      media_storage: cfg.MEDIA_STORAGE || "local",
-    });
+    try {
+      await pool.query("SELECT 1");
+      res.json({
+        status: "ok",
+        version: "6.4.0",
+        media_storage: cfg.MEDIA_STORAGE || "local",
+      });
+    } catch {
+      res.status(503).json({ status: "unavailable" });
+    }
   });
   configureWebhook(app, pool, cfg);
   app.use("/api", (req, res, next) => {
@@ -82,6 +96,9 @@ function createApp(pool, env = process.env) {
     await auth.ready();
   };
   app.locals.config = cfg;
+  require("./field-access").configureFieldAccess(app, pool);
+  require("./operational-routes").configureOperational(app, pool, auth);
+  require("./ecosystem-routes").configureEcosystem(app, pool, cfg, auth);
   configurePortal(app, pool, cfg, auth);
   const admin = auth.requireAdmin;
   const actor = (req) => req.user.nome || req.user.login;
@@ -94,23 +111,23 @@ function createApp(pool, env = process.env) {
       statuses: d.statuses,
       services: d.services,
       today: d.today(),
-      version: "6.2.0",
+      version: "6.4.0",
     }),
   );
   app.get("/api/overview", async (req, res) => {
     const today = d.today();
     const totals = await d.one(
       pool,
-      "SELECT count(*)::int total,count(*) FILTER(WHERE substring(scheduled_at,1,10)=$1)::int today,count(*) FILTER(WHERE scheduled_at<>'' AND substring(scheduled_at,1,10)<$1 AND status NOT IN ('CONCLUÍDO','CANCELADO'))::int overdue FROM zc_orders WHERE deleted_at=''",
+      "SELECT count(*)::int total,count(*) FILTER(WHERE substring(scheduled_at,1,10)=$1)::int today,count(*) FILTER(WHERE scheduled_at<>'' AND substring(scheduled_at,1,10)<$1 AND status NOT IN ('CONCLUÍDO','CANCELADO'))::int overdue FROM zc_orders WHERE deleted_at='' AND parent_order_id IS NULL",
       [today],
     );
     const status = await d.rows(
       pool,
-      "SELECT status,count(*)::int n FROM zc_orders WHERE deleted_at='' GROUP BY status",
+      "SELECT status,count(*)::int n FROM zc_orders WHERE deleted_at='' AND parent_order_id IS NULL GROUP BY status",
     );
     const technicians = await d.rows(
       pool,
-      "SELECT t.id,t.name,count(o.id)::int open_orders FROM zc_technicians t LEFT JOIN zc_orders o ON o.technician_id=t.id AND o.deleted_at='' AND o.status NOT IN ('CONCLUÍDO','CANCELADO') WHERE t.active=true GROUP BY t.id ORDER BY open_orders DESC,t.name LIMIT 8",
+      "SELECT t.id,t.name,count(o.id)::int open_orders FROM zc_technicians t LEFT JOIN zc_orders o ON o.technician_id=t.id AND o.deleted_at='' AND o.parent_order_id IS NULL AND o.status NOT IN ('CONCLUÍDO','CANCELADO') WHERE t.active=true GROUP BY t.id ORDER BY open_orders DESC,t.name LIMIT 8",
     );
     res.json({
       totals,
@@ -124,7 +141,7 @@ function createApp(pool, env = process.env) {
         (
           await d.one(
             pool,
-            "SELECT count(*) n FROM zc_batches WHERE state IN ('needs_review','ready','submitted','stock_failed')",
+            "SELECT count(*) n FROM zc_batches WHERE source<>'bundle' AND state IN ('needs_review','ready','submitted','stock_failed')",
           )
         ).n,
       ),
@@ -132,7 +149,7 @@ function createApp(pool, env = process.env) {
   });
   app.get("/api/orders", async (req, res) => {
     const p = page(req),
-      conditions = ["deleted_at=''"],
+      conditions = [],
       args = [];
     const where = (s, v) => {
       args.push(v);
@@ -143,7 +160,7 @@ function createApp(pool, env = process.env) {
     if (req.query.q) {
       args.push("%" + String(req.query.q).slice(0, 200) + "%");
       conditions.push(
-        `(id ILIKE $${args.length} OR vehicle ILIKE $${args.length} OR customer_name ILIKE $${args.length} OR technician_name ILIKE $${args.length})`,
+        `(id ILIKE $${args.length} OR vehicle ILIKE $${args.length} OR customer_name ILIKE $${args.length} OR technician_name ILIKE $${args.length} OR EXISTS(SELECT 1 FROM zc_batches b WHERE b.order_id=eligible.id AND b.source='portal' AND b.submitted_at<>'' AND b.imeis::text ILIKE $${args.length}))`,
       );
     }
     if (req.query.day) {
@@ -156,21 +173,14 @@ function createApp(pool, env = process.env) {
         d.today(),
       );
     const clause = conditions.join(" AND ");
-    const total = Number(
-      (
-        await d.one(
-          pool,
-          "SELECT count(*) n FROM zc_orders WHERE " + clause,
-          args,
-        )
-      ).n,
-    );
-    const list = await d.rows(
-      pool,
-      `SELECT * FROM zc_orders WHERE ${clause} ORDER BY ${req.query.day ? "scheduled_at,id" : "updated_at DESC,id DESC"} LIMIT $${args.length + 1} OFFSET $${args.length + 2}`,
-      [...args, p.limit, (p.page - 1) * p.limit],
-    );
-    res.json({ items: list.map(d.publicOrder), total, ...p });
+    const result = await groupedPage(pool, {
+      base: "deleted_at=''",
+      conditions: clause,
+      args,
+      ...p,
+      sort: req.query.day ? "scheduled_at,id" : "updated_at DESC,id DESC",
+    });
+    res.json({ ...result, items: await presentOrders(pool, result.items) });
   });
   app.post("/api/orders", async (req, res) =>
     res
@@ -178,25 +188,20 @@ function createApp(pool, env = process.env) {
       .json(d.publicOrder(await o.create(pool, req.body, actor(req)))),
   );
   app.get("/api/orders/:id", async (req, res) => {
-    const order = d.publicOrder(await o.get(pool, req.params.id));
-    order.history = await d.rows(
-      pool,
-      "SELECT * FROM zc_audit WHERE entity_type='order' AND entity_id=$1 ORDER BY id DESC LIMIT 50",
-      [order.id],
-    );
+    const [order] = await presentOrders(pool, [
+      await o.get(pool, req.params.id),
+    ]);
+    Object.assign(order, await orderHistory(pool, order));
     order.jobs = await d.rows(
       pool,
       "SELECT id,kind,state,last_error,created_at FROM zc_jobs WHERE order_id=$1 ORDER BY created_at DESC LIMIT 20",
       [order.id],
     );
-    order.extras =
-      req.user.papel === "admin"
-        ? await d.rows(
-            pool,
-            "SELECT * FROM zc_order_extras WHERE order_id=$1",
-            [order.id],
-          )
-        : [];
+    order.extras = ["admin", "operador"].includes(req.user.papel)
+      ? await d.rows(pool, "SELECT * FROM zc_order_extras WHERE order_id=$1", [
+          order.id,
+        ])
+      : [];
     order.submissions = await d.rows(
       pool,
       "SELECT id,state,version,submitted_at FROM zc_batches WHERE order_id=$1 ORDER BY created_at DESC",
@@ -251,6 +256,16 @@ function createApp(pool, env = process.env) {
         },
         true,
       );
+      await db.query(
+        "UPDATE zc_financial_ledger SET state='awaiting_approval',eligible_on='' WHERE order_id=$1",
+        [order.id],
+      );
+      await require("./notifications").orderEvent(
+        db,
+        { ...order, version: order.version + 1 },
+        "updated",
+        { reason },
+      );
       await d.audit(db, actor(req), "reopened", "order", order.id, { reason });
     });
     res.json({ ok: true });
@@ -258,12 +273,14 @@ function createApp(pool, env = process.env) {
   app.delete("/api/orders/:id", admin, async (req, res) => {
     await transaction(pool, async (db) => {
       const order = await o.get(db, req.params.id);
+      if (order.parent_order_id && order.document_data?.equipment_counts)
+        fail(409, "Arquive o atendimento pela OS principal.");
       await o.guard(db, order.id);
       if (req.body.version !== order.version) fail(409, "A OS mudou.");
       if (
         await d.one(
           db,
-          "SELECT 1 FROM zc_settlement_orders WHERE order_id=$1",
+          "SELECT 1 FROM zc_settlement_orders WHERE order_id=$1 OR order_id IN (SELECT id FROM zc_orders WHERE parent_order_id=$1)",
           [order.id],
         )
       )
@@ -278,29 +295,51 @@ function createApp(pool, env = process.env) {
         { deleted_at: d.now() },
         true,
       );
+      if (order.document_data?.equipment_counts)
+        await db.query(
+          "UPDATE zc_orders SET deleted_at=$2,status='CANCELADO',updated_at=$2,version=version+1 WHERE parent_order_id=$1 AND deleted_at=''",
+          [order.id, d.now()],
+        );
+      await db.query(
+        "UPDATE zc_financial_ledger SET state='cancelled' WHERE order_id=$1 OR order_id IN (SELECT id FROM zc_orders WHERE parent_order_id=$1)",
+        [order.id],
+      );
+      await require("./notifications").orderEvent(
+        db,
+        { ...order, version: order.version + 1 },
+        "cancelled",
+        { reason },
+      );
       await d.audit(db, actor(req), "deleted", "order", order.id, { reason });
     });
     res.json({ ok: true });
   });
   app.post("/api/orders/:id/dispatch", async (req, res) => {
-    if (req.body.masked === false && req.user.papel !== "admin")
+    if (
+      req.body.masked === false &&
+      !["admin", "operador"].includes(req.user.papel)
+    )
       fail(403, "A versão integral da OS exige administrador.");
-    if (req.body.masked === false && req.user.papel !== "admin")
+    if (
+      req.body.masked === false &&
+      !["admin", "operador"].includes(req.user.papel)
+    )
       fail(403, "Envio integral exige administração.");
     res.status(202).json({
       job_id: await o.dispatch(pool, req.params.id, req.body, actor(req), cfg),
     });
   });
   app.get("/api/orders/:id/pdf", async (req, res) => {
-    const order = await o.get(pool, req.params.id);
+    const order = await documentOrder(pool, await o.get(pool, req.params.id));
     res
       .type("pdf")
       .attachment(order.id + ".pdf")
       .send(
         await orderPdf(
           order,
-          req.query.integral !== "1" || req.user.papel !== "admin",
-          { portalUrl: cfg.PUBLIC_URL },
+          req.query.integral !== "1" ||
+            !["admin", "operador"].includes(req.user.papel),
+          { portalUrl: cfg.TECHNICIAN_PORTAL_URL || cfg.PUBLIC_URL },
         ),
       );
   });
@@ -311,7 +350,7 @@ function createApp(pool, env = process.env) {
     );
     for (const t of list) {
       delete t.extra_info;
-      if (req.user.papel !== "admin")
+      if (!["admin", "operador"].includes(req.user.papel))
         for (const k of [
           "price_install",
           "price_maintenance",
@@ -359,8 +398,10 @@ function createApp(pool, env = process.env) {
         fail(400, "JID de grupo inválido.");
     if (req.body.active !== undefined)
       data.active = d.boolean(req.body.active, "Ativo");
+    let access;
     const tech = await transaction(pool, async (db) => {
-      let row;
+      let row,
+        rateChanged = false;
       if (req.params.id) {
         const old = await d.one(
           db,
@@ -385,6 +426,12 @@ function createApp(pool, env = process.env) {
             409,
             "Aguarde a confirmação do estoque antes de alterar o vínculo.",
           );
+        rateChanged = [
+          "price_install",
+          "price_maintenance",
+          "price_removal",
+          "price_visit",
+        ].some((k) => data[k] !== undefined && data[k] !== old[k]);
         row = await o.update(db, "zc_technicians", "id", old.id, data, true);
         if (data.name && data.name !== old.name)
           await db.query(
@@ -395,10 +442,41 @@ function createApp(pool, env = process.env) {
         if (!data.name) fail(400, "Informe o nome.");
         row = await o.insert(db, "zc_technicians", data);
       }
+      if (!req.params.id) {
+        access = await require("./technician-access").createTechnicianAccount(
+          db,
+          row,
+          actor(req),
+        );
+        await require("./finance-engine").initialRate(db, row, actor(req));
+      }
+      if (data.active !== undefined)
+        await db.query(
+          "UPDATE usuarios SET ativo=$1,versao_sessao=versao_sessao+1 WHERE id IN (SELECT user_id FROM zc_technician_accounts WHERE technician_id=$2)",
+          [row.active, row.id],
+        );
+      if (req.params.id && rateChanged) {
+        await require("./finance-engine").addRate(
+          db,
+          row.id,
+          {
+            effective_on: d.today(),
+            prices: {
+              Instalação: row.price_install,
+              Reinstalação: row.price_install,
+              Manutenção: row.price_maintenance,
+              Retirada: row.price_removal,
+              Visita: row.price_visit,
+              Improdutiva: row.price_visit,
+            },
+          },
+          actor(req),
+        );
+      }
       await d.audit(db, actor(req), "saved", "technician", row.id);
       return row;
     });
-    res.json({ id: tech.id });
+    res.json({ id: tech.id, access });
   };
   app.post("/api/technicians", admin, saveTech);
   app.patch("/api/technicians/:id", admin, saveTech);
@@ -437,6 +515,16 @@ function createApp(pool, env = process.env) {
   app.delete("/api/volunteers/:id", admin, async (req, res) => {
     await transaction(pool, async (db) => {
       await db.query("DELETE FROM zc_volunteers WHERE id=$1", [req.params.id]);
+      await db.query(
+        "UPDATE zc_financial_ledger SET state='cancelled' WHERE order_id=$1",
+        [order.id],
+      );
+      await require("./notifications").orderEvent(
+        db,
+        { ...order, version: order.version + 1 },
+        "cancelled",
+        { reason },
+      );
       await d.audit(db, actor(req), "deleted", "volunteer", req.params.id);
     });
     res.json({ ok: true });
@@ -470,7 +558,10 @@ function createApp(pool, env = process.env) {
           [req.params.id],
         );
         if (!old) fail(404, "Usuário não encontrado.");
-        if (old.id === req.user.id && (!active || role !== "admin"))
+        if (
+          old.id === req.user.id &&
+          (!active || (old.papel === "admin" && role !== "admin"))
+        )
           fail(409, "Você não pode desativar a própria conta administrativa.");
         if (
           old.ativo &&
@@ -550,7 +641,7 @@ function createApp(pool, env = process.env) {
     res.json({
       items: await d.rows(
         pool,
-        "SELECT b.*,t.name technician_name,(SELECT count(*)::int FROM zc_evidence e WHERE e.batch_id=b.id AND e.state='ready') ready_count FROM zc_batches b JOIN zc_technicians t ON t.id=b.technician_id ORDER BY b.created_at DESC LIMIT 100",
+        "SELECT b.*,t.name technician_name,(SELECT count(*)::int FROM zc_evidence e WHERE e.batch_id=b.id AND e.state='ready') ready_count FROM zc_batches b JOIN zc_technicians t ON t.id=b.technician_id WHERE b.source<>'bundle' ORDER BY b.created_at DESC LIMIT 100",
       ),
     }),
   );
@@ -561,15 +652,19 @@ function createApp(pool, env = process.env) {
     if (!batch) fail(404, "Lote não encontrado.");
     batch.files = await d.rows(
       pool,
-      "SELECT id,state,mime,sha256,kind,serial_code FROM zc_evidence WHERE batch_id=$1",
+      "SELECT id,state,mime,sha256,kind,serial_code,equipment_type,equipment_model FROM zc_evidence WHERE batch_id=$1",
       [batch.id],
     );
-    batch.rule = batch.order_id
-      ? await portal.rule(pool, (await o.get(pool, batch.order_id)).service)
+    const currentOrder = batch.order_id
+      ? await o.get(pool, batch.order_id)
       : null;
-    batch.current_order = batch.order_id
-      ? d.publicOrder(await o.get(pool, batch.order_id))
+    batch.rule = currentOrder
+      ? await portal.rule(pool, currentOrder.service, currentOrder)
       : null;
+    batch.required_equipment = currentOrder
+      ? portal.requiredEquipment(currentOrder)
+      : {};
+    batch.current_order = currentOrder ? d.publicOrder(currentOrder) : null;
     res.json(batch);
   });
   app.get("/api/evidence/:id", async (req, res) => {
@@ -578,11 +673,17 @@ function createApp(pool, env = process.env) {
       "SELECT * FROM zc_evidence WHERE id=$1 AND state='ready'",
       [req.params.id],
     );
-    if (!item || !/^[-a-f0-9]+\.jpg$/.test(item.path))
+    if (!item || !/^[-a-f0-9]+\.(?:jpg|pdf)$/.test(item.path))
       fail(404, "Foto indisponível.");
     res
       .set("Cache-Control", "no-store")
       .type(item.mime)
+      .set(
+        "Content-Disposition",
+        item.mime === "application/pdf"
+          ? 'attachment; filename="checklist-assinado.pdf"'
+          : "inline",
+      )
       .send(await createMediaStore(cfg).read(item.path));
   });
   app.post("/api/evidence/:id/edit", async (req, res) => {
@@ -854,6 +955,15 @@ function createApp(pool, env = process.env) {
         )
       )
         fail(409, "Fechamento já registrado.");
+      if (
+        await d.one(db, "SELECT 1 FROM zc_financial_ledger WHERE order_id=$1", [
+          order.id,
+        ])
+      )
+        fail(
+          409,
+          "Composição financeira já registrada. Use um ajuste auditado.",
+        );
       const extra = await o.insert(db, "zc_order_extras", {
         order_id: order.id,
         type: d.string(req.body.type || "Extra", "Tipo", 100, true),
@@ -882,6 +992,15 @@ function createApp(pool, env = process.env) {
         )
       )
         fail(409, "Fechamento já registrado.");
+      if (
+        await d.one(db, "SELECT 1 FROM zc_financial_ledger WHERE order_id=$1", [
+          x.order_id,
+        ])
+      )
+        fail(
+          409,
+          "Composição financeira já registrada. Use um ajuste auditado.",
+        );
       await db.query("DELETE FROM zc_order_extras WHERE id=$1", [x.id]);
       await d.audit(db, actor(req), "extra_deleted", "order", x.order_id, {
         id: x.id,
@@ -908,6 +1027,18 @@ function createApp(pool, env = process.env) {
         req.body.end,
       );
       if (!p.orders.length) fail(400, "Nenhuma OS elegível.");
+      if (
+        (
+          await db.query(
+            "SELECT 1 FROM zc_orders WHERE id=ANY($1::text[]) AND workflow_mode='controlled' LIMIT 1",
+            [p.orders.map((x) => x.id)],
+          )
+        ).rowCount
+      )
+        fail(
+          409,
+          "OS do portal exige o módulo Financeiro 6.4 com conferência de fechamento.",
+        );
       if (
         p.total_cents !== req.body.expected_total ||
         JSON.stringify(p.orders.map((x) => x.id)) !==
@@ -1143,6 +1274,16 @@ function createApp(pool, env = process.env) {
   app.use("/api", (req, res) =>
     res.status(404).json({ error: "Rota não encontrada." }),
   );
+  app.get("/tecnico", (req, res) => {
+    if (cfg.TECHNICIAN_PORTAL_URL)
+      return res.redirect(302, cfg.TECHNICIAN_PORTAL_URL);
+    res
+      .status(503)
+      .type("text")
+      .send(
+        "O Portal do Técnico é um aplicativo separado. Peça à central o endereço de acesso.",
+      );
+  });
   app.use(express.static(path.join(cfg.ROOT, "apps/web/dist")));
   app.get("/{*splat}", (req, res) =>
     res.sendFile(path.join(cfg.ROOT, "apps/web/dist/index.html")),
@@ -1160,7 +1301,14 @@ function createApp(pool, env = process.env) {
           : error.code === "23503"
             ? 409
             : 500);
-    if (code >= 500) console.error("Falha na API:", error.code || error.name);
+    if (code >= 500)
+      console.error(
+        JSON.stringify({
+          event: "api_error",
+          method: req.method,
+          code: error.code || error.name,
+        }),
+      );
     res.status(code).json({
       error:
         code >= 500

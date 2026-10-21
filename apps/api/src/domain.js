@@ -6,6 +6,8 @@ const statuses = [
   "AGENDADO",
   "EM EXECUÇÃO",
   "AGUARDANDO VALIDAÇÃO",
+  "EXECUÇÃO FINALIZADA",
+  "AGUARDANDO CONFERÊNCIA",
   "CONCLUÍDO",
   "CANCELADO",
   "REAGENDAR",
@@ -90,13 +92,41 @@ const one = async (db, sql, args = []) =>
   (await db.query(sql, args)).rows[0] || null;
 const rows = async (db, sql, args = []) => (await db.query(sql, args)).rows;
 async function audit(db, actor, action, type, id, detail = {}) {
+  const scope = require("./field-access").context.getStore();
+  if (
+    scope?.actor &&
+    (scope.delegated ||
+      [String(scope.actor.id), scope.actor.login, scope.actor.nome].includes(
+        actor,
+      ))
+  ) {
+    actor = scope.actor.nome || scope.actor.login;
+    detail = {
+      ...detail,
+      user: { id: scope.actor.id, login: scope.actor.login, name: actor },
+    };
+  }
+  if (scope?.delegated) {
+    actor = scope.actor.nome || scope.actor.login;
+    detail = {
+      ...detail,
+      delegation: {
+        actor_user_id: scope.actor.id,
+        actor_login: scope.actor.login,
+        actor_role: scope.actor.papel,
+        technician_id: scope.technician.id,
+        technician_name: scope.technician.name,
+        origin: "zenfield_supervision",
+      },
+    };
+  }
   await db.query(
     "INSERT INTO zc_audit(created_at,actor,action,entity_type,entity_id,detail) VALUES($1,$2,$3,$4,$5,$6::jsonb)",
     [now(), actor, action, type, String(id), JSON.stringify(detail)],
   );
 }
 function publicOrder(o) {
-  const { raw_legacy, ...rest } = o;
+  const { raw_legacy, term, ...rest } = o;
   return rest;
 }
 module.exports = {

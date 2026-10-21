@@ -1,6 +1,6 @@
 /* Estoque Pro 1.4 — identidade azul, espaços compactos e contraste consistente. */
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   --ep-canvas: #f3f6fb;
   --ep-surface: #ffffff;
   --ep-subtle: #f7f9fc;
@@ -923,120 +923,152 @@ input::placeholder {
   }
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --ep-canvas: #101a2c;
-    --ep-surface: #17253b;
-    --ep-subtle: #1c2c43;
-    --ep-text: #edf3fc;
-    --ep-muted: #b0c0d7;
-    --ep-line: #33465f;
-    --ep-primary: #2867d7;
-    --ep-primary-hover: #3377eb;
-    --ep-primary-soft: #203a63;
-    --ep-primary-ink: #bed9ff;
-    --ep-sidebar: #07152c;
-    --ep-green-soft: #1b3d34;
-    --ep-green-ink: #acdfc3;
-    --ep-blue-soft: #233851;
-    --ep-blue-ink: #accef9;
-    --ep-purple-soft: #352e4c;
-    --ep-purple-ink: #cfbbf5;
-    --ep-amber-soft: #413523;
-    --ep-amber-ink: #eac58f;
-    --ep-red-soft: #442635;
-    --ep-red-ink: #f3b8c2;
-  }
-  .workspace-view [class~="bg-gray-50"],
-  .workspace-view [class~="bg-slate-50"],
-  .workspace-view [class~="bg-slate-100"],
-  .workspace-view [class~="bg-gray-100"] {
-    background-color: var(--ep-subtle);
-  }
-  .workspace-view [class*="text-slate-"],
-  .workspace-view [class*="text-gray-"] {
-    color: var(--ep-muted);
-  }
-  .workspace-view h2,
-  .workspace-view h3,
-  .workspace-view strong,
-  .stat-value {
-    color: var(--ep-text);
-  }
-  .workspace-view [class*="border-gray-"],
-  .workspace-view [class*="border-slate-"] {
-    border-color: var(--ep-line);
-  }
-  .workspace-view th,
-  .workspace-view [class*="bg-gradient-to-r"],
-  .equipment-type-content,
-  .stock-icon,
-  .reader-count {
-    background: var(--ep-subtle);
-    color: var(--ep-muted);
-  }
-  .workspace-view td,
-  .workspace-view label.block {
-    color: var(--ep-muted);
-    border-color: var(--ep-line);
-  }
-  .workspace-view .trace-table td {
-    color: var(--ep-text);
-  }
-  .workspace-view [class~="bg-blue-100"],
-  .workspace-view [class~="bg-blue-50"] {
-    background-color: var(--ep-primary-soft);
-  }
-  .workspace-view [class~="text-blue-700"],
-  .workspace-view [class~="text-blue-800"] {
-    color: var(--ep-primary-ink);
-  }
-  .stock-alerts {
-    background: var(--ep-amber-soft);
-    border-color: var(--ep-line);
-  }
-  .stock-alerts strong,
-  .stock-alerts small,
-  .alert-list > div {
-    color: var(--ep-amber-ink);
-  }
-  .error-banner,
-  .form-error {
-    background: var(--ep-red-soft);
-    color: var(--ep-red-ink);
-    border-color: var(--ep-line);
-  }
-  .detail-correction,
-  .backup-card,
-  .restore-form {
-    background: var(--ep-subtle);
-    border-color: var(--ep-line);
-  }
-  .pro-toast,
-  .ui-toast {
-    background: var(--ep-surface);
-    border-color: var(--ep-line);
-  }
-  .mint {
-    --tint: var(--ep-green-soft);
-    --accent: var(--ep-green-ink);
-  }
-  .blue {
-    --tint: var(--ep-blue-soft);
-    --accent: var(--ep-blue-ink);
-  }
-  .violet {
-    --tint: var(--ep-purple-soft);
-    --accent: var(--ep-purple-ink);
-  }
-  .amber {
-    --tint: var(--ep-amber-soft);
-    --accent: var(--ep-amber-ink);
-  }
-  .recharts-cartesian-grid line {
-    stroke: var(--ep-line);
-  }
-  .recharts-cartesian-axis-tick text {
-    fill: var(--ep-muted);
-  }
+:root[data-theme="dark"] {
+  --ep-canvas: #101a2c;
+  --ep-surface: #17253b;
+  --ep-subtle: #1c2c43;
+  --ep-text: #edf3fc;
+  --ep-muted: #b0c0d7;
+  --ep-line: #33465f;
+  --ep-primary: #2867d7;
+  --ep-primary-hover: #3377eb;
+  --ep-primary-soft: #203a63;
+  --ep-primary-ink: #bed9ff;
+  --ep-sidebar: #07152c;
+  --ep-green-soft: #1b3d34;
+  --ep-green-ink: #acdfc3;
+  --ep-blue-soft: #233851;
+  --ep-blue-ink: #accef9;
+  --ep-purple-soft: #352e4c;
+  --ep-purple-ink: #cfbbf5;
+  --ep-amber-soft: #413523;
+  --ep-amber-ink: #eac58f;
+  --ep-red-soft: #442635;
+  --ep-red-ink: #f3b8c2;
+}
+
+:root[data-theme="dark"] .workspace-view [class~="bg-gray-50"],
+:root[data-theme="dark"] .workspace-view [class~="bg-slate-50"],
+:root[data-theme="dark"] .workspace-view [class~="bg-slate-100"],
+:root[data-theme="dark"] .workspace-view [class~="bg-gray-100"] {
+  background-color: var(--ep-subtle);
+}
+
+:root[data-theme="dark"] .workspace-view [class*="text-slate-"],
+:root[data-theme="dark"] .workspace-view [class*="text-gray-"] {
+  color: var(--ep-muted);
+}
+
+:root[data-theme="dark"] .workspace-view h2,
+:root[data-theme="dark"] .workspace-view h3,
+:root[data-theme="dark"] .workspace-view strong,
+:root[data-theme="dark"] .stat-value {
+  color: var(--ep-text);
+}
+
+:root[data-theme="dark"] .workspace-view [class*="border-gray-"],
+:root[data-theme="dark"] .workspace-view [class*="border-slate-"] {
+  border-color: var(--ep-line);
+}
+
+:root[data-theme="dark"] .workspace-view th,
+:root[data-theme="dark"] .workspace-view [class*="bg-gradient-to-r"],
+:root[data-theme="dark"] .equipment-type-content,
+:root[data-theme="dark"] .stock-icon,
+:root[data-theme="dark"] .reader-count {
+  background: var(--ep-subtle);
+  color: var(--ep-muted);
+}
+
+:root[data-theme="dark"] .workspace-view td,
+:root[data-theme="dark"] .workspace-view label.block {
+  color: var(--ep-muted);
+  border-color: var(--ep-line);
+}
+
+:root[data-theme="dark"] .workspace-view .trace-table td {
+  color: var(--ep-text);
+}
+
+:root[data-theme="dark"] .workspace-view [class~="bg-blue-100"],
+:root[data-theme="dark"] .workspace-view [class~="bg-blue-50"] {
+  background-color: var(--ep-primary-soft);
+}
+
+:root[data-theme="dark"] .workspace-view [class~="text-blue-700"],
+:root[data-theme="dark"] .workspace-view [class~="text-blue-800"] {
+  color: var(--ep-primary-ink);
+}
+
+:root[data-theme="dark"] .stock-alerts {
+  background: var(--ep-amber-soft);
+  border-color: var(--ep-line);
+}
+
+:root[data-theme="dark"] .stock-alerts strong,
+:root[data-theme="dark"] .stock-alerts small,
+:root[data-theme="dark"] .alert-list > div {
+  color: var(--ep-amber-ink);
+}
+
+:root[data-theme="dark"] .error-banner,
+:root[data-theme="dark"] .form-error {
+  background: var(--ep-red-soft);
+  color: var(--ep-red-ink);
+  border-color: var(--ep-line);
+}
+
+:root[data-theme="dark"] .detail-correction,
+:root[data-theme="dark"] .backup-card,
+:root[data-theme="dark"] .restore-form {
+  background: var(--ep-subtle);
+  border-color: var(--ep-line);
+}
+
+:root[data-theme="dark"] .pro-toast,
+:root[data-theme="dark"] .ui-toast {
+  background: var(--ep-surface);
+  border-color: var(--ep-line);
+}
+
+:root[data-theme="dark"] .mint {
+  --tint: var(--ep-green-soft);
+  --accent: var(--ep-green-ink);
+}
+
+:root[data-theme="dark"] .blue {
+  --tint: var(--ep-blue-soft);
+  --accent: var(--ep-blue-ink);
+}
+
+:root[data-theme="dark"] .violet {
+  --tint: var(--ep-purple-soft);
+  --accent: var(--ep-purple-ink);
+}
+
+:root[data-theme="dark"] .amber {
+  --tint: var(--ep-amber-soft);
+  --accent: var(--ep-amber-ink);
+}
+
+:root[data-theme="dark"] .recharts-cartesian-grid line {
+  stroke: var(--ep-line);
+}
+
+:root[data-theme="dark"] .recharts-cartesian-axis-tick text {
+  fill: var(--ep-muted);
+}
+
+/* Keep the team totals and progress readable in both appearances. */
+.team-person span {
+  color: var(--ep-green-ink);
+}
+.team-position {
+  color: var(--ep-muted);
+}
+.team-progress {
+  background: var(--ep-subtle);
+}
+.team-row + .team-row {
+  border-color: var(--ep-line);
 }

@@ -12,7 +12,12 @@ export default defineConfig(({ mode }) => {
   return {
     envDir: root,
     plugins: [react(), tailwindcss()],
-    resolve: { alias: { "@zen/ui": path.join(root, "packages/ui/src") } },
+    resolve: {
+      alias: {
+        "@zen/ui": path.join(root, "packages/ui/src"),
+        "@zen/domain": path.join(root, "packages/domain"),
+      },
+    },
     server: {
       fs: { allow: [root] },
       proxy: {

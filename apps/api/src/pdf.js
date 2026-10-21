@@ -61,10 +61,49 @@ function settlementPdf(p) {
         "Serviços",
         p.orders.map((o) => [
           o.id + " · " + o.vehicle,
-          o.service + " — " + brl(o.total_cents),
+          o.service +
+            " — " +
+            brl(o.total_cents) +
+            (o.executed_on ? " | Executado: " + o.executed_on : "") +
+            (o.base_cents !== undefined
+              ? " | Tarifa: " + brl(o.base_cents)
+              : "") +
+            (o.rate_id ? " | Versao: " + o.rate_id : "") +
+            (o.late
+              ? " | Competencia anterior: " + o.original_competence
+              : "") +
+            (o.extras?.length
+              ? " | Adicionais: " +
+                o.extras
+                  .map(
+                    (x) =>
+                      (x.description || x.type) + " " + brl(x.amount_cents),
+                  )
+                  .join("; ")
+              : "") +
+            (o.adjustments?.length
+              ? " | Ajustes: " +
+                o.adjustments
+                  .map((x) => x.reason + " " + brl(x.amount_cents))
+                  .join("; ")
+              : ""),
         ]),
       ],
-      ["Total", [["Valor calculado", brl(p.total_cents)]]],
+      [
+        "Ajustes de competencias anteriores",
+        (p.carry_adjustments || []).map((a) => [
+          a.order_id,
+          a.reason + " — " + brl(a.amount_cents),
+        ]),
+      ],
+      [
+        "Total",
+        [
+          ["Valor calculado", brl(p.total_cents)],
+          ["Vencimento", p.due_on || "Conforme fechamento"],
+          ["Observacao", p.reason || "Valores conferidos pela central"],
+        ],
+      ],
     ],
   );
 }

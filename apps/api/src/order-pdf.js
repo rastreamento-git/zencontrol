@@ -62,12 +62,14 @@ function orderPdf(order, masked = true, options = {}) {
         .text(clean(value), x, top, { lineBreak: false, ...extra });
     }
     function header() {
-      text("ZEN SEGUROS", left, 39, "OSBold", 21, color.navy);
+      doc.image(path.join(__dirname, "../assets/zen-seguros.png"), left, 35, {
+        fit: [140, 44],
+      });
       text("ORDEM DE SERVIÇO", left, 43, "OSBold", 15, color.navy, {
         width,
         align: "right",
       });
-      text("Atendimento técnico", left, 65, "OSRegular", 8, color.muted);
+      text("Atendimento técnico", left + 158, 65, "OSRegular", 8, color.muted);
       text(view.id, left, 65, "OSBold", 8, color.navy, {
         width,
         align: "right",
@@ -249,6 +251,16 @@ function orderPdf(order, masked = true, options = {}) {
         label("FIPE"),
         value(view.vehicle.fipe),
       ],
+      ...(view.vehicle.fipe_type
+        ? [
+            [
+              label("TIPO FIPE"),
+              value(view.vehicle.fipe_type),
+              label("REGRA REGIONAL"),
+              value(view.vehicle.fipe_region),
+            ],
+          ]
+        : []),
     ]);
     const attendance = [
       [label("SERVIÇO"), value(view.service, 3)],

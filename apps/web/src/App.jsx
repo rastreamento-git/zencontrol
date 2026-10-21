@@ -1,3 +1,12 @@
+import ThemeControl from "@zen/ui/components/ThemeControl";
+import ZenMark from "@zen/ui/components/ZenMark";
+import {
+  passwordInputProps,
+  passwordRequirements,
+} from "@zen/ui/lib/password-policy";
+import AppLinks from "@zen/ui/components/AppLinks";
+import { NoticeBell, FinancePanel } from "./components/Ecosystem";
+import OperationalServices from "./components/OperationalServices";
 import { useEffect, useRef, useState } from "react";
 import {
   Activity,
@@ -21,6 +30,7 @@ import {
   Download,
   Heart,
   KeyRound,
+  ShieldCheck,
 } from "lucide-react";
 import { useSession } from "@zen/ui/lib/session";
 import { api, errorMessage, saveToken } from "@zen/ui/lib/api";
@@ -53,6 +63,7 @@ const groups = [
       ["orders", "Ordens de serviço", ClipboardList],
       ["agenda", "Agenda", CalendarDays],
       ["batches", "Validações", CheckCheck],
+      ["blocking", "Bloqueios", ShieldCheck],
       ["technicians", "Equipe técnica", Wrench],
     ],
   },
@@ -69,7 +80,7 @@ const groups = [
 ];
 export default function App() {
   const user = useSession(),
-    admin = user.papel === "admin";
+    admin = ["admin", "operador"].includes(user.papel);
   const [tab, setTab] = useState("dashboard"),
     [menu, setMenu] = useState(false),
     [search, setSearch] = useState(""),
@@ -141,6 +152,9 @@ export default function App() {
   };
   return (
     <div className="inventory-app">
+      <a className="skip-link" href="#zencontrol-content">
+        Ir para o conteúdo
+      </a>
       {menu && (
         <button
           className="sidebar-backdrop"
@@ -154,13 +168,13 @@ export default function App() {
       >
         <div className="brand">
           <span className="brand-mark">
-            <Activity size={23} />
+            <ZenMark variant="control" size={36} />
           </span>
           <div>
             <strong>
               Zen<span>Control</span>
             </strong>
-            <small>Agendamentos & atendimento</small>
+            <small>Gestão de serviços</small>
           </div>
           <button
             className="icon-button sidebar-close"
@@ -190,12 +204,15 @@ export default function App() {
                 ))}
             </div>
           ))}
+          <AppLinks />
         </nav>
         <div className="sidebar-footer">
           <span className="avatar">{initials(user.nome)}</span>
           <div>
             <strong>{user.nome}</strong>
-            <small>{admin ? "Administrador" : "Operador"}</small>
+            <small>
+              {user.papel === "admin" ? "Administrador" : "Operador"}
+            </small>
           </div>
           <button
             className="icon-button"
@@ -210,7 +227,13 @@ export default function App() {
             title="Sair"
             aria-label="Sair"
             disabled={busy}
-            onClick={() => {
+            onClick={async () => {
+              try {
+                await api.post("/auth/logout", {});
+              } catch (e) {
+                notify(errorMessage(e), "error");
+                return;
+              }
               saveToken(null);
               window.dispatchEvent(
                 new CustomEvent("invent:unauthorized", {
@@ -230,6 +253,7 @@ export default function App() {
               className="icon-button menu-toggle"
               aria-label="Abrir menu"
               aria-expanded={menu}
+              aria-controls="zencontrol-menu"
               onClick={() => setMenu(true)}
             >
               <Menu size={22} />
@@ -265,23 +289,22 @@ export default function App() {
             </button>
           </form>
           <div className="topbar-actions">
+            <ThemeControl />
             <span className="header-date">
               {new Date().toLocaleDateString("pt-BR", {
                 day: "2-digit",
                 month: "long",
               })}
             </span>
-            <button
-              className="icon-button notification-button is-enabled"
-              aria-label="Fila de envios e avisos"
-              title="Fila de envios e avisos"
-              onClick={() => navigate("queue")}
-            >
-              <Bell size={20} />
-              {overview?.validations > 0 && (
-                <span className="notification-dot" />
-              )}
-            </button>
+            <NoticeBell
+              onOpen={(n) => {
+                if (n.detail.order_id) {
+                  setOrder({ id: n.detail.order_id });
+                  navigate("batches");
+                } else
+                  navigate(n.target === "requests" ? "finance" : "batches");
+              }}
+            />
             {admin && (
               <button
                 className="icon-button"
@@ -301,7 +324,12 @@ export default function App() {
             </span>
           </div>
         </header>
-        <div className="app-content" ref={body}>
+        <div
+          className="app-content"
+          id="zencontrol-content"
+          tabIndex={-1}
+          ref={body}
+        >
           <div className="sync-toolbar">
             <span
               className={"sync-status " + (error ? "has-error" : "")}
@@ -349,8 +377,10 @@ export default function App() {
               <UsersPage {...props} />
             ) : tab === "batches" ? (
               <Batches {...props} />
+            ) : tab === "blocking" ? (
+              <OperationalServices {...props} />
             ) : tab === "finance" ? (
-              <Finance {...props} />
+              <FinancePanel />
             ) : tab === "history" ? (
               <HistoryPage {...props} />
             ) : tab === "settings" ? (
@@ -373,10 +403,11 @@ export default function App() {
       {password && (
         <FormModal
           title="Alterar senha"
-          description="Use uma senha de 12 a 128 caracteres."
+          description={passwordRequirements}
           fields={[
             {
               name: "current_password",
+              autoComplete: "current-password",
               label: "Senha atual",
               type: "password",
               required: true,
@@ -384,6 +415,7 @@ export default function App() {
             },
             {
               name: "new_password",
+              ...passwordInputProps,
               label: "Nova senha",
               type: "password",
               required: true,

@@ -104,6 +104,14 @@ async function verifyCurrent(client, expected) {
 }
 function configureAdmin(app, pool, auth) {
   app.use("/api/admin", auth.requireAdmin);
+  app.use("/api/admin/users", (req, res, next) => {
+    if (auth.federated)
+      fail(
+        409,
+        "Gerencie as contas ZEN em ZenControl → Usuários. O perfil vale também para o Estoque Pro.",
+      );
+    next();
+  });
   app.get("/api/admin/users", async (req, res) =>
     res.json(
       (await pool.query("SELECT * FROM usuarios ORDER BY nome,id")).rows.map(
@@ -156,7 +164,10 @@ function configureAdmin(app, pool, auth) {
       if (!row) fail(404, "Usuário não encontrado.");
       const active = req.body.ativo ?? row.ativo,
         role = papel ?? row.papel;
-      if (id === req.user.id && (!active || role !== "admin"))
+      if (
+        id === req.user.id &&
+        (!active || (row.papel === "admin" && role !== "admin"))
+      )
         fail(
           409,
           "Você não pode desativar ou retirar seu próprio perfil de administrador.",

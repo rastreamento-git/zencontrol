@@ -66,7 +66,7 @@ function JobTable({ items, user, onRetry }) {
               </td>
               <td className="zc-job-error">{j.last_error || "—"}</td>
               <td>
-                {user.papel === "admin" &&
+                {["admin", "operador"].includes(user.papel) &&
                   ["failed", "uncertain"].includes(j.state) && (
                     <button
                       className="secondary-button"
@@ -413,6 +413,25 @@ function BatchReview({ id, onClose, onSaved }) {
     reload().catch((e) => setError(errorMessage(e)));
     return () => decoder.current?.close();
   }, [id]);
+  useEffect(() => {
+    if (batch?.state !== "approved_sync") return;
+    let active = true;
+    const timer = setInterval(async () => {
+      try {
+        const { data } = await api.get("/batches/" + id);
+        if (active) {
+          setBatch(data);
+          if (data.state !== "approved_sync") onSaved();
+        }
+      } catch (e) {
+        if (active) setError(errorMessage(e));
+      }
+    }, 2000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [id, batch?.state]);
   const approved = ["approved", "completed"].includes(batch?.state);
   async function scan() {
     setBusy(true);
@@ -957,19 +976,6 @@ export function SettingsPage({ revision, refresh, navigate }) {
     [busy, setBusy] = useState(false),
     [month, setMonth] = useState(new Date().toISOString().slice(0, 7)),
     [preview, setPreview] = useState(null);
-  useEffect(() => {
-    setQr(data?.wpp_state?.qr || "");
-  }, [data]);
-  useEffect(() => {
-    const t = setInterval(async () => {
-      if (document.hidden) return;
-      try {
-        const { data } = await api.get("/settings");
-        setQr(data.wpp_state?.qr || "");
-      } catch {}
-    }, 7000);
-    return () => clearInterval(t);
-  }, []);
   async function call(path, method = "get") {
     setBusy(true);
     try {
@@ -1021,11 +1027,6 @@ export function SettingsPage({ revision, refresh, navigate }) {
                 "Acesso individual, fotos e IMEIs vinculados ao serviço.",
               ],
               [
-                "WhatsApp",
-                data.wpp_configured,
-                "Sessão e token do WPPConnect.",
-              ],
-              [
                 "SGA Hinova",
                 data.sga_configured,
                 "Consulta, classificação e fotos do veículo.",
@@ -1051,37 +1052,6 @@ export function SettingsPage({ revision, refresh, navigate }) {
                 </span>
               </div>
             ))}
-            <div className="zc-actions zc-section-gap">
-              <button
-                className="secondary-button"
-                disabled={busy}
-                onClick={() => call("/wpp/start", "post")}
-              >
-                Iniciar sessão / QR
-              </button>
-              <button
-                className="secondary-button"
-                disabled={busy}
-                onClick={() => call("/wpp/status")}
-              >
-                Consultar conexão
-              </button>
-              <button
-                className="secondary-button"
-                disabled={busy}
-                onClick={() => call("/wpp/groups")}
-              >
-                <Users size={14} />
-                Consultar grupos
-              </button>
-            </div>
-            {qr && (
-              <img
-                className="zc-qr"
-                alt="QR Code do WhatsApp"
-                src={"data:image/png;base64," + qr}
-              />
-            )}
           </div>
         </Panel>
         <Panel
