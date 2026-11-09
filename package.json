@@ -30,7 +30,8 @@
     "homologation": "node scripts/homologation.cjs",
     "homologation:build": "node scripts/homologation-build.cjs",
     "homologation:ui": "node scripts/homologation-ui.cjs",
-    "test:frontend": "node scripts/frontend-regressions.cjs"
+    "test:frontend": "node scripts/frontend-regressions.cjs",
+    "test:portal": "node scripts/portal-engagement-ui.cjs"
   },
   "devDependencies": {
     "playwright": "1.62.1",

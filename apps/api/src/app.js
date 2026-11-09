@@ -6,6 +6,13 @@ const path = require("node:path");
 const { createMediaStore } = require("./media-store");
 const sharp = require("sharp");
 const { configureAuth, hashPassword, username, publicUser } = require("./auth");
+const {
+  configureGoogleAccess,
+  googleSettings,
+  googleOrigin,
+} = require("./google-access");
+const { configureProfile } = require("./profile-routes");
+const { configureChat } = require("./chat-routes");
 const { transaction } = require("./database");
 const { fail, HttpError, integer } = require("./errors");
 const { configuration } = require("./config");
@@ -24,6 +31,7 @@ const {
 } = require("./order-presentation");
 function createApp(pool, env = process.env) {
   const cfg = configuration(env),
+    google = googleSettings(cfg),
     app = express();
   app.disable("x-powered-by");
   const origins = (
@@ -37,16 +45,35 @@ function createApp(pool, env = process.env) {
   origins.push(new URL(cfg.PUBLIC_URL).origin);
   if (cfg.TECHNICIAN_PORTAL_URL)
     origins.push(new URL(cfg.TECHNICIAN_PORTAL_URL).origin);
+  if (google) origins.push(google.central);
   if (cfg.TRUST_PROXY)
     app.set("trust proxy", integer(cfg.TRUST_PROXY, "TRUST_PROXY"));
   app.use(
     helmet({
+      ...(google
+        ? { crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" } }
+        : {}),
       contentSecurityPolicy: {
         directives: {
           imgSrc: ["'self'", "data:", "blob:"],
-          scriptSrc: ["'self'", "'wasm-unsafe-eval'"],
+          scriptSrc: [
+            "'self'",
+            "'wasm-unsafe-eval'",
+            ...(google ? [googleOrigin + "/gsi/client"] : []),
+          ],
           workerSrc: ["'self'"],
           frameAncestors: ["'none'"],
+          ...(google
+            ? {
+                frameSrc: ["'self'", googleOrigin + "/gsi/"],
+                connectSrc: ["'self'", googleOrigin + "/gsi/"],
+                styleSrc: [
+                  "'self'",
+                  "'unsafe-inline'",
+                  googleOrigin + "/gsi/style",
+                ],
+              }
+            : {}),
         },
       },
     }),
@@ -90,12 +117,14 @@ function createApp(pool, env = process.env) {
     }
     next();
   });
-  const auth = configureAuth(app, cfg, pool);
+  const auth = configureAuth(app, cfg, pool, configureGoogleAccess);
   app.locals.ready = async () => {
     await createMediaStore(cfg).ready();
     await auth.ready();
   };
   app.locals.config = cfg;
+  configureProfile(app, pool);
+  configureChat(app, pool);
   require("./field-access").configureFieldAccess(app, pool);
   require("./operational-routes").configureOperational(app, pool, auth);
   require("./ecosystem-routes").configureEcosystem(app, pool, cfg, auth);

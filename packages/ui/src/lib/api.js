@@ -15,6 +15,7 @@ export function saveToken(token) {
   if (token) sessionStorage.setItem(TOKEN_KEY, token);
   else sessionStorage.removeItem(TOKEN_KEY);
 }
+export const sessionToken = () => sessionStorage.getItem(TOKEN_KEY);
 
 export function errorMessage(error) {
   if (error.code === "INVENT_BUSY") return "Aguarde a operação em andamento.";

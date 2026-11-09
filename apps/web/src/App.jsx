@@ -5,6 +5,8 @@ import {
   passwordRequirements,
 } from "@zen/ui/lib/password-policy";
 import AppLinks from "@zen/ui/components/AppLinks";
+import ProfileButton from "@zen/ui/components/ProfileButton";
+import Chat from "@zen/ui/components/Chat";
 import { NoticeBell, FinancePanel } from "./components/Ecosystem";
 import OperationalServices from "./components/OperationalServices";
 import { useEffect, useRef, useState } from "react";
@@ -19,6 +21,7 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
+  MessageCircle,
   Plus,
   RefreshCw,
   Search,
@@ -29,7 +32,6 @@ import {
   X,
   Download,
   Heart,
-  KeyRound,
   ShieldCheck,
 } from "lucide-react";
 import { useSession } from "@zen/ui/lib/session";
@@ -63,6 +65,7 @@ const groups = [
       ["orders", "Ordens de serviço", ClipboardList],
       ["agenda", "Agenda", CalendarDays],
       ["batches", "Validações", CheckCheck],
+      ["chat", "Conversas", MessageCircle],
       ["blocking", "Bloqueios", ShieldCheck],
       ["technicians", "Equipe técnica", Wrench],
     ],
@@ -81,7 +84,12 @@ const groups = [
 export default function App() {
   const user = useSession(),
     admin = ["admin", "operador"].includes(user.papel);
-  const [tab, setTab] = useState("dashboard"),
+  const [tab, setTab] = useState(() => {
+      const shortcut = new URLSearchParams(window.location.search).get("area");
+      return ["agenda", "batches", "chat"].includes(shortcut)
+        ? shortcut
+        : "dashboard";
+    }),
     [menu, setMenu] = useState(false),
     [search, setSearch] = useState(""),
     [query, setQuery] = useState(""),
@@ -227,14 +235,6 @@ export default function App() {
           </div>
           <button
             className="icon-button"
-            title="Alterar senha"
-            aria-label="Alterar senha"
-            onClick={() => setPassword(true)}
-          >
-            <KeyRound size={17} />
-          </button>
-          <button
-            className="icon-button"
             title="Sair"
             aria-label="Sair"
             disabled={busy}
@@ -331,9 +331,7 @@ export default function App() {
                 <Download size={19} />
               </button>
             )}
-            <span className="avatar header-avatar" title={user.nome}>
-              {initials(user.nome)}
-            </span>
+            <ProfileButton compact onPassword={() => setPassword(true)} />
           </div>
         </header>
         <div
@@ -371,7 +369,9 @@ export default function App() {
                 {error}
               </div>
             )}
-            {!meta || !overview ? (
+            {tab === "chat" ? (
+              <Chat />
+            ) : !meta || !overview ? (
               <Loading error={error} />
             ) : tab === "dashboard" ? (
               <Dashboard {...props} />

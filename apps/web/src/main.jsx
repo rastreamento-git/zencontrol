@@ -9,6 +9,7 @@ import Feedback from "@zen/ui/components/Feedback";
 import TrackingEntry from "./TrackingEntry";
 import "@zen/ui/styles/appearance.css";
 import "@zen/ui/styles/experience.css";
+import "@zen/ui/styles/engagement.css";
 initializeAppearance();
 createRoot(document.getElementById("root")).render(
   <StrictMode>

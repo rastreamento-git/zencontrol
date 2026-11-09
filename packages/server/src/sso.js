@@ -37,7 +37,7 @@ function configureSso(
   app,
   env,
   pool,
-  { valid, issueToken, publicUser, checkPassword },
+  { valid, issueToken, publicUser, checkPassword, googleClientId },
 ) {
   const loginUrl = origin(env.SSO_LOGIN_URL);
   const apps = {
@@ -117,6 +117,7 @@ function configureSso(
       unified_login: enabled,
       login_url: enabled ? loginUrl : "",
       apps: enabled ? apps : {},
+      ...(googleClientId ? { google_client_id: googleClientId } : {}),
     }),
   );
   app.post("/api/auth/sso/code", limited, async (req, res) => {

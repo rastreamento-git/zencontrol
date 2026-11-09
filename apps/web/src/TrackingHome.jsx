@@ -1,14 +1,14 @@
 import ThemeControl from "@zen/ui/components/ThemeControl";
 import ZenMark from "@zen/ui/components/ZenMark";
-import { useState } from "react";
+import ProfileButton from "@zen/ui/components/ProfileButton";
+import { useEffect, useState } from "react";
 import {
   ArrowUpRight,
-  KeyRound,
   LogOut,
   Layers3,
   CalendarCheck2,
-  Smartphone,
-  PackageCheck,
+  ClipboardCheck,
+  MessageCircle,
 } from "lucide-react";
 import { useSession } from "@zen/ui/lib/session";
 import { api, errorMessage, saveToken } from "@zen/ui/lib/api";
@@ -259,7 +259,7 @@ const apps = [
   },
   {
     id: "stock",
-    name: "EstoquePro",
+    name: "Estoque Pro",
     category: "EQUIPAMENTOS E RASTREABILIDADE",
     description:
       "Gerencie equipamentos, cargas dos técnicos e movimentações de estoque.",
@@ -273,6 +273,15 @@ export default function TrackingHome() {
   const [busy, setBusy] = useState(""),
     [error, setError] = useState(""),
     [password, setPassword] = useState(false);
+  const [initialProfile] = useState(
+    () => new URLSearchParams(window.location.search).get("perfil") === "1",
+  );
+  useEffect(() => {
+    if (!initialProfile) return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("perfil");
+    history.replaceState(null, "", url.pathname + url.search + url.hash);
+  }, [initialProfile]);
   async function logout() {
     setBusy("logout");
     setError("");
@@ -327,15 +336,10 @@ export default function TrackingHome() {
               {user.papel === "admin" ? "Administrador" : "Operador"}
             </small>
           </span>
-          <button
-            type="button"
-            className="icon-button"
-            aria-label="Alterar senha"
-            onClick={() => setPassword(true)}
-            disabled={!!busy}
-          >
-            <KeyRound size={19} />
-          </button>
+          <ProfileButton
+            initiallyOpen={initialProfile}
+            onPassword={() => setPassword(true)}
+          />
           <button
             type="button"
             className="icon-button"
@@ -353,29 +357,39 @@ export default function TrackingHome() {
             <p className="tracking-eyebrow">
               <Layers3 size={15} /> SEU ESPAÇO DE TRABALHO
             </p>
-            <h1>Seu setor, em um só lugar.</h1>
+            <h1>Olá, {user.nome?.split(" ")[0] || "bem-vindo"}.</h1>
             <p>
-              Olá, {user.nome?.split(" ")[0] || "bem-vindo"}. Qual etapa vamos
-              acompanhar agora?
+              Acompanhe a operação, a equipe em campo e o estoque no
+              ZenTracking.
             </p>
           </div>
-          <div className="tracking-profile">
-            <span className="avatar">
-              {(user.nome || "ZT")
-                .split(/\s+/)
-                .slice(0, 2)
-                .map((part) => part[0])
-                .join("")}
-            </span>
-            <div>
-              <strong>{user.nome}</strong>
-              <span>
-                {user.papel === "admin" ? "Administrador" : "Operador"} · Acesso
-                completo
-              </span>
-            </div>
-          </div>
         </div>
+        <nav className="zen-work-shortcuts" aria-label="Acesso rápido">
+          <a href="/zencontrol?area=agenda">
+            <CalendarCheck2 size={21} />
+            <span>
+              <strong>Agenda</strong>
+              <small>Serviços programados</small>
+            </span>
+            <ArrowUpRight size={16} />
+          </a>
+          <a href="/zencontrol?area=batches">
+            <ClipboardCheck size={21} />
+            <span>
+              <strong>Conferir serviços</strong>
+              <small>Evidências da equipe</small>
+            </span>
+            <ArrowUpRight size={16} />
+          </a>
+          <a href="/zencontrol?area=chat">
+            <MessageCircle size={21} />
+            <span>
+              <strong>Conversas</strong>
+              <small>Fale com os técnicos</small>
+            </span>
+            <ArrowUpRight size={16} />
+          </a>
+        </nav>
         {error && (
           <div className="error-banner" role="alert">
             {error}
@@ -429,29 +443,6 @@ export default function TrackingHome() {
             </button>
           ))}
         </div>
-        <section className="tracking-workflow" aria-label="Etapas da operação">
-          <div>
-            <CalendarCheck2 size={22} />
-            <span>
-              <strong>Planeje na central</strong>
-              <small>Organize a agenda e atribua os serviços.</small>
-            </span>
-          </div>
-          <div>
-            <Smartphone size={22} />
-            <span>
-              <strong>Acompanhe em campo</strong>
-              <small>Registre a execução e confira as evidências.</small>
-            </span>
-          </div>
-          <div>
-            <PackageCheck size={22} />
-            <span>
-              <strong>Conclua com controle</strong>
-              <small>Confirme estoque e fechamento dos serviços.</small>
-            </span>
-          </div>
-        </section>
       </main>
       <AppFooter product="ZenTracking" />
       {password && (
