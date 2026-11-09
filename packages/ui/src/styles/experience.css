@@ -760,13 +760,15 @@ button.stat-card:hover {
   }
   .topbar-context {
     min-width: 0;
-    flex: 1;
+    max-width: 100%;
+    flex: 1 0 auto;
   }
   .topbar-context > div {
     min-width: 0;
   }
   .topbar h1 {
     font-size: 18px;
+    overflow-wrap: anywhere;
   }
   .topbar-actions {
     margin-left: auto;

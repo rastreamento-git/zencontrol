@@ -28,7 +28,6 @@ import {
   Settings,
   Users,
   Wallet,
-  Wrench,
   X,
   Download,
   Heart,
@@ -39,13 +38,8 @@ import { api, errorMessage, saveToken } from "@zen/ui/lib/api";
 import { notify } from "@zen/ui/lib/feedback";
 import AppFooter from "@zen/ui/components/AppFooter";
 import Dashboard from "./components/Dashboard";
-import {
-  Orders,
-  OrderEditor,
-  Technicians,
-  Volunteers,
-  UsersPage,
-} from "./components/Records";
+import { Orders, OrderEditor, Volunteers } from "./components/Records";
+import TeamAccess from "./components/TeamAccess";
 import {
   Batches,
   Finance,
@@ -67,7 +61,6 @@ const groups = [
       ["batches", "Validações", CheckCheck],
       ["chat", "Conversas", MessageCircle],
       ["blocking", "Bloqueios", ShieldCheck],
-      ["technicians", "Equipe técnica", Wrench],
     ],
   },
   {
@@ -381,12 +374,10 @@ export default function App() {
                 agenda={tab === "agenda"}
                 globalQuery={query}
               />
-            ) : tab === "technicians" ? (
-              <Technicians {...props} />
             ) : tab === "volunteers" ? (
               <Volunteers {...props} />
-            ) : tab === "users" ? (
-              <UsersPage {...props} />
+            ) : tab === "users" && admin ? (
+              <TeamAccess revision={revision} refresh={refresh} />
             ) : tab === "batches" ? (
               <Batches {...props} />
             ) : tab === "blocking" ? (

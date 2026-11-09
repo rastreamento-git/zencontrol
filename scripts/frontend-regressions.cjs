@@ -338,6 +338,146 @@ async function main() {
       await page.context().close();
     },
   );
+  await check(
+    "Equipe unificada cadastra pessoas por perfil e preserva o acesso do técnico ao editar o cadastro",
+    async () => {
+      const page = await pageFor(
+        4320,
+        centralToken,
+        "zencontrol.session",
+        "/zencontrol",
+      );
+      try {
+        await page
+          .getByRole("button", { name: "Equipe e acessos", exact: true })
+          .click();
+        assert.equal(
+          await page
+            .getByRole("button", { name: "Equipe técnica", exact: true })
+            .count(),
+          0,
+        );
+        const search = page.getByRole("searchbox", { name: "Buscar pessoa" });
+        await search.fill("jose");
+        const techs = page.getByRole("region", {
+          name: "Técnicos",
+          exact: true,
+        });
+        await techs
+          .getByText("Usuário: jose.martins", { exact: true })
+          .waitFor();
+        assert.equal(await techs.getByRole("listitem").count(), 1);
+        await search.clear();
+
+        async function chooseProfile(profile) {
+          await page
+            .getByRole("button", { name: "Adicionar pessoa", exact: true })
+            .click();
+          await page
+            .getByRole("dialog", { name: "Adicionar pessoa" })
+            .getByRole("button", { name: new RegExp("^" + profile + " ") })
+            .click();
+        }
+        await chooseProfile("Operador");
+        const operator = page.getByRole("dialog", { name: "Novo operador" });
+        await operator.getByLabel("Nome de exibição").fill("Operador de teste");
+        await operator
+          .getByLabel("Usuário", { exact: true })
+          .fill("operador.qa");
+        await operator.getByLabel("Senha inicial").fill("Operador1!qa");
+        assert.equal(
+          await operator.getByLabel("Cadastro técnico vinculado").count(),
+          0,
+        );
+        await operator
+          .getByRole("button", { name: "Salvar", exact: true })
+          .click();
+        await page
+          .getByRole("region", { name: "Operadores", exact: true })
+          .getByText("Usuário: operador.qa", { exact: true })
+          .waitFor();
+
+        await chooseProfile("Técnico");
+        const techForm = page.getByRole("dialog", {
+          name: "Cadastrar técnico",
+        });
+        await techForm
+          .getByLabel("Nome", { exact: true })
+          .fill("Técnica de teste");
+        await techForm
+          .getByLabel("Instalação (R$)", { exact: true })
+          .fill("95");
+        await techForm
+          .getByRole("button", { name: "Salvar", exact: true })
+          .click();
+        const activation = page.getByRole("dialog", {
+          name: "Dados de ativação do ZenField",
+        });
+        await activation
+          .getByText("Código de uso único", { exact: true })
+          .waitFor();
+        assert.ok((await activation.locator("code").textContent()).trim());
+        await activation
+          .getByRole("button", { name: "Concluir", exact: true })
+          .click();
+        const row = techs
+          .getByRole("listitem")
+          .filter({ hasText: "Usuário: tecnica.teste" });
+        await row
+          .getByRole("button", { name: "Acesso ZenField", exact: true })
+          .click();
+        await page
+          .getByRole("dialog", { name: "Acesso ao ZenField" })
+          .getByRole("button", { name: "Editar acesso", exact: true })
+          .click();
+        const access = page.getByRole("dialog", { name: "Editar acesso" });
+        await access.getByLabel("Acesso habilitado").uncheck();
+        await access
+          .getByRole("button", { name: "Salvar", exact: true })
+          .click();
+        await row.getByText("Desativado", { exact: true }).waitFor();
+        await row
+          .getByRole("button", { name: "Editar cadastro", exact: true })
+          .click();
+        const cadastro = page.getByRole("dialog", {
+          name: "Editar cadastro técnico",
+        });
+        await cadastro
+          .getByLabel("Endereço / região base", { exact: true })
+          .fill("Niterói");
+        await cadastro
+          .getByRole("button", { name: "Salvar", exact: true })
+          .click();
+        await row.getByText("Niterói", { exact: true }).waitFor();
+        await page.getByLabel("Status do acesso").selectOption("inactive");
+        await row.getByText("Desativado", { exact: true }).waitFor();
+        assert.equal(await techs.getByRole("listitem").count(), 1);
+        await page.setViewportSize({ width: 320, height: 760 });
+        assert.ok(
+          await page.evaluate(
+            () => document.documentElement.scrollWidth <= innerWidth + 1,
+          ),
+          "Equipe e acessos deve caber na largura do celular.",
+        );
+        assert.ok(
+          await page.evaluate(() => {
+            const title = document
+              .querySelector(".topbar h1")
+              .getBoundingClientRect();
+            const actions = document
+              .querySelector(".topbar-actions")
+              .getBoundingClientRect();
+            return (
+              title.right <= actions.left + 1 || title.bottom <= actions.top + 1
+            );
+          }),
+          "Os botões do cabeçalho não devem sobrepor o título.",
+        );
+      } finally {
+        await page.context().close();
+      }
+    },
+  );
   await check("Menu móvel do ZenControl fecha com Escape", async () => {
     const page = await pageFor(
       4320,

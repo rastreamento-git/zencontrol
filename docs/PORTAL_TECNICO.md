@@ -72,7 +72,7 @@ O frontend tem apenas uma configuração pública de API. Não recebe banco ou s
 1. Manter `MEDIA_STORAGE=supabase` e o bucket privado existente. Caso o bucket restrinja MIME, permitir `application/pdf` e `image/jpeg`.
 2. Confirmar a integração do Estoque Pro: `STOCK_ENABLED=true`, `STOCK_API_URL` e `STOCK_API_SECRET`. O técnico deve estar vinculado e os aparelhos, na carga correta.
 3. Usar `ZEN_RUN_WORKER=true` para processar instalações após aprovação. A fila fica no PostgreSQL e processa enquanto a API está ativa.
-4. Criar/vincular as contas em **Equipe técnica** e **Equipe e acessos** e definir os valores dos serviços.
+4. Em **Equipe e acessos → Técnicos**, cadastre o técnico, defina os valores dos serviços e use **Acesso ZenField** para gerenciar o login ou emitir um novo código.
 5. Testar o fluxo entre o endereço do ZenField e o da central, conferindo a conclusão e a inclusão no financeiro.
 
 A suíte do ZenControl usa PostgreSQL/PGlite e Supabase simulado. A homologação no Render/Supabase reais continua necessária antes do uso em produção.
