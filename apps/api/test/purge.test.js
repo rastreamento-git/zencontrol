@@ -91,6 +91,9 @@ test("limpeza com mídia remota é recusada antes de alterar o banco", async () 
   assert.equal((await o.get(pool, order.id)).vehicle, "TES1234");
 });
 test("limpeza esvazia tabelas e fotos do ZenControl e preserva inventário e acessos", async () => {
+  const migrations = Number(
+    (await d.one(pool, "SELECT count(*) n FROM schema_migrations")).n,
+  );
   const result = await purge(pool, cfg, { apply: true });
   assert.equal(result.database_purged, true);
   assert.equal(result.files_purged, true);
@@ -110,7 +113,7 @@ test("limpeza esvazia tabelas e fotos do ZenControl e preserva inventário e ace
   );
   assert.equal(
     Number((await d.one(pool, "SELECT count(*) n FROM schema_migrations")).n),
-    11,
+    migrations,
   );
   await assert.rejects(fs.access(path.join(cfg.DATA_DIR, "media")));
   await assert.rejects(fs.access(path.join(cfg.DATA_DIR, "backups")));
