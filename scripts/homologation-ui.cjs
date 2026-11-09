@@ -147,6 +147,7 @@ async function main() {
   await page
     .getByRole("heading", { name: "Meus serviços", exact: true })
     .waitFor();
+  await page.locator(".portal-search-filters > summary").click();
   await page.getByLabel("Veículo", { exact: true }).fill("ZEN1A23");
   await page.getByRole("heading", { name: "ZEN1A23", exact: true }).waitFor();
   await page
@@ -273,33 +274,29 @@ async function main() {
   await central
     .getByRole("button", { name: "Validações", exact: true })
     .click();
-  await central.getByRole("button", { name: "Conferir", exact: true }).click();
-  await central
-    .getByLabel("Resultado da conferência / correção necessária", {
-      exact: true,
-    })
-    .fill("Conferência fictícia da instalação, documentos e identificação.");
-  await central
-    .getByLabel("Conferi veículo, técnico, fotos e códigos deste serviço.", {
-      exact: true,
-    })
-    .check();
+  await Promise.all([
+    central.waitForResponse((r) => r.url().endsWith("/conference")),
+    central.getByRole("button", { name: "Conferir", exact: true }).click(),
+  ]);
   assert.equal(
-    await central
-      .getByRole("button", { name: "Aprovar conferência", exact: true })
-      .isDisabled(),
-    true,
+    await central.getByRole("textbox", { name: /IMEI|serial/i }).count(),
+    0,
   );
   await central
-    .getByLabel("Abri o checklist e conferi o preenchimento e a assinatura.", {
-      exact: true,
-    })
-    .check();
+    .locator('[aria-label="IMEIs e seriais registrados"]')
+    .getByText("123456789012345", { exact: true })
+    .waitFor();
+  assert.equal(
+    await central
+      .getByRole("button", { name: "Confirmar e concluir OS", exact: true })
+      .isEnabled(),
+    true,
+  );
   response = central.waitForResponse(
     (r) => r.url().endsWith("/approve") && r.request().method() === "POST",
   );
   await central
-    .getByRole("button", { name: "Aprovar conferência", exact: true })
+    .getByRole("button", { name: "Confirmar e concluir OS", exact: true })
     .click();
   assert.equal((await response).status(), 200);
   const submitted = (await api("/batches", null, admin)).items.find(

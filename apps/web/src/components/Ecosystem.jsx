@@ -981,6 +981,25 @@ export function FinancePanel({ technical = false }) {
       setPreview(null);
     }
   }, [data]);
+  useEffect(() => {
+    if (technical || !tid) return;
+    const controller = new AbortController();
+    api
+      .get("/finance-v2/technicians/" + tid + "/rates", {
+        signal: controller.signal,
+      })
+      .then((r) => {
+        if (!controller.signal.aborted)
+          setRatePrices(
+            r.data.items.find((x) => x.effective_on <= today())?.prices ||
+              Object.fromEntries(services.map((s) => [s, 0])),
+          );
+      })
+      .catch((e) => {
+        if (!controller.signal.aborted) setError(errorMessage(e));
+      });
+    return () => controller.abort();
+  }, [technical, tid]);
   async function act(fn) {
     setBusy(true);
     setError("");
@@ -996,15 +1015,22 @@ export function FinancePanel({ technical = false }) {
   function changeTech(id) {
     setTid(id);
     setRatePrices(null);
-    api
-      .get("/finance-v2/technicians/" + id + "/rates")
-      .then((r) =>
-        setRatePrices(
-          r.data.items.find((x) => x.effective_on <= today())?.prices ||
-            Object.fromEntries(services.map((s) => [s, 0])),
-        ),
-      )
-      .catch((e) => setError(errorMessage(e)));
+    setPolicy(null);
+    setPreview(null);
+    setPay(null);
+    setAmount("");
+    setReference("");
+    setReceipt("");
+    setExtra(false);
+    setReason("");
+    setError("");
+    setStart("");
+    setEnd(today());
+    setRateDate(today());
+    setPaidOn(today());
+    setHoliday({ day: "", name: "" });
+    closeKey.current = crypto.randomUUID();
+    paymentKey.current = crypto.randomUUID();
   }
   return (
     <section className="eco-section">
@@ -1015,7 +1041,11 @@ export function FinancePanel({ technical = false }) {
       </p>
       {!technical && (
         <Field label="Técnico">
-          <select value={tid} onChange={(e) => changeTech(e.target.value)}>
+          <select
+            value={tid}
+            disabled={busy}
+            onChange={(e) => changeTech(e.target.value)}
+          >
             <option value="">Selecione um técnico</option>
             {techs.data?.items?.map((t) => (
               <option value={t.id} key={t.id}>

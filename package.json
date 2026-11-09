@@ -29,10 +29,12 @@
     "stock:migrate": "npm run migrate --workspace integrations/estoque-pro",
     "homologation": "node scripts/homologation.cjs",
     "homologation:build": "node scripts/homologation-build.cjs",
-    "homologation:ui": "node scripts/homologation-ui.cjs"
+    "homologation:ui": "node scripts/homologation-ui.cjs",
+    "test:frontend": "node scripts/frontend-regressions.cjs"
   },
   "devDependencies": {
     "playwright": "1.62.1",
     "prettier": "^3.9.10"
-  }
+  },
+  "description": "Central do ecossistema ZenTracking para agenda, ordens de serviço, conferência e financeiro."
 }
