@@ -12,6 +12,8 @@ ZenTracking identifica o conjunto de aplicações do setor de rastreamento. A en
 
 Administrador e operador pertencem ao mesmo grupo de acesso completo, incluindo usuários, configurações e financeiro. Confirmação por senha, backup antes de reset, preservação do último administrador e demais regras das operações continuam obrigatórias. A central pode entrar no ZenField mesmo quando o técnico ainda não ativou sua conta; o cadastro do técnico precisa estar ativo.
 
+No ZenControl, **Equipe e acessos** reúne Administradores, Operadores e Técnicos. Use a busca pelo nome ou usuário e o filtro de status para localizar uma pessoa. Na categoria **Técnicos**, **Editar cadastro** abre os contatos, a região, os valores e o vínculo com o Estoque Pro; **Acesso ZenField** abre o login e as opções de ativação. **Adicionar pessoa → Técnico** cria o cadastro e entrega os dados do primeiro acesso no mesmo fluxo. A indicação **Habilitado** informa a situação da conta; o primeiro acesso ainda depende da ativação individual.
+
 ## Uso no ZenField
 
 1. A central abre o card ZenField e seleciona um técnico ativo.

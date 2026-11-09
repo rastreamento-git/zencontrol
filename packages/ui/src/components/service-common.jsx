@@ -279,7 +279,7 @@ export function FormModal({
       <form onSubmit={save}>
         {description && <p className="dialog-description">{description}</p>}
         <div className="zc-form-grid">
-          {fields.map((f) =>
+          {(typeof fields === "function" ? fields(values) : fields).map((f) =>
             f.type === "checkbox" ? (
               <label key={f.name} className="zc-checkbox zc-full">
                 <input
