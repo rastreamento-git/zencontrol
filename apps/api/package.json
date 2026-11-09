@@ -36,5 +36,6 @@
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.9",
     "pdfjs-dist": "^6.4.299"
-  }
+  },
+  "description": "API do ZenControl para ordens de serviço, evidências, integrações e fechamento financeiro."
 }

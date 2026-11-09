@@ -93,7 +93,8 @@ export default function App() {
     [order, setOrder] = useState(null),
     [password, setPassword] = useState(false),
     [updated, setUpdated] = useState(null);
-  const body = useRef(null);
+  const body = useRef(null),
+    menuToggle = useRef(null);
   const title =
     groups.flatMap((g) => g.items).find((v) => v[0] === tab)?.[1] ||
     "Fila de integrações";
@@ -105,6 +106,16 @@ export default function App() {
   function refresh() {
     setRevision((r) => r + 1);
   }
+  useEffect(() => {
+    if (!menu) return;
+    const close = (event) => {
+      if (event.key !== "Escape") return;
+      setMenu(false);
+      menuToggle.current?.focus();
+    };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [menu]);
   useEffect(() => {
     const handler = (e) => setBusy(e.detail);
     window.addEventListener("invent:busy", handler);
@@ -252,6 +263,7 @@ export default function App() {
             <button
               className="icon-button menu-toggle"
               aria-label="Abrir menu"
+              ref={menuToggle}
               aria-expanded={menu}
               aria-controls="zencontrol-menu"
               onClick={() => setMenu(true)}

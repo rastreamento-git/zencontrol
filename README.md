@@ -1,97 +1,85 @@
-> **ZenControl 6.4 — branch de homologação.** Use o [guia local do ecossistema](https://github.com/rastreamento-git/zencontrol/blob/feat/ecossistema-homologacao/HOMOLOGACAO.md). Requer API ZenControl 6.4. Não executar deploy/migrações em produção nesta etapa.
+# ZenControl · Central de rastreamento
 
-# ZenControl · plataforma de atendimento
+Central do ecossistema **ZenTracking** para agendar atendimentos, gerenciar ordens de serviço, conferir a execução dos técnicos e acompanhar fechamentos e pagamentos.
 
-ZenControl 6.3 reúne agenda, ordens de serviço, conferência da central, financeiro e API para o Portal do Técnico independente. React 19, Vite, Express 5, Node.js 24 e PostgreSQL. A identidade visual, autenticação, componentes e leitor de etiquetas seguem a base do Estoque Pro.
+Esta revisão parte da branch `feat/ecossistema-homologacao`, versão 6.4. O ambiente de homologação usa dados fictícios. A implantação de produção tem roteiro próprio em [Implantação](docs/IMPLANTACAO.md).
 
-**Fluxo:** o técnico registra fotos e IMEIs → a central confere → o Estoque Pro confirma a instalação → a OS é concluída. O envio do técnico nunca conclui o serviço sozinho.
+## Aplicações e acesso
 
-## Organização
+| Aplicação | Responsabilidade |
+| --- | --- |
+| ZenTracking | Entrada única. Administradores e operadores escolhem as aplicações por cards. Técnicos seguem diretamente ao ZenField. |
+| ZenControl | Agenda, OS, conferência, equipe, bloqueios operacionais e financeiro. |
+| [ZenField](https://github.com/rastreamento-git/zenfield) | Execução em campo, fotos, checklist, carga e demonstrativo do técnico. |
+| [Estoque Pro](https://github.com/rastreamento-git/inventario-v2) | Equipamentos, IMEIs/seriais, cargas, movimentações e rastreabilidade. |
 
-| Caminho                          | Responsabilidade                                                         |
-| -------------------------------- | ------------------------------------------------------------------------ |
-| `apps/web/src/components`        | Agenda, gestão e conferência da central                                  |
-| `ZenField (repositório próprio)` | Aplicativo separado dos técnicos, com build e endereço próprios          |
-| `apps/api/src`                   | API, autorização, regras, fila e integração                              |
-| `apps/api/migrations`            | Schema PostgreSQL versionado do ZenControl                               |
-| `packages/ui`                    | Tema e componentes compartilhados; leitor original do Estoque Pro        |
-| `packages/server`                | Base de autenticação, transações e validação                             |
-| `integrations/estoque-pro`       | Backend do inventário com o adaptador de instalação; referência testável |
-| `docs`                           | Regras, implantação e contrato entre os sistemas                         |
-| `.github/workflows`              | Verificação automática em PostgreSQL e build do frontend                 |
+As contas são individuais. A supervisão no ZenField preserva a identidade real do operador na auditoria. A senha exige no mínimo oito caracteres, com maiúscula, minúscula, número e símbolo.
 
-O ZenControl tem banco próprio. O estoque existente continua no banco do Estoque Pro. A comunicação usa API autenticada entre os servidores; o navegador não recebe a chave de integração e o ZenControl não grava diretamente no banco do inventário.
+## Fluxo da ordem de serviço
 
-## Ordem de serviço no modelo independente
+1. A central cadastra cliente, veículo, endereço, contato, agendamento, técnico e quantidade de equipamentos.
+2. O técnico registra etiquetas, checklist assinado, data executada e observações no ZenField. Fotos gerais são opcionais, sem mínimo obrigatório.
+3. A central confere as evidências e confirma a execução ou solicita correção. Os códigos já identificados são consultados sem uma nova leitura de IMEI.
+4. Nas instalações, o Estoque Pro valida a carga e confirma os equipamentos. O recibo válido permite concluir a OS.
+5. O serviço concluído torna-se elegível para o fechamento financeiro, conforme as regras do técnico.
 
-O PDF usa os quatro blocos do gerador independente: associado, veículo, detalhes do atendimento e instruções/observações. Serviço, data/horário e técnico vêm automaticamente da OS salva; o técnico não precisa preenchê-los outra vez. Campos complementares e equipamentos previstos ficam persistidos no banco. **Salvar e gerar PDF** usa os dados atuais do formulário e salva antes de emitir.
+Uma OS pode reunir vários equipamentos em um único atendimento e PDF com a marca ZEN Seguros. Cada equipamento extra tem contabilização interna vinculada. Reinstalações podem reaproveitar equipamentos sem consumir novamente a carga. A dispensa de rastreador autorizada exclui a OS da remuneração do técnico.
 
-A versão padrão oculta CPF/CNPJ, RG, Renavam e parte do nome. A versão integral é exclusiva da administração. O técnico pode baixar a versão protegida apenas das OS atribuídas a ele. A emissão e o envio por WhatsApp usam o mesmo modelo e não dependem de uma consulta à Hinova naquele momento.
+O cadastro aplica faixas FIPE por tipo de veículo e região, identifica veículo elétrico, separa os campos de endereço e formata o telefone. Há instalação, manutenção e retirada, com tratamento de visita improdutiva e reagendamento.
 
-A consulta SGA aceita código, placa ou chassi, complementa a ficha por ID e preenche dados do associado/veículo. Configure as credenciais `HINOVA_*` no ambiente do servidor e `INTEGRATIONS_ENABLED=true` para consultá-la. Serviço, agendamento e atribuição técnica são preservados durante essa consulta. As credenciais de arquivos de referência não fazem parte do repositório.
+## Financeiro e serviços operacionais
 
-Detalhes em [documentos de OS](docs/ORDEM_DE_SERVICO.md). Ao atualizar uma instalação existente, execute `npm run migrate` para adicionar o campo complementar, antes de iniciar a aplicação.
+- Tarifas com vigência, pedidos de reajuste, contraproposta e aceite.
+- Ciclos de fechamento por técnico, prévia, aprovação e composição preservada.
+- Taxa de deslocamento definida pela operação, uma vez por atendimento.
+- Despesa extra vinculada à OS principal, com valor, descrição, foto do comprovante e decisão da central. Somente a aprovação gera reembolso.
+- Registro de pagamentos externos parciais ou integrais, saldo e comprovantes. O sistema registra os pagamentos realizados fora da aplicação.
+- Bloqueios operacionais com protocolo, situação e histórico, sem atribuição ao técnico. A integração automática com a API da Rede Veículo depende da documentação e de implementação específica.
 
-## Hospedar no Render Free
+## Estrutura
 
-A versão 6.2 aceita fotos em bucket privado no Supabase, preservando a autorização da central e dos técnicos. Configure `MEDIA_STORAGE=supabase`, `SUPABASE_URL`, `SUPABASE_SECRET_KEY` e `SUPABASE_STORAGE_BUCKET=zencontrol-evidencias` somente no backend. O `render.yaml` usa plano Free, sem disco, e executa as migrações no comando de início. O PostgreSQL permanece no Aiven. Confira o [passo a passo e limites](docs/IMPLANTACAO.md) antes de habilitar serviços reais.
+| Diretório | Conteúdo |
+| --- | --- |
+| `apps/web` | Interface React/Vite da central e entrada ZenTracking |
+| `apps/api` | API Express, autorização, documentos, financeiro e integrações |
+| `packages/ui` | Componentes, tema, sessão e utilitários da central |
+| `packages/domain` | Regras compartilhadas de cadastro e classificação |
+| `integrations/estoque-pro` | Adaptador de referência e testes de compatibilidade |
+| `scripts` | Inicialização, homologação, backup e verificações |
+| `docs` | Operação, implantação e contratos de integração |
 
-## Subir localmente
+O ZenControl e o Estoque Pro mantêm bancos próprios. A integração acontece por API autenticada entre servidores. Segredos de banco, mídia e integração ficam no backend.
 
-Requisitos: Node.js 24 e Docker Compose ou PostgreSQL 16+ disponível.
+## Desenvolvimento e homologação
+
+Requer Node.js 24. Para testar o ecossistema, mantenha `zencontrol`, `zenfield` e `inventario-v2` lado a lado, com as dependências instaladas conforme [HOMOLOGACAO.md](HOMOLOGACAO.md).
 
 ```bash
 npm ci --include=dev
-npm run setup
-docker compose up -d db
-npm run migrate
-npm run build
+npm run homologation:build
+npm run homologation
 ```
 
-Consulte o usuário e a senha inicial no `.env` gerado. Ative `ZEN_RUN_WORKER=true` nesse arquivo para a API executar a fila no mesmo processo e inicie:
+Para uma instalação com PostgreSQL servidor, consulte [Implantação](docs/IMPLANTACAO.md). As migrações e os arquivos de exemplo não importam dados reais automaticamente.
 
-```bash
-npm start
-```
-
-Abra `http://127.0.0.1:3000`. A central é exclusiva para administrador/operador. O ZenField fica em seu próprio repositório e é iniciado/publicado conforme o README dele. Em desenvolvimento, `npm run dev:web` serve o frontend e usa a API local. Para executar todos os containers: `docker compose up --build -d`; nesse modo, o Compose já inicia um worker separado com o mesmo volume de fotos.
-
-As migrações criam uma base operacional vazia e as regras de evidência. Não importam os arquivos antigos, não conectam ao inventário sem configuração e não executam limpeza de outro banco. `npm run demo` é opcional e cria dados explicitamente fictícios apenas em uma base vazia; não faz parte da implantação.
-
-## Conectar ao Estoque Pro
-
-1. Aplicar no repositório `rastreamento-git/inventario-v2`, pasta `invent-back`, a integração correspondente a `integrations/estoque-pro`. Executar a migração aditiva `003_zencontrol.sql` e publicar o backend atualizado.
-2. Definir `ZENCONTROL_INTEGRATION_SECRET` no ambiente do backend do Estoque Pro com o **mesmo** valor de `STOCK_API_SECRET` do ZenControl. `npm run setup` gera essa chave localmente; transfira-a pelo gerenciador de segredos da hospedagem.
-3. No ZenControl, configurar `STOCK_API_URL` com a URL HTTPS do backend do Estoque Pro, `STOCK_ENABLED=true` e `ZEN_RUN_WORKER=true` quando não houver um worker separado. Manter `STOCK_SOURCE_SYSTEM=zencontrol` estável para esta base.
-4. Em **Equipe técnica**, vincular cada técnico ao cadastro correspondente consultado no Estoque Pro. Em **Equipe e acessos**, criar um usuário com perfil **Técnico** e selecionar seu cadastro no ZenControl.
-5. Em **Configurações**, revisar as fotos exigidas por serviço. Distribuir os equipamentos aos técnicos pelo Estoque Pro antes da instalação.
-6. Validar uma OS: técnico envia as evidências, central aprova em **Validações**, fila confirma o estoque e OS passa para **Concluído**.
-
-WhatsApp e SGA são opcionais, configurados separadamente. `INTEGRATIONS_ENABLED` controla esses serviços; `STOCK_ENABLED` controla o Estoque Pro. Mesmo com a baixa automática legada habilitada, as novas OS sempre exigem aprovação da central.
-
-## Regras e validação
-
-- Cada técnico vê apenas suas próprias OS e fotos; o servidor bloqueia rotas administrativas, financeiro e aprovação para esse perfil.
-- Instalação/reinstalação exigem pelo menos um IMEI/serial e uma foto de etiqueta vinculada a cada código.
-- O estoque aceita somente equipamentos não arquivados em estado `TECNICO`, na carga do técnico vinculado à OS. O lote é confirmado integralmente em uma transação.
-- A integração chama a mesma regra de instalação do Estoque Pro: estado `INSTALADO`, movimento `USO_FINAL`, histórico por serial e saldo recalculado.
-- Aprovar uma instalação cria uma tarefa persistida. A OS fica em **Aguardando estoque**, sem entrar no financeiro, até o recibo autenticado.
-- Uma chave por envio impede duplicidade mesmo quando a instalação ocorre e a resposta de rede se perde. Falhas transitórias são retomadas; recusas de negócio ficam visíveis para correção.
-- A central pode solicitar correção. Técnico recebe o motivo e cria novo envio. Fotos de envios aprovados e dados de uma OS confirmada permanecem preservados.
-- Manutenção, retirada, visita e improdutiva exigem evidências e aprovação, mas não registram uma nova instalação. Retorno de equipamento instalado continua pelo processo de triagem do Estoque Pro.
-
-Detalhes em [regras de negócio](docs/REGRAS_DE_NEGOCIO.md), [integração](docs/INTEGRACAO_ESTOQUE_PRO.md) e [implantação](docs/IMPLANTACAO.md).
+## Verificação
 
 ```bash
 npm run check
 npm test
 npm run build
+npm run test:frontend
 ```
 
-Os testes executam SQL PostgreSQL real através de PGlite localmente. Com `TEST_DATABASE_URL`, usam um servidor PostgreSQL isolado por schema. O CI executa esse segundo modo. A suíte inclui o backend do inventário, aprovação, autorização, evidências, recusa atômica e recuperação de resposta perdida sem baixa duplicada.
+`test:frontend` inicia uma instância local isolada e verifica trocas de técnico, filtros, tratamento de erros e navegação móvel. Exige os três repositórios compilados e Chromium do Playwright (`npx playwright install chromium`). Nunca utiliza banco ou credenciais de produção.
 
-Credenciais, fotos de clientes, bancos antigos e dados de produção não pertencem ao repositório. A criação de uma instância de banco na hospedagem e a configuração dos segredos são etapas de implantação; o código e as migrações não provisionam uma conta de nuvem.
+## Documentação
 
-## Portal do técnico
+- [Mapa dos repositórios e descrições em português](docs/REPOSITORIOS.md)
+- [Entrada única e perfis](docs/ZENTRACKING.md)
+- [Portal do técnico](docs/PORTAL_TECNICO.md)
+- [Ordem de serviço e PDF](docs/ORDEM_DE_SERVICO.md)
+- [Integração com o Estoque Pro](docs/INTEGRACAO_ESTOQUE_PRO.md)
+- [Regras de negócio](docs/REGRAS_DE_NEGOCIO.md)
 
-O ZenField tem repositório, dependências, login, build e hospedagem próprios; a central permanece em `apps/web`. Configure `VITE_API_URL` no portal e `TECHNICIAN_PORTAL_URL` no backend. O caminho antigo `/tecnico` redireciona para o endereço próprio quando configurado. Fotos das etiquetas identificam automaticamente o código e o tipo do aparelho na carga do técnico. Novos envios exigem fotos da vistoria e checklist assinado; a central aprova antes da conclusão e do fechamento financeiro. Confira [operação, limites e ativação](docs/PORTAL_TECNICO.md).
+Desenvolvido por Victor Rodrigues.
