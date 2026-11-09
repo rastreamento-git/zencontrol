@@ -328,12 +328,15 @@
   font-weight: 600;
 }
 .zen-chat-compose > div {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
   gap: 8px;
 }
-.zen-chat-compose textarea {
-  flex: 1;
+.zen-chat-compose > div > textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
   resize: vertical;
   max-height: 180px;
 }

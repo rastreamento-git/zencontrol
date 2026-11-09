@@ -271,6 +271,19 @@ async function main() {
     false,
   );
   await noOverflow(mobile);
+  const composerBounds = await mobile
+    .locator(".zen-chat-compose")
+    .boundingBox();
+  const sendBounds = await mobile
+    .getByRole("button", { name: "Enviar", exact: true })
+    .boundingBox();
+  assert.ok(
+    composerBounds &&
+      sendBounds &&
+      sendBounds.x + sendBounds.width <=
+        composerBounds.x + composerBounds.width + 1,
+    "O botão Enviar deve caber inteiro dentro da conversa a 320 px",
+  );
   await mobile.screenshot({
     path: path.join(directory, "zenfield-chat-escuro.png"),
     fullPage: true,
