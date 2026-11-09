@@ -1,6 +1,7 @@
 const KEY = "zen.appearance";
 const choices = ["light", "dark", "system"];
-let preference = "system";
+const DEFAULT = "dark";
+let preference = DEFAULT;
 let initialized = false;
 
 export function getAppearance() {
@@ -14,7 +15,7 @@ function apply() {
   document.documentElement.dataset.theme = dark ? "dark" : "light";
   document.documentElement.style.colorScheme = dark ? "dark" : "light";
   const color = document.querySelector('meta[name="theme-color"]');
-  if (color) color.content = dark ? "#0e1729" : "#f4f7fb";
+  if (color) color.content = dark ? "#040f23" : "#f2f6fc";
   window.dispatchEvent(new Event("zen:appearance"));
 }
 export function setAppearance(value) {
@@ -46,7 +47,7 @@ export function initializeAppearance() {
     });
   window.addEventListener("storage", (event) => {
     if (event.key === KEY) {
-      preference = choices.includes(event.newValue) ? event.newValue : "system";
+      preference = choices.includes(event.newValue) ? event.newValue : DEFAULT;
       apply();
     }
   });

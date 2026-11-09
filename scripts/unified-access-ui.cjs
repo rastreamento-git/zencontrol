@@ -104,7 +104,7 @@ async function main() {
       await page.evaluate(
         () => getComputedStyle(document.body).backgroundColor,
       ),
-      expected === "dark" ? "rgb(14, 23, 41)" : "rgb(244, 247, 251)",
+      expected === "dark" ? "rgb(4, 15, 35)" : "rgb(242, 246, 252)",
     );
     const images = page.locator(".zen-mark");
     if (await images.count())
@@ -133,15 +133,24 @@ async function main() {
     await page
       .getByRole("heading", { name: "ZenTracking", exact: true })
       .waitFor();
+    await checkAppearance(page, "dark");
+    if (login === "admin") {
+      await page.getByLabel("Usuário", { exact: true }).waitFor();
+      await page.screenshot({
+        path: path.join(directory, "zentracking-login.png"),
+        timeout: 60000,
+        animations: "disabled",
+      });
+    }
     await page.getByLabel("Usuário", { exact: true }).fill(login);
     await page.getByLabel("Senha de acesso").fill(password);
     await page.getByRole("button", { name: "Entrar", exact: true }).click();
     await page
-      .getByRole("heading", { name: "Seu setor, em um só lugar.", exact: true })
+      .getByRole("heading", { name: /Seu espaço de trabalho/, level: 1 })
       .waitFor();
     await page.getByLabel("Aparência", { exact: true }).selectOption("dark");
     await checkAppearance(page, "dark");
-    for (const name of ["ZenControl", "ZenField", "EstoquePro"])
+    for (const name of ["ZenControl", "ZenField", "Estoque Pro"])
       await page
         .getByRole("button", { name: "Abrir " + name, exact: true })
         .waitFor();
@@ -186,7 +195,7 @@ async function main() {
     await page.getByLabel("Aparência", { exact: true }).selectOption("light");
     await checkAppearance(page, "light");
     await page
-      .getByRole("button", { name: "Abrir EstoquePro", exact: true })
+      .getByRole("button", { name: "Abrir Estoque Pro", exact: true })
       .click();
     await page.waitForURL("http://127.0.0.1:4321/**");
     await page.getByRole("button", { name: "Sair", exact: true }).waitFor();
@@ -212,8 +221,8 @@ async function main() {
     assert.equal(
       await page
         .getByRole("heading", {
-          name: "Seu setor, em um só lugar.",
-          exact: true,
+          name: /Seu espaço de trabalho/,
+          level: 1,
         })
         .count(),
       0,
@@ -409,7 +418,9 @@ async function main() {
     path: path.join(directory, "zenfield-scroll.png"),
     fullPage: false,
   });
+  await page.getByRole("button", { name: "Meu perfil", exact: true }).click();
   await page
+    .getByRole("dialog", { name: "Meu perfil", exact: true })
     .getByRole("button", { name: "Alterar senha", exact: true })
     .click();
   await page
