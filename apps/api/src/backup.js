@@ -30,6 +30,7 @@ const tables = [
   "zc_payments",
   "zc_notifications",
   "zc_operational_services",
+  "zc_chat_messages",
 ];
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 async function prepareBackup(pool, cfg) {
@@ -162,6 +163,8 @@ async function restoreBackup(pool, cfg, source, apply = false) {
   // Backups from before operational services remain restorable.
   if (!Object.hasOwn(snapshot.data, "zc_operational_services"))
     snapshot.data.zc_operational_services = [];
+  if (!Object.hasOwn(snapshot.data, "zc_chat_messages"))
+    snapshot.data.zc_chat_messages = [];
   const legacy = tables.filter((t) => !additions.includes(t));
   if (Object.keys(snapshot.data).sort().join() === legacy.sort().join())
     for (const table of additions) snapshot.data[table] = [];
@@ -238,6 +241,7 @@ async function restoreBackup(pool, cfg, source, apply = false) {
             copy.available_at = 0;
           }
           if (table === "zc_batches") copy.source_user_id = null;
+          if (table === "zc_chat_messages") copy.sender_user_id = null;
           const keys = Object.keys(copy);
           if (!keys.length || keys.some((k) => !allowed.has(k)))
             fail(400, "Coluna inválida no backup.");
@@ -255,6 +259,7 @@ async function restoreBackup(pool, cfg, source, apply = false) {
             "zc_volunteers",
             "zc_order_extras",
             "zc_audit",
+            "zc_chat_messages",
           ].includes(table)
         )
           await tx.query(

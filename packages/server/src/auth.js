@@ -78,7 +78,7 @@ function publicUser(row) {
     criado_em: row.criado_em,
   };
 }
-function configureAuth(app, env, pool) {
+function configureAuth(app, env, pool, configurePublicAuth) {
   const enabled = Boolean(env.APP_PASSWORD);
   if (
     env.NODE_ENV === "production" &&
@@ -110,7 +110,7 @@ function configureAuth(app, env, pool) {
     createHmac("sha256", env.SESSION_SECRET)
       .update(payload)
       .digest("base64url");
-  async function valid(req) {
+  async function valid(req, db = pool) {
     if (!enabled)
       return {
         id: null,
@@ -140,8 +140,8 @@ function configureAuth(app, env, pool) {
       !Number.isSafeInteger(data.uid)
     )
       return null;
-    await ready();
-    const { rows } = await pool.query(
+    if (db === pool) await ready();
+    const { rows } = await db.query(
       "SELECT * FROM usuarios WHERE id=$1 AND ativo=true",
       [data.uid],
     );
@@ -151,7 +151,7 @@ function configureAuth(app, env, pool) {
     if (
       row.papel === "tecnico" &&
       !(
-        await pool.query(
+        await db.query(
           "SELECT 1 FROM zc_technician_accounts a JOIN zc_technicians t ON t.id=a.technician_id WHERE a.user_id=$1 AND t.active=true",
           [row.id],
         )
@@ -327,11 +327,16 @@ function configureAuth(app, env, pool) {
     ).toString("base64url");
     return { token: `${payload}.${sign(payload)}`, expiresAt: exp };
   }
-  require("./sso").configureSso(app, env, pool, {
+  const handlers = {
     valid,
     issueToken,
     publicUser,
     checkPassword,
+  };
+  const publicConfig = configurePublicAuth?.(app, env, pool, handlers) || {};
+  require("./sso").configureSso(app, env, pool, {
+    ...handlers,
+    ...publicConfig,
   });
   app.use("/api", async (req, res, next) => {
     const user = await valid(req);

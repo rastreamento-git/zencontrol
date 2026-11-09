@@ -148,6 +148,7 @@ async function main() {
       ? onlineConfig.centralOrigin
       : "http://127.0.0.1:4320",
     SSO_STOCK_URL: online ? onlineConfig.stockOrigin : "http://127.0.0.1:4321",
+    GOOGLE_CLIENT_ID: online ? "" : process.env.GOOGLE_CLIENT_ID,
     STOCK_ENABLED: "true",
     STOCK_API_URL: "http://127.0.0.1:4318",
     STOCK_API_SECRET: scopedSecret("stock-integration"),

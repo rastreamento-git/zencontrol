@@ -235,10 +235,14 @@ test("trocar o técnico ou o veículo após o recebimento impede baixa automáti
   }
 });
 test("migrações são idempotentes e rollback não deixa gravações parciais", async () => {
+  const before = await d.rows(
+    pool,
+    "SELECT name FROM schema_migrations ORDER BY name",
+  );
   await migrate(pool);
-  assert.equal(
-    Number((await d.one(pool, "SELECT count(*) n FROM schema_migrations")).n),
-    11,
+  assert.deepEqual(
+    await d.rows(pool, "SELECT name FROM schema_migrations ORDER BY name"),
+    before,
   );
   await assert.rejects(
     transaction(pool, async (tx) => {

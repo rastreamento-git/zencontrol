@@ -1,13 +1,14 @@
 import ThemeControl from "./ThemeControl";
 import AuthStory from "./AuthStory";
 import ZenMark from "./ZenMark";
+import GoogleButton from "./GoogleButton";
 import {
   passwordInputProps,
   passwordRequirements,
 } from "../lib/password-policy";
 import { useEffect, useState } from "react";
 import { api, errorMessage, saveToken } from "../lib/api";
-import { SessionContext } from "../lib/session";
+import { SessionContext, SessionNameContext } from "../lib/session";
 import AppFooter from "./AppFooter";
 import { prepareAccess, routeSession, beginLogin } from "../lib/sso";
 export default function AuthGate({ children, audience = "central" }) {
@@ -25,6 +26,11 @@ export default function AuthGate({ children, audience = "central" }) {
     [newPassword, setNewPassword] = useState(""),
     [message, setMessage] = useState("");
   const connecting = status === "loading" || !access;
+  const google =
+    !technicianEntry &&
+    !activation &&
+    access?.google_client_id &&
+    window.location.origin === access.login_url;
   useEffect(() => {
     document.title = connecting
       ? "ZenTracking · Conectando…"
@@ -110,6 +116,27 @@ export default function AuthGate({ children, audience = "central" }) {
     window.addEventListener("invent:unauthorized", expired);
     return () => window.removeEventListener("invent:unauthorized", expired);
   }, []);
+  async function completeLogin(data) {
+    saveToken(data.token);
+    try {
+      if (
+        currentApp === "zencontrol" &&
+        ["admin", "operador"].includes(data.user?.papel) &&
+        !new URLSearchParams(window.location.search).has("zen_app")
+      )
+        history.replaceState(
+          null,
+          "",
+          new URLSearchParams(window.location.search).get("perfil") === "1"
+            ? "/?perfil=1"
+            : "/",
+        );
+      if (!(await applySession(data))) saveToken(null);
+    } catch (e) {
+      saveToken(null);
+      throw e;
+    }
+  }
   async function submitLogin(e) {
     e.preventDefault();
     setBusy(true);
@@ -134,14 +161,7 @@ export default function AuthGate({ children, audience = "central" }) {
         password,
         audience: access?.unified_login ? "ecosystem" : audience,
       });
-      saveToken(data.token);
-      if (
-        currentApp === "zencontrol" &&
-        ["admin", "operador"].includes(data.user?.papel) &&
-        !new URLSearchParams(window.location.search).has("zen_app")
-      )
-        history.replaceState(null, "", "/");
-      if (!(await applySession(data))) saveToken(null);
+      await completeLogin(data);
       setPassword("");
     } catch (e) {
       setError(e.response ? errorMessage(e) : e.message || errorMessage(e));
@@ -151,7 +171,13 @@ export default function AuthGate({ children, audience = "central" }) {
   }
   if (status === "ready")
     return (
-      <SessionContext.Provider value={user}>{children}</SessionContext.Provider>
+      <SessionContext.Provider value={user}>
+        <SessionNameContext.Provider
+          value={(nome) => setUser((old) => (old ? { ...old, nome } : old))}
+        >
+          {children}
+        </SessionNameContext.Provider>
+      </SessionContext.Provider>
     );
   return (
     <main className="auth-page">
@@ -236,9 +262,20 @@ export default function AuthGate({ children, audience = "central" }) {
                 {technicianEntry
                   ? "Entre com seu usuário e senha para ver os serviços, enviar fotos e acompanhar a confirmação da central."
                   : access?.unified_login
-                    ? "Acesse ZenControl, ZenField e EstoquePro em um só lugar. Técnicos seguem diretamente para o ZenField."
+                    ? "Acesse ZenControl, ZenField e Estoque Pro em um só lugar. Técnicos seguem diretamente para o ZenField."
                     : "Entre para acompanhar os agendamentos e os atendimentos."}
               </p>
+              {google && (
+                <>
+                  <GoogleButton
+                    clientId={access.google_client_id}
+                    onComplete={completeLogin}
+                  />
+                  <div className="zen-auth-divider">
+                    <span>ou entre com usuário e senha</span>
+                  </div>
+                </>
+              )}
               <label htmlFor="login">Usuário</label>
               <input
                 id="login"

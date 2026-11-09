@@ -6,12 +6,12 @@ Esta revisão parte da branch `feat/ecossistema-homologacao`, versão 6.4. O amb
 
 ## Aplicações e acesso
 
-| Aplicação | Responsabilidade |
-| --- | --- |
-| ZenTracking | Entrada única. Administradores e operadores escolhem as aplicações por cards. Técnicos seguem diretamente ao ZenField. |
-| ZenControl | Agenda, OS, conferência, equipe, bloqueios operacionais e financeiro. |
-| [ZenField](https://github.com/rastreamento-git/zenfield) | Execução em campo, fotos, checklist, carga e demonstrativo do técnico. |
-| [Estoque Pro](https://github.com/rastreamento-git/inventario-v2) | Equipamentos, IMEIs/seriais, cargas, movimentações e rastreabilidade. |
+| Aplicação                                                        | Responsabilidade                                                                                                       |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| ZenTracking                                                      | Entrada única. Administradores e operadores escolhem as aplicações por cards. Técnicos seguem diretamente ao ZenField. |
+| ZenControl                                                       | Agenda, OS, conferência, equipe, bloqueios operacionais e financeiro.                                                  |
+| [ZenField](https://github.com/rastreamento-git/zenfield)         | Execução em campo, fotos, checklist, carga e demonstrativo do técnico.                                                 |
+| [Estoque Pro](https://github.com/rastreamento-git/inventario-v2) | Equipamentos, IMEIs/seriais, cargas, movimentações e rastreabilidade.                                                  |
 
 As contas são individuais. A supervisão no ZenField preserva a identidade real do operador na auditoria. A senha exige no mínimo oito caracteres, com maiúscula, minúscula, número e símbolo.
 
@@ -38,15 +38,15 @@ O cadastro aplica faixas FIPE por tipo de veículo e região, identifica veícul
 
 ## Estrutura
 
-| Diretório | Conteúdo |
-| --- | --- |
-| `apps/web` | Interface React/Vite da central e entrada ZenTracking |
-| `apps/api` | API Express, autorização, documentos, financeiro e integrações |
-| `packages/ui` | Componentes, tema, sessão e utilitários da central |
-| `packages/domain` | Regras compartilhadas de cadastro e classificação |
-| `integrations/estoque-pro` | Adaptador de referência e testes de compatibilidade |
-| `scripts` | Inicialização, homologação, backup e verificações |
-| `docs` | Operação, implantação e contratos de integração |
+| Diretório                  | Conteúdo                                                       |
+| -------------------------- | -------------------------------------------------------------- |
+| `apps/web`                 | Interface React/Vite da central e entrada ZenTracking          |
+| `apps/api`                 | API Express, autorização, documentos, financeiro e integrações |
+| `packages/ui`              | Componentes, tema, sessão e utilitários da central             |
+| `packages/domain`          | Regras compartilhadas de cadastro e classificação              |
+| `integrations/estoque-pro` | Adaptador de referência e testes de compatibilidade            |
+| `scripts`                  | Inicialização, homologação, backup e verificações              |
+| `docs`                     | Operação, implantação e contratos de integração                |
 
 O ZenControl e o Estoque Pro mantêm bancos próprios. A integração acontece por API autenticada entre servidores. Segredos de banco, mídia e integração ficam no backend.
 
@@ -77,6 +77,7 @@ npm run test:frontend
 
 - [Mapa dos repositórios e descrições em português](docs/REPOSITORIOS.md)
 - [Entrada única e perfis](docs/ZENTRACKING.md)
+- [Meu perfil, login Google e conversas](docs/PERFIL-GOOGLE-CHAT.md)
 - [Portal do técnico](docs/PORTAL_TECNICO.md)
 - [Ordem de serviço e PDF](docs/ORDEM_DE_SERVICO.md)
 - [Integração com o Estoque Pro](docs/INTEGRACAO_ESTOQUE_PRO.md)

@@ -4,6 +4,7 @@ const { transaction } = require("./database");
 const { fail } = require("./errors");
 const { tables: backupTables } = require("./backup");
 const tables = [
+  "zc_chat_messages",
   ...backupTables,
   "zc_technician_accounts",
   "zc_notification_reads",
