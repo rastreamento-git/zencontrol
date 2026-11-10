@@ -1,5 +1,5 @@
 import ThemeControl from "./ThemeControl";
-import AuthStory from "./AuthStory";
+import AuthStory, { AuthApps } from "./AuthStory";
 import ZenMark from "./ZenMark";
 import GoogleButton from "./GoogleButton";
 import {
@@ -180,11 +180,17 @@ export default function AuthGate({ children, audience = "central" }) {
       </SessionContext.Provider>
     );
   return (
-    <main className="auth-page">
-      <div className="auth-appearance">
-        <ThemeControl />
-      </div>
-      <div className="auth-layout">
+    <div className="auth-page">
+      <header className="auth-site-header">
+        <div className="auth-site-nav">
+          <span className="auth-site-brand">
+            <ZenMark variant="tracking" size={32} />
+            ZenTracking
+          </span>
+          <ThemeControl />
+        </div>
+      </header>
+      <main className="auth-layout">
         <AuthStory />
         <section className="auth-card" aria-labelledby="auth-title">
           <div className="auth-brand">
@@ -354,7 +360,8 @@ export default function AuthGate({ children, audience = "central" }) {
             </form>
           )}
         </section>
-      </div>
+        <AuthApps />
+      </main>
       <AppFooter
         product={
           connecting
@@ -366,6 +373,6 @@ export default function AuthGate({ children, audience = "central" }) {
                 : "ZenControl"
         }
       />
-    </main>
+    </div>
   );
 }

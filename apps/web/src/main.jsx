@@ -10,6 +10,7 @@ import TrackingEntry from "./TrackingEntry";
 import "@zen/ui/styles/appearance.css";
 import "@zen/ui/styles/experience.css";
 import "@zen/ui/styles/engagement.css";
+import "@zen/ui/styles/signal-theme.css";
 initializeAppearance();
 createRoot(document.getElementById("root")).render(
   <StrictMode>

@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import {
   ArrowUpRight,
   LogOut,
-  Layers3,
+  ArrowDown,
   CalendarCheck2,
   ClipboardCheck,
   MessageCircle,
@@ -21,231 +21,24 @@ import AppFooter from "@zen/ui/components/AppFooter";
 import { FormModal } from "./components/common";
 import "./tracking.css";
 
-function Illustration({ type }) {
-  return (
-    <svg viewBox="0 0 320 170" fill="none" aria-hidden="true" focusable="false">
-      <circle cx="253" cy="40" r="58" fill="currentColor" opacity=".05" />
-      <circle cx="54" cy="151" r="43" fill="currentColor" opacity=".06" />
-      {type === "zencontrol" ? (
-        <>
-          <rect
-            x="42"
-            y="24"
-            width="236"
-            height="126"
-            rx="12"
-            fill="white"
-            stroke="currentColor"
-            strokeOpacity=".2"
-          />
-          <path d="M42 54h236" stroke="currentColor" strokeOpacity=".12" />
-          <circle cx="58" cy="40" r="3" fill="currentColor" opacity=".5" />
-          <circle cx="69" cy="40" r="3" fill="currentColor" opacity=".25" />
-          <rect
-            x="58"
-            y="70"
-            width="56"
-            height="63"
-            rx="6"
-            fill="currentColor"
-            opacity=".08"
-          />
-          <path
-            d="M69 84h33M69 96h26M69 108h30M69 120h17"
-            stroke="currentColor"
-            strokeWidth="3"
-            strokeLinecap="round"
-            opacity=".35"
-          />
-          {[0, 1, 2].map((i) => (
-            <g key={i}>
-              <rect
-                x={130 + i * 44}
-                y="70"
-                width="34"
-                height="25"
-                rx="5"
-                fill="currentColor"
-                opacity={0.11 + i * 0.08}
-              />
-              <path
-                d={`M${135 + i * 44} 112h24M${135 + i * 44} 126h18`}
-                stroke="currentColor"
-                strokeWidth="4"
-                strokeLinecap="round"
-                opacity=".3"
-              />
-            </g>
-          ))}
-          <circle cx="264" cy="130" r="21" fill="currentColor" />
-          <path
-            d="m255 130 6 6 11-13"
-            stroke="white"
-            strokeWidth="3"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </>
-      ) : type === "zenfield" ? (
-        <>
-          <path
-            d="m50 112 56-25 49 25 50-26 67 16"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeDasharray="5 7"
-            opacity=".25"
-          />
-          <path
-            d="m50 132 56-25 49 25 50-26 67 16"
-            stroke="currentColor"
-            strokeWidth="2"
-            opacity=".12"
-          />
-          <rect
-            x="115"
-            y="13"
-            width="91"
-            height="143"
-            rx="16"
-            fill="white"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeOpacity=".35"
-          />
-          <path
-            d="M143 25h35"
-            stroke="currentColor"
-            strokeWidth="4"
-            strokeLinecap="round"
-            opacity=".3"
-          />
-          <rect
-            x="127"
-            y="40"
-            width="67"
-            height="43"
-            rx="7"
-            fill="currentColor"
-            opacity=".09"
-          />
-          <path
-            d="m149 59 8 8 15-17"
-            stroke="currentColor"
-            strokeWidth="3"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          {[0, 1, 2].map((i) => (
-            <g key={i}>
-              <rect
-                x="128"
-                y={96 + i * 16}
-                width="7"
-                height="7"
-                rx="2"
-                fill="currentColor"
-                opacity=".4"
-              />
-              <path
-                d={`M143 ${100 + i * 16}h39`}
-                stroke="currentColor"
-                strokeWidth="3"
-                strokeLinecap="round"
-                opacity=".25"
-              />
-            </g>
-          ))}
-          <path
-            d="M251 40c-11 0-19 8-19 19 0 14 19 30 19 30s19-16 19-30c0-11-8-19-19-19Z"
-            fill="currentColor"
-          />
-          <circle cx="251" cy="59" r="6" fill="white" />
-        </>
-      ) : (
-        <>
-          <rect
-            x="175"
-            y="26"
-            width="102"
-            height="117"
-            rx="11"
-            fill="white"
-            stroke="currentColor"
-            strokeOpacity=".25"
-          />
-          <rect
-            x="188"
-            y="42"
-            width="76"
-            height="22"
-            rx="5"
-            fill="currentColor"
-            opacity=".12"
-          />
-          {[0, 1, 2].map((i) => (
-            <g key={i}>
-              <rect
-                x="189"
-                y={79 + i * 18}
-                width="8"
-                height="8"
-                rx="2"
-                fill="currentColor"
-                opacity=".45"
-              />
-              <path
-                d={`M207 ${83 + i * 18}h43`}
-                stroke="currentColor"
-                strokeWidth="3"
-                strokeLinecap="round"
-                opacity=".25"
-              />
-            </g>
-          ))}
-          <path
-            d="m44 76 49-23 49 23v55l-49 23-49-23V76Z"
-            fill="white"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeOpacity=".5"
-          />
-          <path
-            d="m44 76 49 23 49-23M93 99v55M69 64l48 24v20"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeOpacity=".45"
-          />
-          <rect
-            x="113"
-            y="106"
-            width="48"
-            height="34"
-            rx="6"
-            fill="currentColor"
-          />
-          {[0, 1, 2, 3, 4].map((i) => (
-            <path
-              key={i}
-              d={`M${123 + i * 6} 114v17`}
-              stroke="white"
-              strokeWidth={i % 2 ? 2 : 3}
-            />
-          ))}
-        </>
-      )}
-    </svg>
-  );
-}
 const apps = [
+  {
+    id: "stock",
+    name: "Estoque Pro",
+    category: "EQUIPAMENTOS E RASTREABILIDADE",
+    description:
+      "Gerencie equipamentos, cargas dos técnicos e movimentações de estoque.",
+    features: ["Inventário", "Cargas", "Rastreabilidade"],
+    variant: "stock",
+  },
   {
     id: "zencontrol",
     name: "ZenControl",
     category: "GESTÃO DA OPERAÇÃO",
     description:
       "Organize ordens de serviço, agendamentos, equipe e conferências.",
-    detail: "Central de atendimento",
     features: ["Agendamentos", "Conferências", "Financeiro"],
-    className: "control",
+    variant: "control",
   },
   {
     id: "zenfield",
@@ -253,21 +46,17 @@ const apps = [
     category: "OPERAÇÃO EM CAMPO",
     description:
       "Acesse o ambiente de um técnico e acompanhe ou realize os atendimentos.",
-    detail: "Seleção de técnico",
     features: ["Serviços", "Evidências", "Equipe em campo"],
-    className: "field",
-  },
-  {
-    id: "stock",
-    name: "Estoque Pro",
-    category: "EQUIPAMENTOS E RASTREABILIDADE",
-    description:
-      "Gerencie equipamentos, cargas dos técnicos e movimentações de estoque.",
-    detail: "Controle de equipamentos",
-    features: ["Inventário", "Cargas", "Rastreabilidade"],
-    className: "stock",
+    variant: "field",
   },
 ];
+
+const shortcuts = [
+  ["agenda", "Agenda", "Serviços programados", CalendarCheck2],
+  ["batches", "Conferir serviços", "Evidências da equipe", ClipboardCheck],
+  ["chat", "Conversas", "Fale com os técnicos", MessageCircle],
+];
+
 export default function TrackingHome() {
   const user = useSession();
   const [busy, setBusy] = useState(""),
@@ -315,134 +104,149 @@ export default function TrackingHome() {
         Ir para o conteúdo
       </a>
       <header className="tracking-header">
-        <a
-          className="tracking-brand"
-          href="/"
-          aria-label="ZenTracking · Início"
-        >
-          <span className="tracking-mark">
-            <ZenMark variant="tracking" size={48} />
-          </span>
-          <span>
-            <strong>ZenTracking</strong>
-            <small>Ecossistema Zen Seguros</small>
-          </span>
-        </a>
-        <div className="tracking-account">
-          <ThemeControl />
-          <span className="tracking-identity">
-            <b>{user.nome}</b>
-            <small>
-              {user.papel === "admin" ? "Administrador" : "Operador"}
-            </small>
-          </span>
-          <ProfileButton
-            initiallyOpen={initialProfile}
-            onPassword={() => setPassword(true)}
-          />
-          <button
-            type="button"
-            className="icon-button"
-            aria-label="Sair"
-            onClick={logout}
-            disabled={!!busy}
+        <div className="tracking-boundary tracking-header-inner">
+          <a
+            className="tracking-brand"
+            href="/"
+            aria-label="ZenTracking · Início"
           >
-            <LogOut size={19} />
-          </button>
+            <ZenMark variant="tracking" size={34} />
+            <span>ZenTracking</span>
+          </a>
+          <nav
+            className="tracking-header-nav"
+            aria-label="Navegação do ZenTracking"
+          >
+            <a href="#tracking-apps">Aplicativos</a>
+            <a href="#tracking-shortcuts">Acesso rápido</a>
+          </nav>
+          <div className="tracking-account">
+            <ThemeControl />
+            <span className="tracking-identity">
+              <b>{user.nome}</b>
+              <small>
+                {user.papel === "admin" ? "Administrador" : "Operador"}
+              </small>
+            </span>
+            <ProfileButton
+              initiallyOpen={initialProfile}
+              onPassword={() => setPassword(true)}
+            />
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Sair"
+              onClick={logout}
+              disabled={!!busy}
+            >
+              <LogOut size={18} aria-hidden="true" />
+            </button>
+          </div>
         </div>
       </header>
       <main className="tracking-main" id="tracking-content" tabIndex={-1}>
-        <div className="tracking-intro">
-          <div>
-            <p className="tracking-eyebrow">
-              <Layers3 size={15} /> SEU ESPAÇO DE TRABALHO
-            </p>
-            <h1>Olá, {user.nome?.split(" ")[0] || "bem-vindo"}.</h1>
-            <p>
-              Acompanhe a operação, a equipe em campo e o estoque no
-              ZenTracking.
-            </p>
-          </div>
-        </div>
-        <nav className="zen-work-shortcuts" aria-label="Acesso rápido">
-          <a href="/zencontrol?area=agenda">
-            <CalendarCheck2 size={21} />
-            <span>
-              <strong>Agenda</strong>
-              <small>Serviços programados</small>
-            </span>
-            <ArrowUpRight size={16} />
-          </a>
-          <a href="/zencontrol?area=batches">
-            <ClipboardCheck size={21} />
-            <span>
-              <strong>Conferir serviços</strong>
-              <small>Evidências da equipe</small>
-            </span>
-            <ArrowUpRight size={16} />
-          </a>
-          <a href="/zencontrol?area=chat">
-            <MessageCircle size={21} />
-            <span>
-              <strong>Conversas</strong>
-              <small>Fale com os técnicos</small>
-            </span>
-            <ArrowUpRight size={16} />
-          </a>
-        </nav>
-        {error && (
-          <div className="error-banner" role="alert">
-            {error}
-          </div>
-        )}
-        <div className="tracking-section-heading">
-          <h2>Aplicativos</h2>
-          <span>3 ambientes conectados</span>
-        </div>
-        <div className="tracking-apps" aria-label="Aplicativos ZenTracking">
-          {apps.map((app) => (
-            <button
-              key={app.id}
-              type="button"
-              className={`tracking-card tracking-${app.className}`}
-              aria-label={`Abrir ${app.name}`}
-              disabled={!!busy}
-              onClick={() => launch(app.id)}
+        <section className="tracking-hero" aria-labelledby="tracking-title">
+          <div className="tracking-boundary">
+            <div className="tracking-intro">
+              <p className="tracking-eyebrow">
+                <i aria-hidden="true" /> ECOSSISTEMA ZEN SEGUROS
+              </p>
+              <h1 id="tracking-title">
+                Olá, {user.nome?.split(" ")[0] || "bem-vindo"}.
+                <span>Seu espaço de trabalho.</span>
+              </h1>
+              <p className="tracking-description">
+                Acompanhe a operação, a equipe em campo e o estoque no
+                ZenTracking.
+              </p>
+              <div className="tracking-hero-actions">
+                <a className="primary-button" href="#tracking-apps">
+                  Ver aplicativos <ArrowDown size={16} aria-hidden="true" />
+                </a>
+                <a className="secondary-button" href="#tracking-shortcuts">
+                  Ver atalhos
+                </a>
+              </div>
+            </div>
+            {error && (
+              <div className="error-banner" role="alert">
+                {error}
+              </div>
+            )}
+            <section
+              className="tracking-catalog"
+              id="tracking-apps"
+              aria-labelledby="tracking-app-title"
             >
-              <div className="tracking-art">
-                <Illustration type={app.id} />
-                <span className="tracking-app-mark">
-                  <ZenMark
-                    variant={
-                      app.id === "zencontrol"
-                        ? "control"
-                        : app.id === "zenfield"
-                          ? "field"
-                          : "stock"
-                    }
-                    size={48}
-                  />
-                </span>
+              <div className="tracking-section-heading">
+                <h2 id="tracking-app-title">Aplicativos</h2>
+                <span>3 ambientes conectados</span>
               </div>
-              <div className="tracking-card-content">
-                <small>{app.category}</small>
-                <h2>{app.name}</h2>
-                <p>{app.description}</p>
-                <ul className="tracking-features">
-                  {app.features.map((feature) => (
-                    <li key={feature}>{feature}</li>
-                  ))}
-                </ul>
-                <span className="tracking-card-action">
+              <div className="tracking-apps">
+                {apps.map((app) => (
+                  <button
+                    key={app.id}
+                    type="button"
+                    className="tracking-card"
+                    data-product={app.variant}
+                    aria-label={"Abrir " + app.name}
+                    aria-describedby={"tracking-app-description-" + app.id}
+                    aria-busy={busy === app.id}
+                    disabled={!!busy}
+                    onClick={() => launch(app.id)}
+                  >
+                    <span className="tracking-card-top">
+                      <span className="tracking-card-category">
+                        <i aria-hidden="true" /> {app.category}
+                      </span>
+                      <ZenMark variant={app.variant} size={30} />
+                    </span>
+                    <span className="tracking-card-name">{app.name}</span>
+                    <span
+                      className="tracking-card-description"
+                      id={"tracking-app-description-" + app.id}
+                    >
+                      {app.description}
+                    </span>
+                    <span className="tracking-features" aria-hidden="true">
+                      {app.features.map((feature) => (
+                        <span key={feature}>{feature}</span>
+                      ))}
+                    </span>
+                    <span className="tracking-card-action" aria-hidden="true">
+                      {busy === app.id ? "Abrindo…" : "Acessar"}
+                      <ArrowUpRight size={16} />
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          </div>
+        </section>
+        <section
+          className="tracking-shortcuts"
+          id="tracking-shortcuts"
+          aria-labelledby="tracking-shortcuts-title"
+        >
+          <div className="tracking-boundary">
+            <h2 id="tracking-shortcuts-title">Acesso rápido</h2>
+            <nav
+              className="tracking-shortcut-grid"
+              aria-label="Acesso rápido"
+            >
+              {shortcuts.map(([area, label, description, Icon]) => (
+                <a key={area} href={"/zencontrol?area=" + area}>
+                  <Icon size={22} aria-hidden="true" />
                   <span>
-                    {busy === app.id ? "Abrindo…" : `Acessar ${app.name}`}
+                    <strong>{label}</strong>
+                    <small>{description}</small>
                   </span>
-                  <ArrowUpRight size={20} />
-                </span>
-              </div>
-            </button>
-          ))}
-        </div>
+                  <ArrowUpRight size={16} aria-hidden="true" />
+                </a>
+              ))}
+            </nav>
+          </div>
+        </section>
       </main>
       <AppFooter product="ZenTracking" />
       {password && (

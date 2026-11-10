@@ -163,7 +163,7 @@ export default function App() {
     openOrder: (id) => setOrder({ id: id || null }),
   };
   return (
-    <div className="inventory-app">
+    <div className="inventory-app zen-shell zen-shell-control">
       <a className="skip-link" href="#zencontrol-content">
         Ir para o conteúdo
       </a>

@@ -145,12 +145,12 @@ export default function Dashboard({
                     color: "var(--ep-text)",
                   }}
                   labelStyle={{ color: "var(--ep-text)" }}
-                  cursor={{ fill: "var(--ep-soft)" }}
+                  cursor={{ fill: "var(--ep-primary-soft)" }}
                 />
                 <Bar
                   dataKey="total"
                   name="Ordens"
-                  fill="#2563eb"
+                  fill="var(--zen-control)"
                   radius={[5, 5, 0, 0]}
                   maxBarSize={35}
                 />
