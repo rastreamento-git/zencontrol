@@ -6,6 +6,7 @@ const assert = require("node:assert/strict");
 const { randomBytes } = require("node:crypto");
 const { spawn } = require("node:child_process");
 const { chromium } = require("playwright");
+const sharp = require("sharp");
 
 const root = path.resolve(__dirname, "..");
 const instance = "portal-" + randomBytes(4).toString("hex");
@@ -196,6 +197,11 @@ async function main() {
   }
   if (process.env.ZEN_CHROMIUM_PATH)
     launch.executablePath = process.env.ZEN_CHROMIUM_PATH;
+  launch.args = [
+    ...(launch.args || []),
+    "--use-fake-device-for-media-stream",
+    "--use-fake-ui-for-media-stream",
+  ];
   browser = await chromium.launch(launch);
   const staff = await pageFor("operacao", { width: 1440, height: 960 });
   await passwordLogin(staff, "admin", data.admin_password);
@@ -551,6 +557,88 @@ async function main() {
   summary.liveChatBothDirections = "passed";
   summary.sharedInboxAndPrivateStaffRoom = "passed";
   summary.presenceAndPhoto = "passed";
+
+  await mobile.setViewportSize({ width: 320, height: 680 });
+  const fixture = await sharp({
+    create: { width: 96, height: 72, channels: 3, background: "#18559e" },
+  })
+    .png()
+    .toBuffer();
+  const picker = mobile.waitForEvent("filechooser");
+  await fieldChat.getByRole("button", { name: "Anexar fotos" }).click();
+  await (
+    await picker
+  ).setFiles([
+    { name: "etiqueta.png", mimeType: "image/png", buffer: fixture },
+    { name: "remover.png", mimeType: "image/png", buffer: fixture },
+  ]);
+  await fieldChat.getByRole("button", { name: "Remover remover.png" }).click();
+  await fieldChat.getByRole("button", { name: "Abrir câmera" }).click();
+  const camera = mobile.getByRole("dialog", { name: "Câmera do chat" });
+  await camera.getByRole("button", { name: "Tirar foto" }).click();
+  await camera.waitFor({ state: "hidden" });
+  await fieldChat.getByRole("img", { name: "Foto da câmera.jpg" }).waitFor();
+  await fieldChat
+    .getByRole("button", { name: "Abrir chat em tela cheia" })
+    .click();
+  await fieldChat.getByRole("img", { name: "etiqueta.png" }).waitFor();
+  await noOverflow(mobile);
+  await mobile.screenshot({
+    path: path.join(directory, "chat-fotos-pre-envio.png"),
+  });
+
+  let posted;
+  const uploadRoute = /\/api\/chat\/threads\/\d+\/messages$/;
+  await mobile.route(uploadRoute, async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    const body = route.request().postDataJSON();
+    if (posted) {
+      posted.retried = body.request_id;
+      return route.continue();
+    }
+    const saved = await route.fetch();
+    posted = { first: body.request_id, status: saved.status() };
+    await route.abort("failed");
+  });
+  const caption = "Fotos fictícias da etiqueta e da câmera.";
+  await fieldChat.getByLabel("Mensagem", { exact: true }).fill(caption);
+  await fieldChat.getByRole("button", { name: "Enviar", exact: true }).click();
+  await fieldChat
+    .getByRole("alert")
+    .getByText(/Não foi possível acessar a API/)
+    .waitFor();
+  assert.equal(posted.status, 201);
+  await fieldChat.getByRole("img", { name: "etiqueta.png" }).waitFor();
+  assert.equal(
+    await fieldChat.getByLabel("Mensagem", { exact: true }).inputValue(),
+    caption,
+  );
+  await fieldChat.getByRole("button", { name: "Enviar", exact: true }).click();
+  await fieldChat
+    .getByRole("img", { name: "etiqueta.png" })
+    .waitFor({ state: "hidden" });
+  assert.equal(posted.retried, posted.first);
+  await mobile.unroute(uploadRoute);
+
+  await staffChat
+    .getByRole("button", { name: "Técnicos", exact: true })
+    .click();
+  await staffChat.getByRole("button", { name: new RegExp(tech.name) }).click();
+  const photoMessage = staffChat
+    .locator(".zen-chat-messages li")
+    .filter({ hasText: caption });
+  await photoMessage.getByRole("button", { name: /Ampliar foto 1/ }).click();
+  const expanded = staff.getByRole("dialog", { name: /Foto 1 de/ });
+  await expanded.getByRole("img").waitFor();
+  await staff.keyboard.press("Escape");
+  await expanded.waitFor({ state: "hidden" });
+  await staffChat.waitFor();
+  assert.equal(await photoMessage.locator(".zen-chat-photo").count(), 2);
+  await staff.screenshot({
+    path: path.join(directory, "chat-fotos-recebidas.png"),
+  });
+  summary.cameraAndAttachmentsWithRetry = "passed";
+
   const recoveryPage = await pageFor("recovery", { width: 390, height: 844 });
   await recoveryPage.goto(hub);
   await recoveryPage

@@ -29,11 +29,13 @@ No ZenField, o técnico usa **Chat com a central**. Cada mensagem chega à caixa
 
 Em **Meu status**, selecione **Online**, **Ausente** ou **Ocupado**. Em Online, a presença passa para Ausente quando a aba fica oculta ou após cinco minutos sem interação. A lista mostra Offline cerca de dois minutos após o último sinal do aplicativo. Os avisos ficam no sino até a leitura, inclusive para quem entrar depois.
 
-O backup operacional inclui as mensagens e preserva o nome e o papel de quem escreveu; na restauração, os identificadores das contas antigas são desvinculados. O backup operacional continua sem incluir credenciais, vínculos Google ou dados privados do perfil.
+Use **Anexar** para escolher fotos JPEG, PNG ou WebP e **Câmera** para fotografar. Cada mensagem aceita até quatro fotos com legenda opcional. Confira a prévia e remova as fotos que quiser antes de enviar. Clique em uma foto no histórico para ampliar.
+
+As fotos usam o armazenamento privado do ZenControl. O servidor verifica a permissão da conversa antes de devolver cada imagem. O backup operacional inclui mensagens e fotos. Ao restaurar, o histórico conserva o nome e o papel de quem escreveu e desvincula os identificadores das contas antigas. Credenciais, vínculos com Google e dados privados do perfil pertencem à base de contas de destino.
 
 ## Aplicar e validar
 
-Aplique as migrações pendentes, incluindo `013_caixa_operacao.sql` e `014_primeiro_acesso_recuperacao.sql`, no banco de homologação do ZenControl. Publique primeiro a API da branch de homologação. No endereço configurado em `VITE_API_URL`, abra `/healthz` na raiz do serviço e confirme `"chat_directory_version": 1`. Esse campo identifica uma API que oferece o diretório completo. Depois publique os frontends do ZenControl e do ZenField apontando para essa API. Valide o primeiro acesso, a recuperação e os avisos no sino com contas de técnico, operador e administrador.
+Aplique as migrações pendentes até `015_fotos_chat.sql` e publique primeiro a API do ZenControl. No endereço configurado em `VITE_API_URL`, abra `/healthz` na raiz do serviço e confirme `"chat_directory_version": 1` e `"chat_photo_version": 1`. Em seguida, publique os frontends do ZenControl e do ZenField apontando para essa API. Valide os avisos do sino e o envio de fotos com contas de técnico, operador e administrador.
 
 Os testes de API usam dados fictícios e simulam a confirmação de identidade do Google para verificar vínculo, reaproveitamento de credencial, edição de perfil, privacidade das conversas e entrega pelo canal em tempo real:
 

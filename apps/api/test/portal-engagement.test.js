@@ -1,27 +1,43 @@
 const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
 const { once } = require("node:events");
-const { randomUUID } = require("node:crypto");
+const { randomBytes, randomUUID } = require("node:crypto");
+const fs = require("node:fs/promises");
+const os = require("node:os");
+const path = require("node:path");
 const { OAuth2Client } = require("google-auth-library");
 const sharp = require("sharp");
 const { testDatabase } = require("./helpers/database.cjs");
 const { migrate } = require("../scripts/migrate");
 const { createApp } = require("../src/app");
 const { hashPassword } = require("../src/auth");
+const { photoMessageType } = require("../src/chat-photos");
+const { createMediaStore } = require("../src/media-store");
+const { prepareBackup, restoreBackup } = require("../src/backup");
 
 const password = "Somente1!Teste",
   central = "http://127.0.0.1:4320",
   field = "http://127.0.0.1:4319",
   clientId = "123456-test.apps.googleusercontent.com";
 let db, server, base, admin, operator, technician, another, tid, otherTid;
+let dataDir, config;
 
-async function call(path, { method = "GET", token, body, origin } = {}) {
+async function call(
+  path,
+  {
+    method = "GET",
+    token,
+    body,
+    origin,
+    contentType = "application/json",
+  } = {},
+) {
   const res = await fetch(base + path, {
     method,
     headers: {
       ...(token ? { Authorization: "Bearer " + token } : {}),
       ...(origin ? { Origin: origin } : {}),
-      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      ...(body === undefined ? {} : { "Content-Type": contentType }),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -41,6 +57,7 @@ async function signIn(login) {
 before(async () => {
   db = await testDatabase();
   await migrate(db.pool);
+  dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "zen-chat-media-"));
   const app = createApp(db.pool, {
     APP_PASSWORD: password,
     SESSION_SECRET: "profile-chat-test-session-secret-123456",
@@ -50,7 +67,9 @@ before(async () => {
     TECHNICIAN_PORTAL_URL: field,
     SSO_STOCK_URL: "http://127.0.0.1:4321",
     GOOGLE_CLIENT_ID: clientId,
+    ZEN_DATA_DIR: dataDir,
   });
+  config = app.locals.config;
   await app.locals.ready();
   const hash = await hashPassword(password);
   await db.pool.query(
@@ -94,6 +113,7 @@ after(async () => {
     await new Promise((resolve) => server.close(resolve));
   }
   await db?.close();
+  if (dataDir) await fs.rm(dataDir, { recursive: true, force: true });
 });
 
 test("o perfil permite edição própria sem alterar login ou papel", async () => {
@@ -387,6 +407,179 @@ test("a sala interna é restrita e a lista mostra presença por conta", async ()
     roster.data.items.find((x) => x.id === pending.rows[0].id).status,
     "offline",
   );
+});
+
+test("fotos privadas aceitam legenda opcional, repetição de envio e restauração", async (t) => {
+  const png = await sharp(randomBytes(520 * 480 * 3), {
+    raw: { width: 520, height: 480, channels: 3 },
+  })
+    .png()
+    .toBuffer();
+  const jpeg = await sharp(png).resize(20).jpeg().toBuffer();
+  const image = (bytes, format) =>
+    "data:image/" + format + ";base64," + bytes.toString("base64");
+  const route = "/api/chat/threads/" + tid + "/messages";
+  const payload = {
+    body: "",
+    request_id: randomUUID(),
+    photos: [image(png, "png"), image(jpeg, "jpeg")],
+  };
+  assert.ok(JSON.stringify(payload).length > 512 * 1024);
+  const send = (body, token = technician.token) =>
+    call(route, {
+      method: "POST",
+      token,
+      body,
+      contentType: photoMessageType,
+    });
+  assert.equal((await call("/healthz")).data.chat_photo_version, 1);
+  assert.equal(
+    (await call("/api/chat/threads", { token: technician.token })).data
+      .photo_version,
+    1,
+  );
+  const sends = await Promise.all([send(payload), send(payload)]);
+  assert.deepEqual(sends.map((r) => r.status).sort(), [200, 201]);
+  const [message, repeat] = sends.map((r) => r.data.message);
+  assert.equal(message.id, repeat.id);
+  assert.equal(message.photo_count, 2);
+  assert.equal(message.body, "");
+  assert.equal(message.photos, undefined);
+  assert.equal(
+    (await send({ ...payload, photos: [payload.photos[0]] })).status,
+    409,
+  );
+  assert.equal(
+    (
+      await send({
+        request_id: randomUUID(),
+        photos: [image(Buffer.from("<svg/>"), "jpeg")],
+      })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await send({
+        request_id: randomUUID(),
+        photos: [image(Buffer.alloc(1024 * 1024 + 1), "jpeg")],
+      })
+    ).status,
+    413,
+  );
+  assert.equal(
+    (
+      await send({
+        request_id: randomUUID(),
+        photos: Array(5).fill(payload.photos[1]),
+      })
+    ).status,
+    400,
+  );
+
+  const photoRoute = route + "/" + message.id + "/photos/1";
+  assert.equal((await call(photoRoute)).status, 401);
+  assert.equal((await call(photoRoute, { token: another.token })).status, 404);
+  assert.equal(
+    (
+      await call(
+        photoRoute.replace(
+          "/threads/" + tid + "/",
+          "/threads/" + otherTid + "/",
+        ),
+        { token: operator.token },
+      )
+    ).status,
+    404,
+  );
+  const received = await fetch(base + photoRoute, {
+    headers: { Authorization: "Bearer " + operator.token },
+  });
+  assert.equal(received.status, 200);
+  assert.match(received.headers.get("content-type"), /^image\/jpeg/);
+  assert.match(received.headers.get("cache-control"), /no-store/);
+  assert.equal(
+    (await sharp(Buffer.from(await received.arrayBuffer())).metadata()).format,
+    "jpeg",
+  );
+  const listing = await call("/api/chat/threads", { token: operator.token });
+  assert.equal(
+    listing.data.items.find((item) => item.id === tid).preview,
+    "Foto",
+  );
+
+  const team = await call("/api/chat/threads/equipe/messages", {
+    method: "POST",
+    token: operator.token,
+    contentType: photoMessageType,
+    body: {
+      body: "Foto interna",
+      request_id: randomUUID(),
+      photos: [payload.photos[1]],
+    },
+  });
+  assert.equal(team.status, 201);
+  const internalPhoto =
+    "/api/chat/threads/equipe/messages/" + team.data.message.id + "/photos/1";
+  assert.equal(
+    (await call(internalPhoto, { token: technician.token })).status,
+    404,
+  );
+
+  const store = createMediaStore(config);
+  const files = path.join(dataDir, "media");
+  const committedFiles = (await fs.readdir(files)).sort();
+  assert.equal(committedFiles.length, 3);
+  const put = store.put.bind(store);
+  let uploads = 0;
+  const failingUpload = t.mock.method(store, "put", async (...args) => {
+    if (++uploads === 2) throw Error("falha de teste");
+    return put(...args);
+  });
+  const failedId = randomUUID();
+  assert.equal((await send({ ...payload, request_id: failedId })).status, 500);
+  failingUpload.mock.restore();
+  assert.deepEqual((await fs.readdir(files)).sort(), committedFiles);
+  assert.equal(
+    (
+      await db.pool.query(
+        "SELECT 1 FROM zc_chat_messages WHERE request_id=$1",
+        [failedId],
+      )
+    ).rowCount,
+    0,
+  );
+
+  const backup = await prepareBackup(db.pool, config);
+  const target = await testDatabase();
+  const restoreRoot = await fs.mkdtemp(
+    path.join(os.tmpdir(), "zen-chat-restore-"),
+  );
+  try {
+    assert.equal(backup.files.length, 3);
+    await fs.writeFile(path.join(dataDir, "database.json"), backup.database);
+    await fs.writeFile(path.join(dataDir, "manifest.json"), backup.manifest);
+    await migrate(target.pool);
+    await restoreBackup(
+      target.pool,
+      { ...config, DATA_DIR: restoreRoot },
+      dataDir,
+      true,
+    );
+    assert.deepEqual(
+      (await fs.readdir(path.join(restoreRoot, "media"))).sort(),
+      committedFiles,
+    );
+    const restored = await target.pool.query(
+      "SELECT photos FROM zc_chat_messages WHERE id=$1",
+      [message.id],
+    );
+    assert.equal(restored.rows[0].photos.length, 2);
+  } finally {
+    await backup.cleanup();
+    await target.close();
+    await fs.rm(restoreRoot, { recursive: true, force: true });
+  }
 });
 
 test("Google exige vínculo voluntário, nonce único, origem e a sessão do próprio usuário", async (t) => {

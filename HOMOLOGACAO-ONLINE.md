@@ -51,7 +51,7 @@ Criar projetos exclusivos `zencontrol-homolog` e `zenfield-homolog`, conectados 
 
 A API temporária continua no Render. Depois de obter os endereços estáveis dos dois novos projetos, definir `ONLINE_CENTRAL_URL` (origem HTTPS da central Vercel) e atualizar `ONLINE_FIELD_URL` (origem HTTPS do ZenField Vercel) no serviço `zencontrol-homolog`. Fazer um único deploy manual da API. `ONLINE_CENTRAL_URL` é opcional e, quando ausente, preserva a origem anterior no Render. O CORS aceita apenas as origens exatas configuradas, sem curinga para previews.
 
-Ao atualizar o chat, publique primeiro `zencontrol-homolog` no Render e confira `"chat_directory_version": 1` em [`/healthz`](https://zencontrol-homolog.onrender.com/healthz). O inicializador do ambiente temporário aplica as migrações. Os dois projetos Vercel devem apontar para a mesma API em `VITE_API_URL`.
+Ao atualizar o chat, publique primeiro `zencontrol-homolog` no Render e confira `"chat_directory_version": 1` e `"chat_photo_version": 1` em [`/healthz`](https://zencontrol-homolog.onrender.com/healthz). O inicializador do ambiente temporário aplica as migrações. Os dois projetos Vercel devem apontar para a mesma API em `VITE_API_URL`.
 
 No Vercel, `Production` é o destino de publicação do projeto **exclusivo de homologação**; usar essa opção somente nesses dois projetos novos, com a branch de teste. Não promover a branch de teste em projetos produtivos. Os dados continuam temporários. Nunca copiar segredos do backend para variáveis `VITE_*`.
 
