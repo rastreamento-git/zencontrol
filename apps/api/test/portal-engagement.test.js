@@ -345,7 +345,10 @@ test("a sala interna é restrita e a lista mostra presença por conta", async ()
   await db.pool.query(
     "INSERT INTO zc_technicians(name) VALUES('Empresa fictícia sem conta')",
   );
-  const company = (await list()).data.items.find(
+  const directory = (await list()).data;
+  assert.equal(directory.directory_version, 1);
+  assert.equal((await call("/healthz")).data.chat_directory_version, 1);
+  const company = directory.items.find(
     (x) => x.name === "Empresa fictícia sem conta",
   );
   assert.equal(company.status, "offline");
@@ -365,6 +368,12 @@ test("a sala interna é restrita e a lista mostra presença por conta", async ()
   );
   assert.equal(await state(), "offline");
   assert.equal((await mark(operator.token, "online")).status, 204);
+  const pending = await db.pool.query(
+    `INSERT INTO usuarios(login,nome,senha_hash,papel,activation_required)
+     SELECT 'operador.pendente','Operador com acesso pendente',senha_hash,'operador',true
+     FROM usuarios WHERE id=$1 RETURNING id`,
+    [operator.user.id],
+  );
   const roster = await call("/api/chat/team", { token: admin.token });
   assert.equal(
     roster.data.items.find((x) => x.id === operator.user.id).status,
@@ -373,6 +382,10 @@ test("a sala interna é restrita e a lista mostra presença por conta", async ()
   assert.equal(
     roster.data.items.find((x) => x.id === admin.user.id).role,
     "admin",
+  );
+  assert.equal(
+    roster.data.items.find((x) => x.id === pending.rows[0].id).status,
+    "offline",
   );
 });
 

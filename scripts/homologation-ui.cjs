@@ -126,6 +126,9 @@ async function main() {
   await page
     .getByText("Reposição fictícia para homologação", { exact: true })
     .waitFor();
+  await page
+    .getByRole("button", { name: "Meu financeiro", exact: true })
+    .click();
   await page.getByRole("button", { name: "Meus valores", exact: true }).click();
   await page
     .getByRole("heading", { name: "Tarifas vigentes", exact: true })

@@ -21,11 +21,11 @@ Em **Esqueci minha senha**, o link segue para o e-mail da conta, vale por 30 min
 
 ## Conversas
 
-No ZenControl, abra **Conversas → Caixa da operação** para ver os técnicos cadastrados e sua presença. Técnicos ativos que ainda precisam liberar o acesso aparecem como Offline, com a indicação **Sem acesso ao chat**. No ZenField, o técnico usa **Chat com a central**. Cada mensagem entra na conversa desse técnico na caixa compartilhada e gera um aviso no sino de operadores e administradores, com leitura por conta. O aviso abre a conversa. Na resposta, o técnico vê o nome, a função e a foto de quem respondeu. Contas sem foto aparecem com iniciais.
+No ZenControl, abra **Conversas → Técnicos** para ver os cadastros ativos, pesquisar por nome ou empresa e iniciar uma conversa. Um cadastro sem conta habilitada aparece como **Offline** com a indicação **Sem acesso ao chat**. Se a conta está habilitada e a troca de senha está pendente, a central já pode enviar mensagens para o técnico ler quando concluir o primeiro acesso.
 
-Use **Conversas → Equipe interna → Sala da operação** para conversar com os demais operadores e administradores. A lista da sala mostra os colaboradores e seu status. O histórico da sala e as conversas de cada técnico ficam separados no PostgreSQL do ZenControl.
+Em **Conversas → Equipe interna**, a sala abre junto da lista de colaboradores ativos. Recolha a lista no mini chat se precisar de mais espaço para ler a conversa. O histórico da sala e as conversas com cada técnico ficam separados no PostgreSQL do ZenControl.
 
-Use **Técnicos** na janela do chat para abrir a lista e iniciar uma mensagem mesmo com uma conversa aberta. O técnico recebe o aviso no sino do ZenField e pode abrir a conversa por ele.
+No ZenField, o técnico usa **Chat com a central**. Cada mensagem chega à caixa compartilhada de operadores e administradores. O sino avisa a equipe e abre a conversa. A resposta mostra o nome, a função e o avatar de quem escreveu. Contas sem foto aparecem com iniciais.
 
 Em **Meu status**, selecione **Online**, **Ausente** ou **Ocupado**. Em Online, a presença passa para Ausente quando a aba fica oculta ou após cinco minutos sem interação. A lista mostra Offline cerca de dois minutos após o último sinal do aplicativo. Os avisos ficam no sino até a leitura, inclusive para quem entrar depois.
 
@@ -33,7 +33,7 @@ O backup operacional inclui as mensagens e preserva o nome e o papel de quem esc
 
 ## Aplicar e validar
 
-Aplique as migrações pendentes, incluindo `014_primeiro_acesso_recuperacao.sql`, em um banco de homologação do ZenControl, separado do banco do Estoque Pro. Publique primeiro a API e depois os frontends do ZenControl e ZenField. Valide o primeiro acesso, a recuperação e os avisos no sino com contas de técnico, operador e administrador.
+Aplique as migrações pendentes, incluindo `013_caixa_operacao.sql` e `014_primeiro_acesso_recuperacao.sql`, no banco de homologação do ZenControl. Publique primeiro a API da branch de homologação. No endereço configurado em `VITE_API_URL`, abra `/healthz` na raiz do serviço e confirme `"chat_directory_version": 1`. Esse campo identifica uma API que oferece o diretório completo. Depois publique os frontends do ZenControl e do ZenField apontando para essa API. Valide o primeiro acesso, a recuperação e os avisos no sino com contas de técnico, operador e administrador.
 
 Os testes de API usam dados fictícios e simulam a confirmação de identidade do Google para verificar vínculo, reaproveitamento de credencial, edição de perfil, privacidade das conversas e entrega pelo canal em tempo real:
 

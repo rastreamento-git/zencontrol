@@ -318,22 +318,18 @@
 }
 .zen-chat-preferences {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   justify-content: flex-end;
   padding: 5px var(--zen-chat-gap);
   border-bottom: 1px solid var(--ep-line);
 }
-.zen-chat-preferences .zen-chat-directory {
-  min-height: 32px;
-  margin-right: auto;
-  padding: 4px 10px;
-  font-size: 12px;
-}
 .zen-chat-preferences label {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-left: auto;
   color: var(--ep-muted);
   font-size: 12px;
 }
@@ -374,17 +370,16 @@
 }
 .zen-chat-sections {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 4px;
-  margin-bottom: 12px;
   padding: 4px;
   border: 1px solid var(--ep-line);
   border-radius: 12px;
   background: var(--ep-canvas);
 }
 .zen-chat-sections button {
-  min-height: 38px;
-  padding: 5px;
+  min-height: 34px;
+  padding: 5px 9px;
   border: 0;
   border-radius: 8px;
   background: transparent;
@@ -395,6 +390,15 @@
 .zen-chat-sections button[aria-pressed="true"] {
   background: var(--ep-primary-soft);
   color: var(--ep-primary-ink);
+}
+.zen-chat .zen-chat-error {
+  margin: 8px var(--zen-chat-gap);
+}
+.zen-chat-error p {
+  margin: 0 0 8px;
+}
+.zen-chat .zen-chat-back {
+  display: none;
 }
 .zen-chat-thread {
   width: 100%;
@@ -422,10 +426,12 @@ button.zen-chat-thread[aria-current="true"] {
   gap: 4px;
   overflow-wrap: anywhere;
 }
-.zen-chat-roster-title {
-  margin: 14px 10px 4px;
+.zen-chat-team-members summary {
+  padding: 5px 10px;
   color: var(--ep-muted);
   font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
 }
 .zen-chat-roster {
   list-style: none;
@@ -587,12 +593,23 @@ button.zen-chat-thread[aria-current="true"] {
   .zen-chat-layout.is-staff {
     grid-template-columns: minmax(0, 1fr);
   }
-  .zen-chat-layout.is-staff.has-thread .zen-chat-threads,
+  .zen-chat-layout.is-staff.has-thread:not(.is-team) .zen-chat-threads,
   .zen-chat-layout.is-staff:not(.has-thread) .zen-chat-placeholder {
     display: none;
   }
   .zen-chat-threads {
     border-right: 0;
+  }
+  .zen-chat-layout.is-team.has-thread {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .zen-chat-layout.is-team.has-thread .zen-chat-threads {
+    max-height: min(125px, 24dvh);
+    padding: 4px 12px;
+    border-bottom: 1px solid var(--ep-line);
+  }
+  .zen-chat .zen-chat-back {
+    display: inline-flex;
   }
   .zen-chat-messages li {
     max-width: 92%;

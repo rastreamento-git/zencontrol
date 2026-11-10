@@ -224,6 +224,14 @@ async function main() {
   );
   await shared.getByRole("button", { name: "Fechar diálogo" }).click();
   summary.stockProfile = "passed";
+  const legacyDirectory = (url) => url.pathname === "/api/chat/threads";
+  const missingTeam = (url) => url.pathname === "/api/chat/team";
+  await staff.route(legacyDirectory, (route) =>
+    route.fulfill({ json: { items: [] } }),
+  );
+  await staff.route(missingTeam, (route) =>
+    route.fulfill({ status: 404, json: { error: "Rota não encontrada." } }),
+  );
   await staff
     .getByRole("navigation", { name: "Acesso rápido" })
     .getByRole("link", { name: /Conversas/ })
@@ -233,6 +241,33 @@ async function main() {
   });
   await staffChat.waitFor();
   assert.ok(await staffChat.evaluate((dialog) => dialog.matches(":modal")));
+  const updateWarning = staffChat
+    .getByRole("alert")
+    .getByText(
+      "A API do ZenControl deste ambiente precisa ser atualizada para carregar o chat.",
+    );
+  await updateWarning.waitFor();
+  assert.equal(
+    await staffChat.getByText("Em tempo real", { exact: true }).count(),
+    0,
+  );
+  assert.equal(
+    await staffChat.getByText("Nenhum técnico ativo cadastrado.").count(),
+    0,
+  );
+  await staffChat.getByRole("button", { name: "Equipe interna" }).click();
+  await updateWarning.waitFor();
+  await staff.unroute(missingTeam);
+  await staffChat.getByRole("button", { name: "Tentar novamente" }).click();
+  await staffChat
+    .getByRole("heading", { name: "Sala da operação", exact: true })
+    .waitFor();
+  await staffChat.getByText("Operação local", { exact: true }).waitFor();
+  await staffChat.getByText("Marcele", { exact: true }).waitFor();
+  await staff.unroute(legacyDirectory);
+  await staffChat
+    .getByRole("button", { name: "Técnicos", exact: true })
+    .click();
   assert.ok(
     await staffChat
       .getByRole("button", {
@@ -247,7 +282,13 @@ async function main() {
   assert.ok(!(await staffChat.evaluate((dialog) => dialog.matches(":modal"))));
   const miniBounds = await staffChat.boundingBox();
   assert.ok(miniBounds && miniBounds.x > staff.viewportSize().width / 2);
-  await staff.getByRole("button", { name: "Agenda", exact: true }).click();
+  await staff
+    .getByRole("button", { name: "Ordens de serviço", exact: true })
+    .click();
+  await staff
+    .getByRole("navigation", { name: "Visualização dos serviços" })
+    .getByRole("button", { name: "Agenda", exact: true })
+    .click();
   await staff
     .getByRole("heading", { name: "Agenda", exact: true })
     .first()
@@ -266,7 +307,7 @@ async function main() {
   await staffChat.getByText("Em tempo real", { exact: true }).waitFor();
   await staffChat.getByRole("button", { name: "Voltar ao mini chat" }).click();
   await staffChat
-    .getByRole("button", { name: "Técnicos", exact: true })
+    .getByRole("button", { name: "Voltar aos técnicos", exact: true })
     .click();
   await staffChat.getByLabel("Buscar técnico nas conversas").fill(tech.name);
   await staffChat.getByRole("button", { name: new RegExp(tech.name) }).click();
@@ -423,11 +464,17 @@ async function main() {
   await operatorChat
     .getByRole("button", { name: "Equipe interna", exact: true })
     .click();
-  await operatorChat.getByRole("heading", { name: "Colaboradores" }).waitFor();
+  await operatorChat.getByText(/^Colaboradores \(/).waitFor();
   await operatorChat.getByText("Operação local", { exact: true }).waitFor();
   await operatorChat
-    .getByRole("button", { name: "Sala da operação", exact: true })
+    .getByRole("heading", { name: "Sala da operação", exact: true })
+    .waitFor();
+  await operatorChat
+    .getByRole("button", { name: "Voltar ao mini chat" })
     .click();
+  assert.ok(
+    await operatorChat.getByText("Operação local", { exact: true }).isVisible(),
+  );
   await operatorChat
     .getByLabel("Mensagem", { exact: true })
     .fill("Mensagem interna fictícia");
@@ -437,9 +484,6 @@ async function main() {
   await staff.getByRole("button", { name: "Conversas", exact: true }).click();
   await staffChat
     .getByRole("button", { name: "Equipe interna", exact: true })
-    .click();
-  await staffChat
-    .getByRole("button", { name: "Sala da operação", exact: true })
     .click();
   await staffChat
     .getByText("Mensagem interna fictícia", { exact: true })

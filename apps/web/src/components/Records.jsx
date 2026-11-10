@@ -35,7 +35,14 @@ import {
   money,
   useLoad,
 } from "./common";
-export function Orders({ agenda, meta, revision, openOrder, globalQuery }) {
+export function Orders({
+  agenda,
+  meta,
+  revision,
+  openOrder,
+  globalQuery,
+  onChangeView,
+}) {
   const [q, setQ] = useState(globalQuery || ""),
     [term, setTerm] = useState(q),
     [page, setPage] = useState(1),
@@ -81,6 +88,24 @@ export function Orders({ agenda, meta, revision, openOrder, globalQuery }) {
         </button>
       </Intro>
       <Panel>
+        <nav className="zc-filters" aria-label="Visualização dos serviços">
+          <button
+            type="button"
+            className={agenda ? "secondary-button" : "primary-button"}
+            aria-pressed={!agenda}
+            onClick={() => onChangeView("orders")}
+          >
+            Lista de OS
+          </button>
+          <button
+            type="button"
+            className={agenda ? "primary-button" : "secondary-button"}
+            aria-pressed={agenda}
+            onClick={() => onChangeView("agenda")}
+          >
+            Agenda
+          </button>
+        </nav>
         {agenda ? (
           <div className="zc-filters">
             <label>

@@ -5,6 +5,8 @@ const { isStaff } = require("./field-access");
 const { notify } = require("./notifications");
 
 const pageSize = 50;
+const directoryLimit = 200;
+const directoryVersion = 1;
 const uuidPattern =
   /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const messageColumns =
@@ -98,7 +100,7 @@ function configureChat(app, pool) {
     const { rows } = await pool.query(
       `SELECT u.id,u.nome name,u.papel role,p.avatar_version,${presence("u")} status
        FROM usuarios u LEFT JOIN zc_user_profiles p ON p.user_id=u.id
-       WHERE u.ativo=true AND u.activation_required=false AND u.papel IN ('admin','operador')
+       WHERE u.ativo=true AND u.papel IN ('admin','operador')
        ORDER BY u.nome,u.id`,
     );
     res.json({ items: rows });
@@ -145,10 +147,14 @@ function configureChat(app, pool) {
          SELECT id,body,created_at FROM zc_chat_messages WHERE technician_id=t.id ORDER BY id DESC LIMIT 1
        ) recent ON true
        WHERE t.active=true AND ($1='' OR strpos(lower(t.name),lower($1))>0)
-       ORDER BY recent.id DESC NULLS LAST,t.name,t.id LIMIT 200`,
-      [search],
+       ORDER BY recent.id DESC NULLS LAST,t.name,t.id LIMIT $2`,
+      [search, directoryLimit + 1],
     );
-    res.json({ items: rows });
+    res.json({
+      items: rows.slice(0, directoryLimit),
+      has_more: rows.length > directoryLimit,
+      directory_version: directoryVersion,
+    });
   });
   app.get("/api/chat/threads/:id/messages", async (req, res) => {
     const { id } = await thread(req);
@@ -283,4 +289,4 @@ function configureChat(app, pool) {
   });
 }
 
-module.exports = { configureChat };
+module.exports = { configureChat, directoryVersion };

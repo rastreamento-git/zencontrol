@@ -333,15 +333,24 @@ async function main() {
         .getByRole("group", { name: "Ações rápidas do estoque" })
         .getByRole("button", { name: /Rastrear IMEI ou serial/ })
         .click();
-      const search = page.getByLabel(
+      const globalSearch = page.getByLabel(
         "Pesquisar equipamento ou digitar atalho",
         { exact: true },
       );
+      const traceSearch = page.getByLabel(
+        "Buscar equipamentos na rastreabilidade",
+        { exact: true },
+      );
+      await traceSearch.waitFor();
+      assert.equal(await globalSearch.count(), 0);
       for (let attempt = 0; attempt < 2; attempt++) {
         await page
           .getByLabel("Status", { exact: true })
           .selectOption("INSTALADO");
-        await search.fill("123456789012345");
+        await page
+          .getByRole("button", { name: "Painel de controle", exact: true })
+          .click();
+        await globalSearch.fill("123456789012345");
         await page
           .getByRole("button", {
             name: "Executar pesquisa ou atalho",
@@ -349,11 +358,14 @@ async function main() {
           })
           .click();
         await until(
-          async () =>
-            (await page.getByLabel("Status", { exact: true }).inputValue()) ===
-            "TODOS",
-          "A busca global preservou o filtro de status.",
+          async () => (await traceSearch.inputValue()) === "123456789012345",
+          "A pesquisa global deve abrir a rastreabilidade com o IMEI.",
         );
+        assert.equal(
+          await page.getByLabel("Status", { exact: true }).inputValue(),
+          "TODOS",
+        );
+        assert.equal(await globalSearch.count(), 0);
       }
       await page.context().close();
     },
