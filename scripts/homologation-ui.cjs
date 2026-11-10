@@ -86,15 +86,17 @@ async function main() {
   });
   await page.goto("http://127.0.0.1:4320");
   await page.getByLabel("Usuário", { exact: true }).fill(access.login);
-  await page.getByLabel("Senha de acesso").fill("zen123");
-  await page.getByLabel("Primeiro acesso ou redefinição").check();
+  await page.getByLabel("Senha de acesso").fill(access.temporary_password);
+  await page.getByRole("button", { name: "Entrar", exact: true }).click();
+  await page.getByLabel("Nova senha", { exact: true }).fill(password);
   await page
-    .getByLabel("Código individual fornecido pela central")
-    .fill(access.code);
-  await page.getByLabel("Nova senha (mínimo 8 caracteres)").fill(password);
-  await page.getByRole("button", { name: "Ativar conta", exact: true }).click();
+    .getByLabel("Confirme a nova senha", { exact: true })
+    .fill(password);
   await page
-    .getByText("Conta ativada. Entre com sua nova senha.", { exact: true })
+    .getByRole("button", { name: "Salvar nova senha", exact: true })
+    .click();
+  await page
+    .getByText("Senha definida. Entre com sua nova senha.", { exact: true })
     .waitFor();
   await page.getByLabel("Senha de acesso").fill(password);
   await page.getByRole("button", { name: "Entrar", exact: true }).click();

@@ -307,10 +307,13 @@ export default function Chat({ mode, onModeChange, targetThread, onNotice }) {
     [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
   const [status, setStatus] = useChatPresence(user.id);
-  const live = useChatStream((reason) => {
-    if (open) setRevision((n) => n + 1);
-    if (staff && reason !== "change") onNotice?.(reason === "notice");
-  }, staff || open);
+  const live = useChatStream(
+    (reason) => {
+      if (open) setRevision((n) => n + 1);
+      if (reason !== "change") onNotice?.(reason === "notice");
+    },
+    Boolean(user.id) && (Boolean(onNotice) || open),
+  );
   const activeThread =
     items?.find((item) => item.id === selected?.id) || selected;
   function showSection(next) {
@@ -435,6 +438,20 @@ export default function Chat({ mode, onModeChange, targetThread, onNotice }) {
             </div>
           </header>
           <div className="zen-chat-preferences">
+            {staff && (
+              <button
+                type="button"
+                className="secondary-button zen-chat-directory"
+                onClick={() => {
+                  setSection("inbox");
+                  setSelected(null);
+                  setQuery("");
+                  setError("");
+                }}
+              >
+                <Users size={16} aria-hidden="true" /> Técnicos
+              </button>
+            )}
             <label>
               Meu status
               <select
@@ -554,7 +571,10 @@ export default function Chat({ mode, onModeChange, targetThread, onNotice }) {
                           <small>
                             {t.user_id === null
                               ? "Sem acesso ao chat"
-                              : t.preview || "Sem mensagens"}
+                              : t.preview ||
+                                (t.activation_required
+                                  ? "Recebe ao primeiro acesso"
+                                  : "Iniciar conversa")}
                           </small>
                         </span>
                       </button>

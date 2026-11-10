@@ -12,6 +12,10 @@ const {
   googleOrigin,
 } = require("./google-access");
 const { configureProfile } = require("./profile-routes");
+const {
+  configurePasswordRecovery,
+  recoveryEmail,
+} = require("./password-recovery");
 const { configureChat } = require("./chat-routes");
 const { transaction } = require("./database");
 const { fail, HttpError, integer } = require("./errors");
@@ -117,6 +121,7 @@ function createApp(pool, env = process.env) {
     }
     next();
   });
+  configurePasswordRecovery(app, pool, cfg);
   const auth = configureAuth(app, cfg, pool, configureGoogleAccess);
   app.locals.ready = async () => {
     await createMediaStore(cfg).ready();
@@ -476,6 +481,9 @@ function createApp(pool, env = process.env) {
           db,
           row,
           actor(req),
+          req.body.recovery_email === undefined
+            ? null
+            : recoveryEmail(req.body.recovery_email),
         );
         await require("./finance-engine").initialRate(db, row, actor(req));
       }
@@ -565,7 +573,14 @@ function createApp(pool, env = process.env) {
           pool,
           "SELECT u.*,a.technician_id FROM usuarios u LEFT JOIN zc_technician_accounts a ON a.user_id=u.id ORDER BY u.nome,u.id",
         )
-      ).map((u) => ({ ...publicUser(u), technician_id: u.technician_id })),
+      ).map((u) => ({
+        ...publicUser(u),
+        technician_id: u.technician_id,
+        activation_required: u.activation_required,
+        ...(req.user.papel === "admin" || u.papel === "tecnico"
+          ? { recovery_email: u.recovery_email }
+          : {}),
+      })),
     }),
   );
   const saveUser = async (req, res) => {
@@ -578,8 +593,12 @@ function createApp(pool, env = process.env) {
     const active =
       body.ativo === undefined ? true : d.boolean(body.ativo, "Ativo");
     const hash = body.password ? await hashPassword(body.password) : null;
+    const email =
+      body.recovery_email === undefined
+        ? undefined
+        : recoveryEmail(body.recovery_email);
     const user = await transaction(pool, async (db) => {
-      let row;
+      let row, originalRole;
       if (req.params.id) {
         const old = await d.one(
           db,
@@ -587,6 +606,7 @@ function createApp(pool, env = process.env) {
           [req.params.id],
         );
         if (!old) fail(404, "Usuário não encontrado.");
+        originalRole = old.papel;
         if (
           old.id === req.user.id &&
           (!active || (old.papel === "admin" && role !== "admin"))
@@ -637,6 +657,18 @@ function createApp(pool, env = process.env) {
         await db.query("DELETE FROM zc_technician_accounts WHERE user_id=$1", [
           row.id,
         ]);
+      if (email !== undefined && email !== row.recovery_email) {
+        if (
+          req.user.papel !== "admin" &&
+          (role !== "tecnico" || (originalRole && originalRole !== "tecnico"))
+        )
+          fail(403, "A administração deve alterar o e-mail desta conta.");
+        await db.query("UPDATE usuarios SET recovery_email=$2 WHERE id=$1", [
+          row.id,
+          email,
+        ]);
+        await d.audit(db, actor(req), "recovery_email_updated", "user", row.id);
+      }
       await d.audit(db, actor(req), "saved", "user", row.id, {
         papel: role,
         ativo: active,

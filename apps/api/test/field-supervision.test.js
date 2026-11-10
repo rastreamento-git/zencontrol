@@ -117,8 +117,7 @@ before(async () => {
   });
   await req("/auth/activate", "POST", {
     login: a.access.login,
-    password: "zen123",
-    code: a.access.code,
+    password: a.access.temporary_password,
     new_password: password,
   });
   tech = (

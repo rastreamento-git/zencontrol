@@ -76,8 +76,7 @@ before(async () => {
   tid = t.id;
   await req("/auth/activate", "POST", {
     login: t.access.login,
-    password: "zen123",
-    code: t.access.code,
+    password: t.access.temporary_password,
     new_password: password,
   });
   tech = (

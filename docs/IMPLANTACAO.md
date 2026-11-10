@@ -15,6 +15,7 @@ Crie um banco PostgreSQL dedicado ao ZenControl, com usuário próprio e credenc
 | `DATABASE_CA`                          | CA do provedor, quando necessária                                                   |
 | `DATABASE_POOL_MAX`                    | Máximo de conexões do processo; padrão `3`, adequado ao Aiven Free compartilhado    |
 | `APP_ADMIN_USER`, `APP_PASSWORD`       | Inicialização da primeira conta administrativa                                      |
+| `RESEND_API_KEY`, `PASSWORD_RESET_FROM` | Chave de envio e remetente verificado para recuperação de senha                     |
 | `SESSION_SECRET`, `ZEN_WEBHOOK_SECRET` | Segredos individuais, pelo menos 32 caracteres                                      |
 | `ZEN_DATA_DIR`                         | Diretório de trabalho; precisa ser persistente somente quando `MEDIA_STORAGE=local` |
 | `MEDIA_STORAGE`                        | `local` para disco persistente ou `supabase` para bucket privado                    |

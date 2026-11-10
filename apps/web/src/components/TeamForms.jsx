@@ -1,5 +1,6 @@
 import { useState } from "react";
 import Modal from "@zen/ui/components/Modal";
+import { useSession } from "@zen/ui/lib/session";
 import {
   passwordInputProps,
   passwordRequirements,
@@ -26,6 +27,9 @@ export function AccountForm({
   onSaved,
   onClose,
 }) {
+  const requester = useSession();
+  const editRecovery =
+    requester.papel === "admin" || account?.papel === "tecnico";
   const otherLinks = new Set(
     accounts
       .filter((user) => user.id !== account?.id && user.papel === "tecnico")
@@ -43,7 +47,11 @@ export function AccountForm({
             ? "Novo administrador"
             : "Novo operador"
       }
-      description={passwordRequirements}
+      description={
+        account?.papel === "tecnico"
+          ? "Use o e-mail de recuperação para redefinir a senha. A senha temporária é gerada em Acesso ao ZenField."
+          : passwordRequirements
+      }
       initial={{ ativo: true, papel: role, ...account }}
       fields={({ papel }) => [
         { name: "nome", label: "Nome de exibição", required: true },
@@ -70,19 +78,43 @@ export function AccountForm({
               },
             ]
           : []),
-        {
-          name: "password",
-          ...passwordInputProps,
-          title: passwordRequirements,
-          label: account ? "Nova senha (opcional)" : "Senha inicial",
-          type: "password",
-          required: !account,
-        },
+        ...(editRecovery
+          ? [
+              {
+                name: "recovery_email",
+                label: "E-mail de recuperação",
+                type: "email",
+                autoComplete: "email",
+                full: true,
+                maxLength: 254,
+              },
+            ]
+          : []),
+        ...(account?.papel !== "tecnico"
+          ? [
+              {
+                name: "password",
+                ...passwordInputProps,
+                title: passwordRequirements,
+                label: account ? "Nova senha (opcional)" : "Senha inicial",
+                type: "password",
+                required: !account,
+              },
+            ]
+          : []),
         { name: "ativo", label: "Acesso habilitado", type: "checkbox" },
       ]}
       onClose={onClose}
       onSave={async (values) => {
-        const { nome, login, papel, ativo, technician_id, password } = values;
+        const {
+          nome,
+          login,
+          papel,
+          ativo,
+          technician_id,
+          password,
+          recovery_email,
+        } = values;
         const payload = {
           nome,
           login,
@@ -90,6 +122,7 @@ export function AccountForm({
           ativo,
           ...(papel === "tecnico" ? { technician_id } : {}),
           ...(password ? { password } : {}),
+          ...(editRecovery ? { recovery_email: recovery_email || "" } : {}),
         };
         if (account) await api.patch("/users/" + account.id, payload);
         else await api.post("/users", payload);
@@ -133,6 +166,17 @@ export function TechnicianForm({ technician, onSaved, onClose }) {
       }}
       fields={[
         { name: "name", label: "Nome", required: true, full: true },
+        ...(!technician
+          ? [
+              {
+                name: "recovery_email",
+                label: "E-mail de recuperação",
+                type: "email",
+                maxLength: 254,
+                full: true,
+              },
+            ]
+          : []),
         { name: "phone", label: "Telefone com DDI e DDD" },
         { name: "tags", label: "Habilidades" },
         { name: "address", label: "Endereço / região base", full: true },
@@ -163,6 +207,7 @@ export function TechnicianForm({ technician, onSaved, onClose }) {
             "stock_technician_id",
             "tags",
             "address",
+            ...(!technician ? ["recovery_email"] : []),
             ...rates.map(([key]) => key),
           ]
             .filter((key) => values[key] !== undefined)
@@ -194,17 +239,19 @@ export function TechnicianAccess({ person, onClose, onEdit, onIssued }) {
   const { account, name, technician, status } = person;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [email, setEmail] = useState("");
   const action = !account
-    ? "Gerar código de acesso"
+    ? "Criar acesso e gerar senha"
     : account.ativo
-      ? "Reemitir código"
-      : "Reativar e gerar código";
+      ? "Gerar nova senha temporária"
+      : "Reativar e gerar senha";
   async function issue() {
     setBusy(true);
     setError("");
     try {
       const { data } = await api.post(
         "/technicians/" + technician.id + "/activation",
+        account ? {} : { recovery_email: email },
       );
       onIssued(data);
     } catch (e) {
@@ -225,13 +272,33 @@ export function TechnicianAccess({ person, onClose, onEdit, onIssued }) {
           <dt>Status do acesso</dt>
           <dd>{status.text}</dd>
         </div>
+        {account && (
+          <div>
+            <dt>E-mail de recuperação</dt>
+            <dd>{account.recovery_email || "Ainda não cadastrado"}</dd>
+          </div>
+        )}
       </dl>
+      {!account && (
+        <div className="zen-profile-form">
+          <label htmlFor="technician-recovery-email">
+            E-mail de recuperação (opcional)
+          </label>
+          <input
+            id="technician-recovery-email"
+            type="email"
+            maxLength={254}
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+          />
+        </div>
+      )}
       <p className="dialog-description">
         {!account
-          ? "Gere um login individual e um código para o primeiro acesso."
+          ? "Crie o usuário e a senha temporária para o primeiro acesso."
           : account.ativo
-            ? "Reemitir o código encerra as sessões abertas. O técnico precisará ativar o acesso novamente."
-            : "A conta será reativada e o técnico receberá um novo código de ativação."}
+            ? "A nova senha temporária encerra as sessões abertas. O técnico define uma senha definitiva ao entrar."
+            : "A conta será reativada com uma senha temporária para o próximo acesso."}
       </p>
       {error && (
         <p className="form-error" role="alert">
@@ -255,7 +322,7 @@ export function TechnicianAccess({ person, onClose, onEdit, onIssued }) {
           onClick={issue}
           disabled={busy}
         >
-          {busy ? "Gerando código…" : action}
+          {busy ? "Gerando senha…" : action}
         </button>
       </div>
     </Modal>
@@ -263,11 +330,12 @@ export function TechnicianAccess({ person, onClose, onEdit, onIssued }) {
 }
 
 export function ActivationDetails({ access, onClose }) {
+  const [copied, setCopied] = useState("");
   return (
-    <Modal title="Dados de ativação do ZenField" onClose={onClose}>
+    <Modal title="Primeiro acesso ao ZenField" onClose={onClose}>
       <p className="dialog-description">
-        Entregue estes dados ao técnico por um canal verificado. O código só é
-        mostrado nesta emissão.
+        Entregue os dados ao técnico por um canal verificado. A senha temporária
+        aparece nesta tela.
       </p>
       <dl className="team-access-details">
         <div>
@@ -275,13 +343,9 @@ export function ActivationDetails({ access, onClose }) {
           <dd>{access.login}</dd>
         </div>
         <div>
-          <dt>Senha provisória</dt>
-          <dd>{access.temporary_password}</dd>
-        </div>
-        <div>
-          <dt>Código de uso único</dt>
+          <dt>Senha temporária</dt>
           <dd>
-            <code>{access.code}</code>
+            <code>{access.temporary_password}</code>
           </dd>
         </div>
         <div>
@@ -290,11 +354,34 @@ export function ActivationDetails({ access, onClose }) {
         </div>
       </dl>
       <p className="dialog-description">
-        No ZenTracking ou no ZenField, selecione{" "}
-        <strong>Primeiro acesso ou redefinição</strong> para definir a senha
-        definitiva. {passwordRequirements}
+        Entre com estes dados no ZenTracking ou ZenField. A próxima tela pede a
+        senha definitiva.
       </p>
+      {copied && (
+        <p className="dialog-description" role="status">
+          {copied}
+        </p>
+      )}
       <div className="dialog-actions">
+        <button
+          type="button"
+          className="secondary-button"
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(
+                "Usuário: " +
+                  access.login +
+                  "\nSenha temporária: " +
+                  access.temporary_password,
+              );
+              setCopied("Dados copiados.");
+            } catch {
+              setCopied("Selecione o usuário e a senha acima para copiá-los.");
+            }
+          }}
+        >
+          Copiar dados
+        </button>
         <button type="button" className="primary-button" onClick={onClose}>
           Concluir
         </button>

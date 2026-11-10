@@ -68,7 +68,7 @@ after(async () => {
   if (db) await db.close();
   if (folder) await fs.rm(folder, { recursive: true, force: true });
 });
-test("A: automatic normalized unique login; activation cannot release data before a strong password; one-use code and tenant isolation", async () => {
+test("A: automatic normalized unique login; activation cannot release data before a strong password; individual temporary password and tenant isolation", async () => {
   const a = await ok("/technicians", "POST", {
     name: "José da Silva Martins",
     price_install: "90",
@@ -99,8 +99,7 @@ test("A: automatic normalized unique login; activation cannot release data befor
     (
       await req("/auth/activate", "POST", {
         login: access.login,
-        password: "zen123",
-        code: "wrong",
+        password: "Wrong1!Password",
         new_password: password,
       })
     ).status,
@@ -110,8 +109,7 @@ test("A: automatic normalized unique login; activation cannot release data befor
     (
       await req("/auth/activate", "POST", {
         login: access.login,
-        password: "zen123",
-        code: access.code,
+        password: access.temporary_password,
         new_password: "short",
       })
     ).status,
@@ -119,16 +117,14 @@ test("A: automatic normalized unique login; activation cannot release data befor
   );
   await ok("/auth/activate", "POST", {
     login: access.login,
-    password: "zen123",
-    code: access.code,
+    password: access.temporary_password,
     new_password: password,
   });
   assert.equal(
     (
       await req("/auth/activate", "POST", {
         login: access.login,
-        password: "zen123",
-        code: access.code,
+        password: access.temporary_password,
         new_password: password,
       })
     ).status,
@@ -143,8 +139,7 @@ test("A: automatic normalized unique login; activation cannot release data befor
   ).token;
   await ok("/auth/activate", "POST", {
     login: b.access.login,
-    password: "zen123",
-    code: b.access.code,
+    password: b.access.temporary_password,
     new_password: password,
   });
   other = (
@@ -939,8 +934,7 @@ test("J: reset invalidates sessions, expired activation refuses access, deactiva
     (
       await req("/auth/activate", "POST", {
         login: a.login,
-        password: "zen123",
-        code: a.code,
+        password: a.temporary_password,
         new_password: password,
       })
     ).status,

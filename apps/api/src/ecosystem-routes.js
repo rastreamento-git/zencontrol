@@ -13,6 +13,7 @@ const {
 const { StockClient } = require("./stock-client"),
   { createMediaStore } = require("./media-store");
 const { settlementPdf } = require("./pdf");
+const { recoveryEmail } = require("./password-recovery");
 function configureEcosystem(app, pool, cfg, auth) {
   const admin = auth.requireAdmin,
     actor = (req) => req.user.nome || req.user.login;
@@ -83,7 +84,15 @@ function configureEcosystem(app, pool, cfg, auth) {
         "SELECT u.id,u.login FROM usuarios u JOIN zc_technician_accounts a ON a.user_id=u.id WHERE a.technician_id=$1",
         [t.id],
       );
-      if (!u) return createTechnicianAccount(db, t, actor(req));
+      if (!u)
+        return createTechnicianAccount(
+          db,
+          t,
+          actor(req),
+          req.body.recovery_email === undefined
+            ? null
+            : recoveryEmail(req.body.recovery_email),
+        );
       await db.query("UPDATE usuarios SET ativo=true WHERE id=$1", [u.id]);
       return {
         login: u.login,

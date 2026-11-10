@@ -186,6 +186,11 @@ function configureAuth(app, env, pool, configurePublicAuth) {
     const login = String(req.body.login || "")
       .trim()
       .toLowerCase();
+    if (
+      typeof req.body.password === "string" &&
+      req.body.new_password === req.body.password
+    )
+      fail(400, "Escolha uma senha diferente da temporária.");
     const nextHash = await hashPassword(req.body.new_password);
     const result = await transaction(pool, async (db) => {
       const row = (
@@ -194,18 +199,25 @@ function configureAuth(app, env, pool, configurePublicAuth) {
           [login],
         )
       ).rows[0];
-      const codeHash = createHash("sha256")
-        .update(String(req.body.code || ""))
-        .digest("hex");
       if (
         !row?.ativo ||
+        row.papel !== "tecnico" ||
         !row.activation_required ||
         row.used_at ||
-        new Date(row.expires_at).getTime() <= Date.now() ||
-        req.body.password !== "zen123" ||
-        !equal(codeHash, row.code_hash)
+        new Date(row.expires_at).getTime() <= Date.now()
       )
         return null;
+      // Recognize only previously issued legacy credentials. New access uses
+      // the individual temporary password stored in the account hash.
+      const authorized = row.code_hash
+        ? req.body.password === "zen123" &&
+          typeof req.body.code === "string" &&
+          equal(
+            createHash("sha256").update(req.body.code).digest("hex"),
+            row.code_hash,
+          )
+        : await checkPassword(req.body.password, row.senha_hash);
+      if (!authorized) return null;
       if (
         !(
           await db.query(
@@ -233,7 +245,7 @@ function configureAuth(app, env, pool, configurePublicAuth) {
       await logAuth(null, "activation_failed");
       fail(
         401,
-        "Ativação inválida ou expirada. Solicite um novo código à central.",
+        "Senha temporária incorreta ou expirada. Solicite uma nova senha à central.",
       );
     }
     res.json({ ok: true, message: "Conta ativada. Entre com sua nova senha." });
@@ -276,11 +288,11 @@ function configureAuth(app, env, pool, configurePublicAuth) {
         req.body?.password,
         fallback?.senha_hash,
       );
-      if (!row?.ativo || !correct || row.activation_required) {
+      if (!row?.ativo || !correct) {
         await logAuth(row?.id, "login_failed");
         fail(
           401,
-          "Usuário ou senha incorretos. No primeiro acesso, use a ativação fornecida pela central.",
+          "Usuário ou senha incorretos. No primeiro acesso, use a senha temporária fornecida pela central.",
         );
       }
       if (
@@ -306,6 +318,18 @@ function configureAuth(app, env, pool, configurePublicAuth) {
         fail(403, "Use uma conta de técnico para entrar neste portal.");
       if (audience === "central" && row.papel === "tecnico")
         fail(403, "Esta conta é de técnico. Entre pelo Portal do Técnico.");
+      if (row.activation_required) {
+        const pending = await pool.query(
+          "SELECT 1 FROM zc_activations WHERE user_id=$1 AND code_hash IS NULL AND used_at IS NULL AND expires_at>now()",
+          [row.id],
+        );
+        if (row.papel === "tecnico" && pending.rowCount)
+          return res.json({ password_change_required: true });
+        fail(
+          401,
+          "Solicite uma nova senha temporária à central ou use Esqueci minha senha.",
+        );
+      }
       await logAuth(row.id, "login_succeeded");
       res.json({
         enabled: true,

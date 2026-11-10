@@ -18,17 +18,21 @@ export default function AuthGate({ children, audience = "central" }) {
   const [status, setStatus] = useState("loading");
   const [error, setError] = useState("");
   const [user, setUser] = useState(null);
-  const [login, setLogin] = useState(technicianEntry ? "" : "admin");
+  const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
-  const [activation, setActivation] = useState(false),
-    [code, setCode] = useState(""),
+  const [resetToken, setResetToken] = useState(() =>
+    new URLSearchParams(window.location.hash.slice(1)).get("redefinir"),
+  );
+  const [mode, setMode] = useState(resetToken === null ? "login" : "reset"),
+    [identifier, setIdentifier] = useState(""),
     [newPassword, setNewPassword] = useState(""),
+    [confirmation, setConfirmation] = useState(""),
     [message, setMessage] = useState("");
   const connecting = status === "loading" || !access;
   const google =
     !technicianEntry &&
-    !activation &&
+    mode === "login" &&
     access?.google_client_id &&
     window.location.origin === access.login_url;
   useEffect(() => {
@@ -93,6 +97,10 @@ export default function AuthGate({ children, audience = "central" }) {
       const config = await prepareAccess(currentApp);
       setAccess(config);
       if (config.redirecting) return;
+      if (resetToken !== null) {
+        setStatus("login");
+        return;
+      }
       const { data } = await api.get("/auth/session");
       await applySession(data, config);
     } catch (e) {
@@ -101,6 +109,12 @@ export default function AuthGate({ children, audience = "central" }) {
     }
   }
   useEffect(() => {
+    if (resetToken !== null)
+      history.replaceState(
+        null,
+        "",
+        window.location.pathname + window.location.search,
+      );
     check();
     const expired = (event) => {
       setStatus("login");
@@ -114,7 +128,26 @@ export default function AuthGate({ children, audience = "central" }) {
       );
     };
     window.addEventListener("invent:unauthorized", expired);
-    return () => window.removeEventListener("invent:unauthorized", expired);
+    const followResetLink = () => {
+      const token = new URLSearchParams(window.location.hash.slice(1)).get(
+        "redefinir",
+      );
+      if (token === null) return;
+      history.replaceState(
+        null,
+        "",
+        window.location.pathname + window.location.search,
+      );
+      switchMode("reset");
+      setResetToken(token);
+      setStatus("login");
+      setUser(null);
+    };
+    window.addEventListener("hashchange", followResetLink);
+    return () => {
+      window.removeEventListener("invent:unauthorized", expired);
+      window.removeEventListener("hashchange", followResetLink);
+    };
   }, []);
   async function completeLogin(data) {
     saveToken(data.token);
@@ -142,18 +175,35 @@ export default function AuthGate({ children, audience = "central" }) {
     setBusy(true);
     setError("");
     try {
-      if (activation) {
-        await api.post("/auth/activate", {
-          login,
-          password,
-          code,
-          new_password: newPassword,
+      if (mode === "forgot") {
+        const { data } = await api.post("/auth/password/forgot", {
+          identifier,
         });
-        setActivation(false);
+        setMessage(data.message);
+        return;
+      }
+      if (mode === "first" || mode === "reset") {
+        if (newPassword !== confirmation)
+          throw Error("As duas senhas precisam ser iguais.");
+        if (mode === "first") {
+          await api.post("/auth/activate", {
+            login,
+            password,
+            new_password: newPassword,
+          });
+        } else {
+          await api.post("/auth/password/reset", {
+            token: resetToken,
+            new_password: newPassword,
+          });
+          saveToken(null);
+          setResetToken(null);
+        }
+        setMode("login");
         setPassword("");
-        setCode("");
         setNewPassword("");
-        setMessage("Conta ativada. Entre com sua nova senha.");
+        setConfirmation("");
+        setMessage("Senha definida. Entre com sua nova senha.");
         return;
       }
       const { data } = await api.post("/auth/login", {
@@ -161,6 +211,11 @@ export default function AuthGate({ children, audience = "central" }) {
         password,
         audience: access?.unified_login ? "ecosystem" : audience,
       });
+      if (data.password_change_required) {
+        setMode("first");
+        setMessage("");
+        return;
+      }
       await completeLogin(data);
       setPassword("");
     } catch (e) {
@@ -168,6 +223,15 @@ export default function AuthGate({ children, audience = "central" }) {
     } finally {
       setBusy(false);
     }
+  }
+  function switchMode(next) {
+    setError("");
+    setMessage("");
+    setPassword("");
+    setNewPassword("");
+    setConfirmation("");
+    setResetToken(null);
+    setMode(next);
   }
   if (status === "ready")
     return (
@@ -235,12 +299,13 @@ export default function AuthGate({ children, audience = "central" }) {
                 Tentar novamente
               </button>
             </>
-          ) : technicianEntry && access?.unified_login ? (
+          ) : technicianEntry && access?.unified_login && mode === "login" ? (
             <div className="auth-form">
               <p className="auth-description">
                 Use sua conta ZenTracking. Seu perfil abre automaticamente a
                 área correta.
               </p>
+              {message && <p role="status">{message}</p>}
               {error && <p role="alert">{error}</p>}
               <button
                 className="primary-button"
@@ -258,11 +323,19 @@ export default function AuthGate({ children, audience = "central" }) {
                 Entrar no ZenTracking
               </button>
               <p>
-                Primeiro acesso? Ative sua conta na tela de acesso ZenTracking
-                com o código fornecido pela central.
+                No primeiro acesso, entre com a senha temporária da central para
+                definir a sua.
               </p>
+              <button
+                type="button"
+                className="zen-auth-link"
+                onClick={() => switchMode("forgot")}
+                disabled={busy}
+              >
+                Esqueci minha senha
+              </button>
             </div>
-          ) : (
+          ) : mode === "login" ? (
             <form onSubmit={submitLogin} className="auth-form">
               <p className="auth-description">
                 {technicianEntry
@@ -289,6 +362,7 @@ export default function AuthGate({ children, audience = "central" }) {
                 autoComplete="username"
                 autoFocus={technicianEntry}
                 required
+                disabled={busy}
                 value={login}
                 onChange={(e) => setLogin(e.target.value)}
               />
@@ -298,54 +372,99 @@ export default function AuthGate({ children, audience = "central" }) {
                 type="password"
                 autoComplete="current-password"
                 required
+                disabled={busy}
                 autoFocus={!technicianEntry}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
+              {message && <p role="status">{message}</p>}
+              {error && (
+                <p role="alert" className="text-red-700">
+                  {error}
+                </p>
+              )}
+              <button disabled={busy} className="primary-button">
+                {busy ? "Aguarde…" : "Entrar"}
+              </button>
+              <button
+                type="button"
+                className="zen-auth-link"
+                onClick={() => switchMode("forgot")}
+                disabled={busy}
+              >
+                Esqueci minha senha
+              </button>
               {(technicianEntry || access?.unified_login) && (
+                <p className="auth-description">
+                  No primeiro acesso, use a senha temporária da central. Você
+                  define a definitiva na próxima tela.
+                </p>
+              )}
+            </form>
+          ) : (
+            <form onSubmit={submitLogin} className="auth-form">
+              <h2 className="zen-auth-step-title">
+                {mode === "forgot"
+                  ? "Recuperar acesso"
+                  : mode === "first"
+                    ? "Defina sua primeira senha"
+                    : "Redefina sua senha"}
+              </h2>
+              {mode === "forgot" ? (
                 <>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={activation}
-                      onChange={(e) => {
-                        setActivation(e.target.checked);
-                        setError("");
-                        setMessage("");
-                      }}
-                    />{" "}
-                    Primeiro acesso ou redefinição
+                  <p className="auth-description">
+                    O link vai para o e-mail cadastrado na conta.
+                  </p>
+                  <label htmlFor="recovery-identifier">
+                    Usuário ou e-mail cadastrado
                   </label>
-                  {activation && (
-                    <>
-                      <label htmlFor="activation-code">
-                        Código individual fornecido pela central
-                      </label>
-                      <input
-                        id="activation-code"
-                        autoComplete="one-time-code"
-                        value={code}
-                        onChange={(e) => setCode(e.target.value)}
-                        required
-                      />
-                      <label htmlFor="new-password">
-                        Nova senha (mínimo 8 caracteres)
-                      </label>
-                      <input
-                        id="new-password"
-                        type="password"
-                        autoComplete="new-password"
-                        {...passwordInputProps}
-                        value={newPassword}
-                        onChange={(e) => setNewPassword(e.target.value)}
-                        required
-                      />
-                      <p>
-                        {passwordRequirements} Use zen123 como senha provisória
-                        e o código individual. O código expira em 24 horas.
-                      </p>
-                    </>
+                  <input
+                    id="recovery-identifier"
+                    autoComplete="username"
+                    autoFocus
+                    required
+                    maxLength={254}
+                    value={identifier}
+                    onChange={(e) => setIdentifier(e.target.value)}
+                  />
+                </>
+              ) : (
+                <>
+                  {mode === "first" && (
+                    <p className="auth-description">
+                      A senha temporária foi aceita para{" "}
+                      <strong>{login}</strong>.
+                    </p>
                   )}
+                  <p
+                    id="new-password-requirements"
+                    className="auth-description"
+                  >
+                    {passwordRequirements}
+                  </p>
+                  <label htmlFor="new-password">Nova senha</label>
+                  <input
+                    id="new-password"
+                    type="password"
+                    autoComplete="new-password"
+                    autoFocus
+                    aria-describedby="new-password-requirements"
+                    {...passwordInputProps}
+                    required
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                  />
+                  <label htmlFor="confirm-password">
+                    Confirme a nova senha
+                  </label>
+                  <input
+                    id="confirm-password"
+                    type="password"
+                    autoComplete="new-password"
+                    required
+                    value={confirmation}
+                    onChange={(e) => setConfirmation(e.target.value)}
+                  />
                 </>
               )}
               {message && <p role="status">{message}</p>}
@@ -354,8 +473,33 @@ export default function AuthGate({ children, audience = "central" }) {
                   {error}
                 </p>
               )}
-              <button disabled={busy} className="primary-button">
-                {busy ? "Aguarde…" : activation ? "Ativar conta" : "Entrar"}
+              <button
+                type="submit"
+                className="primary-button"
+                disabled={busy || (mode === "forgot" && Boolean(message))}
+              >
+                {busy
+                  ? "Aguarde…"
+                  : mode === "forgot"
+                    ? "Enviar link"
+                    : "Salvar nova senha"}
+              </button>
+              {mode === "reset" && error && (
+                <button
+                  type="button"
+                  className="zen-auth-link"
+                  onClick={() => switchMode("forgot")}
+                >
+                  Solicitar outro link
+                </button>
+              )}
+              <button
+                type="button"
+                className="zen-auth-link"
+                onClick={() => switchMode("login")}
+                disabled={busy}
+              >
+                Voltar ao login
               </button>
             </form>
           )}

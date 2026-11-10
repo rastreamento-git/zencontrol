@@ -98,6 +98,7 @@ async function noOverflow(page) {
 async function main() {
   temp = await fs.mkdtemp(path.join(os.tmpdir(), "zen-google-browser-"));
   const mock = path.join(temp, "google.cjs");
+  const mailbox = path.join(temp, "test-mail.jsonl");
   await fs.writeFile(
     mock,
     `
@@ -107,6 +108,12 @@ async function main() {
         throw Error("Credencial fora do teste local");
       const value = JSON.parse(Buffer.from(idToken.split(".")[1], "base64url").toString());
       return { getPayload: () => value };
+    };
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (url, options) => {
+      if (url !== "https://api.resend.com/emails") return realFetch(url, options);
+      require("node:fs").appendFileSync(${JSON.stringify(mailbox)}, options.body + "\\n", { mode: 0o600 });
+      return Promise.resolve(new Response(null, { status: 200 }));
     };
   `,
   );
@@ -120,6 +127,8 @@ async function main() {
         ...process.env,
         ZEN_HOMOLOGY_INSTANCE: instance,
         GOOGLE_CLIENT_ID: clientId,
+        RESEND_API_KEY: "browser-test-only",
+        PASSWORD_RESET_FROM: "contas@example.test",
       },
       stdio: ["ignore", "pipe", "pipe"],
     },
@@ -144,17 +153,6 @@ async function main() {
   );
   const tech = data["1"];
   const technicalPassword = "Homolog1!Chat";
-  const activation = await fetch("http://127.0.0.1:4317/api/auth/activate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      login: tech.login,
-      password: tech.temporary_password,
-      code: tech.activation_code,
-      new_password: technicalPassword,
-    }),
-  });
-  assert.ok(activation.ok, "Ativação local do técnico");
   const localApi = "http://127.0.0.1:4317/api";
   const operatorLogin = "marcele.teste",
     operatorPassword = "Homolog1!Operacao";
@@ -179,6 +177,7 @@ async function main() {
       nome: "Marcele",
       password: operatorPassword,
       papel: "operador",
+      recovery_email: "marcele@example.test",
     }),
   });
   assert.ok(operatorAccount.ok, "Cadastro da operadora fictícia");
@@ -236,8 +235,10 @@ async function main() {
   assert.ok(await staffChat.evaluate((dialog) => dialog.matches(":modal")));
   assert.ok(
     await staffChat
-      .getByRole("button", { name: /Maria.*Offline.*Sem acesso ao chat/ })
-      .isDisabled(),
+      .getByRole("button", {
+        name: /Maria.*Offline.*Recebe ao primeiro acesso/,
+      })
+      .isEnabled(),
   );
   await staffChat.getByRole("button", { name: new RegExp(tech.name) }).click();
   const staffDraft = staffChat.getByLabel("Mensagem", { exact: true });
@@ -263,6 +264,19 @@ async function main() {
     "Central confirmou o recebimento.",
   );
   await staffChat.getByText("Em tempo real", { exact: true }).waitFor();
+  await staffChat.getByRole("button", { name: "Voltar ao mini chat" }).click();
+  await staffChat
+    .getByRole("button", { name: "Técnicos", exact: true })
+    .click();
+  await staffChat.getByLabel("Buscar técnico nas conversas").fill(tech.name);
+  await staffChat.getByRole("button", { name: new RegExp(tech.name) }).click();
+  const outreach = "Confirme o recebimento do atendimento fictício.";
+  await staffChat.getByLabel("Mensagem", { exact: true }).fill(outreach);
+  await staffChat.getByRole("button", { name: "Enviar", exact: true }).click();
+  await staffChat
+    .getByRole("log", { name: "Histórico de mensagens" })
+    .getByText(outreach)
+    .waitFor();
   await staffChat.getByRole("button", { name: "Fechar chat" }).click();
 
   const operatorPage = await pageFor("marcele", { width: 1280, height: 820 });
@@ -284,7 +298,24 @@ async function main() {
   await operatorProfile.getByRole("button", { name: "Fechar diálogo" }).click();
 
   const mobile = await pageFor("tecnico", { width: 390, height: 844 });
-  await passwordLogin(mobile, tech.login, technicalPassword);
+  await passwordLogin(mobile, tech.login, tech.temporary_password);
+  await mobile
+    .getByRole("heading", { name: "Defina sua primeira senha" })
+    .waitFor();
+  await mobile
+    .getByLabel("Nova senha", { exact: true })
+    .fill(technicalPassword);
+  await mobile
+    .getByLabel("Confirme a nova senha", { exact: true })
+    .fill(technicalPassword);
+  await mobile.getByRole("button", { name: "Salvar nova senha" }).click();
+  await mobile
+    .getByText("Senha definida. Entre com sua nova senha.", { exact: true })
+    .waitFor();
+  await mobile
+    .getByLabel("Senha de acesso", { exact: true })
+    .fill(technicalPassword);
+  await mobile.getByRole("button", { name: "Entrar", exact: true }).click();
   await mobile.waitForURL("http://127.0.0.1:4319/**");
   await profile(
     mobile,
@@ -307,10 +338,16 @@ async function main() {
   await mobile.locator(".portal-order").first().click();
   const openService = mobile.locator(".portal-service");
   await openService.waitFor();
-  await fieldNav
-    .getByRole("button", { name: "Chat com a central", exact: true })
+  const fieldNotice = mobile.getByRole("button", {
+    name: /Notificações, [1-9]\d* não lidas/,
+  });
+  await fieldNotice.click();
+  await mobile
+    .getByRole("region", { name: "Histórico de notificações" })
+    .getByRole("button", { name: /Nova mensagem da central/ })
     .click();
   const fieldChat = mobile.getByRole("dialog", { name: "Chat com a central" });
+  await fieldChat.getByText(outreach, { exact: true }).waitFor();
   await fieldChat.getByText("Em tempo real", { exact: true }).waitFor();
   await fieldChat.getByLabel("Meu status").selectOption("busy");
   const fieldDraft = fieldChat.getByLabel("Mensagem", { exact: true });
@@ -358,8 +395,17 @@ async function main() {
   await operatorChat
     .getByLabel("Mensagem", { exact: true })
     .fill("Central confirmou o recebimento.");
+  await fieldChat.getByRole("button", { name: "Fechar chat" }).click();
   await operatorChat
     .getByRole("button", { name: "Enviar", exact: true })
+    .click();
+  await mobile
+    .getByText("Nova mensagem da central.", { exact: true })
+    .waitFor({ timeout: 5000 });
+  await fieldNotice.click();
+  await mobile
+    .getByRole("region", { name: "Histórico de notificações" })
+    .getByRole("button", { name: /Nova mensagem da central.*Marcele/ })
     .click();
   await fieldChat
     .getByText("Central confirmou o recebimento.", { exact: true })
@@ -461,6 +507,57 @@ async function main() {
   summary.liveChatBothDirections = "passed";
   summary.sharedInboxAndPrivateStaffRoom = "passed";
   summary.presenceAndPhoto = "passed";
+  const recoveryPage = await pageFor("recovery", { width: 390, height: 844 });
+  await recoveryPage.goto(hub);
+  await recoveryPage
+    .getByRole("button", { name: "Esqueci minha senha" })
+    .click();
+  await recoveryPage
+    .getByLabel("Usuário ou e-mail cadastrado")
+    .fill("marcele@example.test");
+  await recoveryPage.getByRole("button", { name: "Enviar link" }).click();
+  await recoveryPage.getByText(/Se houver uma conta ativa/).waitFor();
+  let mail;
+  await until(async () => {
+    try {
+      const lines = (await fs.readFile(mailbox, "utf8")).trim().split("\n");
+      mail = JSON.parse(lines[0]);
+      return true;
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+      return false;
+    }
+  }, "A recuperação não chegou à caixa de e-mail simulada.");
+  assert.deepEqual(mail.to, ["marcele@example.test"]);
+  const url = new URL(mail.text.split("\n\n").at(-1));
+  assert.equal(url.origin, hub);
+  await recoveryPage.goto(url.href);
+  await recoveryPage
+    .getByRole("heading", { name: "Redefina sua senha" })
+    .waitFor();
+  assert.equal(new URL(recoveryPage.url()).hash, "");
+  const resetPassword = "Redefinida1!Operacao";
+  await recoveryPage
+    .getByLabel("Nova senha", { exact: true })
+    .fill(resetPassword);
+  await recoveryPage
+    .getByLabel("Confirme a nova senha", { exact: true })
+    .fill(resetPassword);
+  await recoveryPage.getByRole("button", { name: "Salvar nova senha" }).click();
+  await recoveryPage
+    .getByText("Senha definida. Entre com sua nova senha.")
+    .waitFor();
+  await recoveryPage.getByLabel("Usuário", { exact: true }).fill(operatorLogin);
+  await recoveryPage
+    .getByLabel("Senha de acesso", { exact: true })
+    .fill(resetPassword);
+  await recoveryPage
+    .getByRole("button", { name: "Entrar", exact: true })
+    .click();
+  await recoveryPage
+    .getByRole("button", { name: "Abrir ZenControl" })
+    .waitFor();
+  summary.firstAccessRecoveryAndProactiveChat = "passed";
   summary.mobile320And390 = "passed";
   summary.historyAndDarkMode = "passed";
   assert.deepEqual(errors, []);

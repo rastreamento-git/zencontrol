@@ -149,6 +149,8 @@ async function main() {
       : "http://127.0.0.1:4320",
     SSO_STOCK_URL: online ? onlineConfig.stockOrigin : "http://127.0.0.1:4321",
     GOOGLE_CLIENT_ID: online ? "" : process.env.GOOGLE_CLIENT_ID,
+    RESEND_API_KEY: process.env.RESEND_API_KEY,
+    PASSWORD_RESET_FROM: process.env.PASSWORD_RESET_FROM,
     STOCK_ENABLED: "true",
     STOCK_API_URL: "http://127.0.0.1:4318",
     STOCK_API_SECRET: scopedSecret("stock-integration"),
@@ -191,14 +193,14 @@ async function main() {
           tx,
           t,
           "Demonstração local",
+          online ? null : "tecnico-" + t.id + "@example.test",
         );
         await f.initialRate(tx, t, "Demonstração local");
         credentials[t.id] = {
           name,
           login: access.login,
-          activation_code: access.code,
           expires_at: access.expires_at,
-          temporary_password: "zen123",
+          temporary_password: access.temporary_password,
         };
         await tx.query(
           "INSERT INTO zc_closing_policies(technician_id,policy,updated_by) VALUES($1,$2::jsonb,$3)",
@@ -381,9 +383,9 @@ async function main() {
     console.log("Admin dos sistemas: admin / " + credentials.admin_password);
   if (!online)
     console.log(
-      "Ativações individuais: " +
+      "Primeiro acesso dos técnicos: " +
         credentialFile +
-        " (códigos temporários; use a central para renovar).",
+        " (senhas temporárias; use a central para renovar).",
     );
   if (!online)
     console.log(
