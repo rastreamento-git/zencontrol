@@ -1,6 +1,6 @@
 # Meu perfil, Google e conversas no ZenTracking
 
-O ZenTracking reúne atalhos para agenda, conferência e conversas, além dos três aplicativos. Use **Meu perfil** para editar nome de exibição e telefone. O cadastro de acesso continua definindo login e papel. No Estoque Pro integrado, o atalho de perfil abre a mesma conta no ZenTracking.
+O ZenTracking reúne atalhos para agenda, conferência e conversas, além dos três aplicativos. Use **Meu perfil** para editar nome de exibição, telefone e foto. O cadastro de acesso define login e papel. No Estoque Pro integrado, o atalho de perfil abre a mesma conta no ZenTracking.
 
 ## Habilitar o acesso Google
 
@@ -13,13 +13,17 @@ O fluxo usa Google Identity Services e valida a credencial assinada na API. Não
 
 ## Conversas
 
-No ZenControl, abra **Conversas** e selecione o técnico. No ZenField, use **Chat com a central**. Cada técnico lê apenas sua conversa. A central responde com o nome da conta que fez o envio. O histórico fica no PostgreSQL do ZenControl e tem páginas de 50 mensagens. O navegador recebe atualizações quando a conversa está aberta e sincroniza o histórico se a conexão cair.
+No ZenControl, abra **Conversas → Caixa da operação** para ver os técnicos cadastrados e sua presença. Técnicos ativos que ainda precisam liberar o acesso aparecem como Offline, com a indicação **Sem acesso ao chat**. No ZenField, o técnico usa **Chat com a central**. Cada mensagem entra na conversa desse técnico na caixa compartilhada e gera um aviso no sino de operadores e administradores, com leitura por conta. O aviso abre a conversa. Na resposta, o técnico vê o nome, a função e a foto de quem respondeu. Contas sem foto aparecem com iniciais.
+
+Use **Conversas → Equipe interna → Sala da operação** para conversar com os demais operadores e administradores. A lista da sala mostra os colaboradores e seu status. O histórico da sala e as conversas de cada técnico ficam separados no PostgreSQL do ZenControl.
+
+Em **Meu status**, selecione **Online**, **Ausente** ou **Ocupado**. Em Online, a presença passa para Ausente quando a aba fica oculta ou após cinco minutos sem interação. A lista mostra Offline cerca de dois minutos após o último sinal do aplicativo. Os avisos ficam no sino até a leitura, inclusive para quem entrar depois.
 
 O backup operacional inclui as mensagens e preserva o nome e o papel de quem escreveu; na restauração, os identificadores das contas antigas são desvinculados. O backup operacional continua sem incluir credenciais, vínculos Google ou dados privados do perfil.
 
 ## Aplicar e validar
 
-A migração `012_perfil_google_conversas.sql` adiciona as tabelas do recurso. Aplique primeiro em um banco de homologação do ZenControl, separado do banco do Estoque Pro. Depois, publique a API e os frontends correspondentes. O login Google real exige o cliente e as origens configurados acima.
+Aplique as migrações pendentes, incluindo `013_caixa_operacao.sql`, em um banco de homologação do ZenControl, separado do banco do Estoque Pro. Publique primeiro a API e depois os frontends do ZenControl e ZenField. Valide com três contas (técnico, operador e administrador), incluindo o aviso com o chat fechado e a abertura da conversa pelo sino.
 
 Os testes de API usam dados fictícios e simulam a confirmação de identidade do Google para verificar vínculo, reaproveitamento de credencial, edição de perfil, privacidade das conversas e entrega pelo canal em tempo real:
 

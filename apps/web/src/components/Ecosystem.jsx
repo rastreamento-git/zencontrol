@@ -108,12 +108,15 @@ async function download(path, name) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-export function NoticeBell({ onOpen }) {
+export function NoticeBell({ onOpen, chatRevision = 0 }) {
   const [open, setOpen] = useState(false),
     [revision, setRevision] = useState(0),
     [page, setPage] = useState(1),
     [failure, setFailure] = useState("");
-  const state = useData("/notifications?limit=20&page=" + page, revision);
+  const state = useData(
+    "/notifications?limit=20&page=" + page,
+    revision + chatRevision,
+  );
   useEffect(() => {
     const refresh = () => {
       if (!document.hidden) setRevision((x) => x + 1);

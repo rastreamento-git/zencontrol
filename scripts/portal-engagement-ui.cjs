@@ -155,6 +155,33 @@ async function main() {
     }),
   });
   assert.ok(activation.ok, "Ativação local do técnico");
+  const localApi = "http://127.0.0.1:4317/api";
+  const operatorLogin = "marcele.teste",
+    operatorPassword = "Homolog1!Operacao";
+  const adminLogin = await fetch(localApi + "/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      login: "admin",
+      password: data.admin_password,
+      audience: "ecosystem",
+    }),
+  });
+  assert.ok(adminLogin.ok, "Login do administrador fictício");
+  const operatorAccount = await fetch(localApi + "/users", {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer " + (await adminLogin.json()).token,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      login: operatorLogin,
+      nome: "Marcele",
+      password: operatorPassword,
+      papel: "operador",
+    }),
+  });
+  assert.ok(operatorAccount.ok, "Cadastro da operadora fictícia");
   const launch = { headless: true };
   if (process.env.ZEN_CHROMIUM_MODULE) {
     const module = (await import(process.env.ZEN_CHROMIUM_MODULE)).default;
@@ -203,10 +230,15 @@ async function main() {
     .getByRole("link", { name: /Conversas/ })
     .click();
   const staffChat = staff.getByRole("dialog", {
-    name: "Conversas com técnicos",
+    name: "Conversas da operação",
   });
   await staffChat.waitFor();
   assert.ok(await staffChat.evaluate((dialog) => dialog.matches(":modal")));
+  assert.ok(
+    await staffChat
+      .getByRole("button", { name: /Maria.*Offline.*Sem acesso ao chat/ })
+      .isDisabled(),
+  );
   await staffChat.getByRole("button", { name: new RegExp(tech.name) }).click();
   const staffDraft = staffChat.getByLabel("Mensagem", { exact: true });
   await staffDraft.fill("Central confirmou o recebimento.");
@@ -230,6 +262,26 @@ async function main() {
     await staffDraft.inputValue(),
     "Central confirmou o recebimento.",
   );
+  await staffChat.getByText("Em tempo real", { exact: true }).waitFor();
+  await staffChat.getByRole("button", { name: "Fechar chat" }).click();
+
+  const operatorPage = await pageFor("marcele", { width: 1280, height: 820 });
+  await passwordLogin(operatorPage, operatorLogin, operatorPassword);
+  await operatorPage.getByRole("button", { name: "Abrir ZenControl" }).click();
+  await operatorPage
+    .getByRole("button", { name: "Meu perfil", exact: true })
+    .click();
+  const operatorProfile = operatorPage.getByRole("dialog", {
+    name: "Meu perfil",
+  });
+  await operatorProfile
+    .getByLabel("Foto de perfil")
+    .setInputFiles(
+      path.join(directory, "fixtures", "foto-vistoria-exemplo.jpg"),
+    );
+  await operatorProfile.getByText("Foto de perfil atualizada.").waitFor();
+  await operatorProfile.locator(".zen-person-avatar img").waitFor();
+  await operatorProfile.getByRole("button", { name: "Fechar diálogo" }).click();
 
   const mobile = await pageFor("tecnico", { width: 390, height: 844 });
   await passwordLogin(mobile, tech.login, technicalPassword);
@@ -260,7 +312,7 @@ async function main() {
     .click();
   const fieldChat = mobile.getByRole("dialog", { name: "Chat com a central" });
   await fieldChat.getByText("Em tempo real", { exact: true }).waitFor();
-  await staffChat.getByText("Em tempo real", { exact: true }).waitFor();
+  await fieldChat.getByLabel("Meu status").selectOption("busy");
   const fieldDraft = fieldChat.getByLabel("Mensagem", { exact: true });
   await fieldDraft.fill("Cheguei ao atendimento fictício.");
   await fieldChat.getByRole("button", { name: "Voltar ao mini chat" }).click();
@@ -274,14 +326,84 @@ async function main() {
     "Cheguei ao atendimento fictício.",
   );
   await fieldChat.getByRole("button", { name: "Enviar", exact: true }).click();
-  await staffChat
+  await Promise.all(
+    [staff, operatorPage].map((page) =>
+      page
+        .getByText("Nova mensagem na caixa da operação.", { exact: true })
+        .waitFor({ timeout: 5000 }),
+    ),
+  );
+  const notice = operatorPage.getByRole("button", {
+    name: /Notificações, [1-9]\d* não lidas/,
+  });
+  await notice.click();
+  await operatorPage
+    .getByRole("region", { name: "Histórico de notificações" })
+    .getByRole("button", { name: /Nova mensagem de técnico/ })
+    .click();
+  const operatorChat = operatorPage.getByRole("dialog", {
+    name: "Conversas da operação",
+  });
+  await operatorChat
+    .getByRole("heading", { name: tech.name, exact: true })
+    .waitFor();
+  await operatorChat
+    .getByRole("log", { name: "Histórico de mensagens" })
     .getByText("Cheguei ao atendimento fictício.", { exact: true })
-    .first()
-    .waitFor({ timeout: 5000 });
-  await staffChat.getByRole("button", { name: "Enviar", exact: true }).click();
+    .waitFor();
+  await operatorChat
+    .getByRole("button", { name: new RegExp(tech.name) })
+    .getByText("Ocupado", { exact: true })
+    .waitFor();
+  await operatorChat
+    .getByLabel("Mensagem", { exact: true })
+    .fill("Central confirmou o recebimento.");
+  await operatorChat
+    .getByRole("button", { name: "Enviar", exact: true })
+    .click();
   await fieldChat
     .getByText("Central confirmou o recebimento.", { exact: true })
     .waitFor({ timeout: 5000 });
+  const reply = fieldChat
+    .locator(".zen-chat-messages li")
+    .filter({ hasText: "Central confirmou o recebimento." });
+  await reply.getByText("Marcele", { exact: true }).waitFor();
+  await reply.getByText("Operador", { exact: true }).waitFor();
+  await reply.locator(".zen-person-avatar img").waitFor();
+  await operatorPage.screenshot({
+    path: path.join(directory, "zencontrol-chat.png"),
+  });
+
+  await operatorChat
+    .getByRole("button", { name: "Equipe interna", exact: true })
+    .click();
+  await operatorChat.getByRole("heading", { name: "Colaboradores" }).waitFor();
+  await operatorChat.getByText("Operação local", { exact: true }).waitFor();
+  await operatorChat
+    .getByRole("button", { name: "Sala da operação", exact: true })
+    .click();
+  await operatorChat
+    .getByLabel("Mensagem", { exact: true })
+    .fill("Mensagem interna fictícia");
+  await operatorChat
+    .getByRole("button", { name: "Enviar", exact: true })
+    .click();
+  await staff.getByRole("button", { name: "Conversas", exact: true }).click();
+  await staffChat
+    .getByRole("button", { name: "Equipe interna", exact: true })
+    .click();
+  await staffChat
+    .getByRole("button", { name: "Sala da operação", exact: true })
+    .click();
+  await staffChat
+    .getByText("Mensagem interna fictícia", { exact: true })
+    .waitFor();
+  assert.equal(
+    await fieldChat
+      .getByText("Mensagem interna fictícia", { exact: true })
+      .count(),
+    0,
+  );
   await fieldChat.getByRole("button", { name: "Fechar chat" }).click();
   await openService.waitFor();
   await mobile.getByRole("button", { name: "Mini chat", exact: true }).click();
@@ -290,10 +412,6 @@ async function main() {
     .click();
   await mobile.screenshot({
     path: path.join(directory, "zenfield-chat.png"),
-  });
-  await staff.screenshot({
-    path: path.join(directory, "zencontrol-chat.png"),
-    fullPage: true,
   });
   await noOverflow(mobile);
   await mobile.keyboard.press("Escape");
@@ -341,6 +459,8 @@ async function main() {
   );
   summary.chatModesAndDrafts = "passed";
   summary.liveChatBothDirections = "passed";
+  summary.sharedInboxAndPrivateStaffRoom = "passed";
+  summary.presenceAndPhoto = "passed";
   summary.mobile320And390 = "passed";
   summary.historyAndDarkMode = "passed";
   assert.deepEqual(errors, []);

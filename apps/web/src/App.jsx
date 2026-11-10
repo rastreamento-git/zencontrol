@@ -82,6 +82,8 @@ export default function App() {
       ["agenda", "batches"].includes(shortcut) ? shortcut : "dashboard",
     ),
     [chatMode, setChatMode] = useState(shortcut === "chat" ? "full" : "closed"),
+    [chatTarget, setChatTarget] = useState(null),
+    [chatNoticeRevision, setChatNoticeRevision] = useState(0),
     [menu, setMenu] = useState(false),
     [search, setSearch] = useState(""),
     [query, setQuery] = useState(""),
@@ -303,7 +305,19 @@ export default function App() {
               })}
             </span>
             <NoticeBell
+              chatRevision={chatNoticeRevision}
               onOpen={(n) => {
+                if (
+                  n.target === "chat" &&
+                  Number.isSafeInteger(n.detail.technician_id)
+                ) {
+                  setChatTarget({
+                    id: n.detail.technician_id,
+                    name: n.detail.technician,
+                  });
+                  navigate("chat");
+                  return;
+                }
                 if (n.detail.order_id) {
                   setOrder({ id: n.detail.order_id });
                   navigate("batches");
@@ -394,7 +408,15 @@ export default function App() {
         </div>
         <AppFooter />
       </main>
-      <Chat mode={chatMode} onModeChange={setChatMode} />
+      <Chat
+        mode={chatMode}
+        onModeChange={setChatMode}
+        targetThread={chatTarget}
+        onNotice={(newMessage) => {
+          setChatNoticeRevision((n) => n + 1);
+          if (newMessage) notify("Nova mensagem na caixa da operação.", "info");
+        }}
+      />
       {order && (
         <OrderEditor
           key={order.id || "new"}

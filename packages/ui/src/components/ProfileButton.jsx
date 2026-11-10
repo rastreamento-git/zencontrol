@@ -4,12 +4,40 @@ import { api, errorMessage } from "../lib/api";
 import { useSession, useSessionName } from "../lib/session";
 import GoogleButton from "./GoogleButton";
 import Modal from "./Modal";
+import PersonAvatar, { roleLabels } from "./PersonAvatar";
 
-const roleLabels = {
-  admin: "Administrador",
-  operador: "Operador",
-  tecnico: "Técnico",
-};
+async function avatarImage(file) {
+  if (
+    !["image/jpeg", "image/png", "image/webp"].includes(file.type) ||
+    file.size > 12 * 1024 * 1024
+  )
+    throw Error("Escolha uma foto JPEG, PNG ou WebP de até 12 MB.");
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 128;
+    const edge = Math.min(bitmap.width, bitmap.height);
+    canvas
+      .getContext("2d")
+      .drawImage(
+        bitmap,
+        (bitmap.width - edge) / 2,
+        (bitmap.height - edge) / 2,
+        edge,
+        edge,
+        0,
+        0,
+        128,
+        128,
+      );
+    return canvas.toDataURL("image/webp", 0.85);
+  } catch {
+    throw Error("Não foi possível ler a foto. Escolha outra imagem.");
+  } finally {
+    bitmap?.close();
+  }
+}
 
 function Profile({ onClose, onPassword }) {
   const user = useSession(),
@@ -64,6 +92,30 @@ function Profile({ onClose, onPassword }) {
       setBusy(false);
     }
   }
+  async function saveAvatar(file) {
+    setBusy(true);
+    setError("");
+    setSuccess("");
+    try {
+      const image = file ? await avatarImage(file) : null;
+      const { data } = await api.put("/account/avatar", { image });
+      setProfile((current) => ({
+        ...current,
+        avatar_version: data.avatar_version,
+      }));
+      setSuccess(
+        file ? "Foto de perfil atualizada." : "Foto de perfil removida.",
+      );
+    } catch (e) {
+      setError(
+        e.isAxiosError || e.code === "INVENT_BUSY"
+          ? errorMessage(e)
+          : e.message,
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
   async function changeGoogle(e) {
     e.preventDefault();
     setBusy(true);
@@ -92,9 +144,11 @@ function Profile({ onClose, onPassword }) {
     <Modal title="Meu perfil" onClose={onClose} busy={busy}>
       <div className="zen-profile">
         <div className="zen-profile-identity">
-          <span className="zen-profile-avatar">
-            <UserRound size={22} />
-          </span>
+          <PersonAvatar
+            name={user.nome}
+            userId={user.id}
+            version={profile?.avatar_version}
+          />
           <div>
             <strong>{user.nome}</strong>
             <small>
@@ -129,6 +183,30 @@ function Profile({ onClose, onPassword }) {
           )
         ) : (
           <>
+            <div className="zen-profile-form">
+              <label htmlFor={id + "-avatar"}>Foto de perfil</label>
+              <input
+                id={id + "-avatar"}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                disabled={busy}
+                onChange={(event) => {
+                  const file = event.currentTarget.files[0];
+                  event.currentTarget.value = "";
+                  if (file) saveAvatar(file);
+                }}
+              />
+              {profile.avatar_version && (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={busy}
+                  onClick={() => saveAvatar(null)}
+                >
+                  Remover foto
+                </button>
+              )}
+            </div>
             <form className="zen-profile-form" onSubmit={save}>
               <label htmlFor={id + "-name"}>Nome de exibição</label>
               <input

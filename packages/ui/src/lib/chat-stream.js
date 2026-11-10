@@ -15,8 +15,8 @@ export function useChatStream(onUpdate, open) {
     const controller = new AbortController();
     let retry,
       delay = 1500;
-    function refresh() {
-      if (!document.hidden) callback.current();
+    function refresh(reason = "sync") {
+      if (!document.hidden) callback.current(reason);
     }
     async function connect() {
       const token = sessionToken();
@@ -57,7 +57,8 @@ export function useChatStream(onUpdate, open) {
                 setLive(true);
                 delay = 1500;
                 refresh();
-              } else if (frame.startsWith("event: change")) refresh();
+              } else if (frame.startsWith("event: notice")) refresh("notice");
+              else if (frame.startsWith("event: change")) refresh("change");
             }
             if (buffer.length > 8192) throw Error("Evento inválido");
           }
@@ -76,12 +77,13 @@ export function useChatStream(onUpdate, open) {
     }
     connect();
     const poll = setInterval(refresh, 15000);
-    document.addEventListener("visibilitychange", refresh);
+    const onVisibility = () => refresh();
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       controller.abort();
       clearTimeout(retry);
       clearInterval(poll);
-      document.removeEventListener("visibilitychange", refresh);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [open]);
   return live;
