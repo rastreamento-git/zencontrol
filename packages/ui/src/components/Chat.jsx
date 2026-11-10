@@ -1,5 +1,13 @@
-import { useEffect, useId, useRef, useState } from "react";
-import { ArrowLeft, MessageCircle, Search, Send } from "lucide-react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import {
+  ArrowLeft,
+  Maximize2,
+  MessageCircle,
+  Minimize2,
+  Search,
+  Send,
+  X,
+} from "lucide-react";
 import { api, errorMessage } from "../lib/api";
 import { useSession } from "../lib/session";
 import { useChatStream } from "../lib/chat-stream";
@@ -17,7 +25,7 @@ function mergeMessages(current, incoming) {
     BigInt(a.id) < BigInt(b.id) ? -1 : 1,
   );
 }
-function Conversation({ thread, revision, staff, onBack }) {
+function Conversation({ thread, revision, staff, onBack, mode }) {
   const user = useSession(),
     composer = useId();
   const scroll = useRef(null),
@@ -34,6 +42,7 @@ function Conversation({ thread, revision, staff, onBack }) {
   const [readError, setReadError] = useState(""),
     [sendError, setSendError] = useState("");
   const route = "/chat/threads/" + thread.id + "/messages";
+  const open = mode !== "closed";
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -41,6 +50,7 @@ function Conversation({ thread, revision, staff, onBack }) {
     };
   }, []);
   useEffect(() => {
+    if (!open) return;
     const controller = new AbortController();
     api
       .get(route, { signal: controller.signal })
@@ -59,11 +69,12 @@ function Conversation({ thread, revision, staff, onBack }) {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [route, revision]);
+  }, [open, route, revision]);
   useEffect(() => {
     const list = scroll.current;
-    if (list && pinned.current) list.scrollTop = list.scrollHeight;
-  }, [messages]);
+    if (mode !== "closed" && list && pinned.current)
+      list.scrollTop = list.scrollHeight;
+  }, [messages, mode]);
   async function loadOlder() {
     if (loadingOlder || !messages[0]) return;
     setLoadingOlder(true);
@@ -240,16 +251,35 @@ function Conversation({ thread, revision, staff, onBack }) {
   );
 }
 
-export default function Chat() {
+export default function Chat({ mode, onModeChange }) {
   const user = useSession(),
     staff = user.papel !== "tecnico";
+  const id = useId(),
+    windowRef = useRef(null),
+    launcher = useRef(null);
+  const open = mode !== "closed",
+    compact = mode === "mini";
+  const sizeLabel = compact
+    ? "Abrir chat em tela cheia"
+    : "Voltar ao mini chat";
   const [items, setItems] = useState(null),
     [selected, setSelected] = useState(null);
   const [query, setQuery] = useState(""),
     [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
-  const live = useChatStream(() => setRevision((n) => n + 1));
+  const live = useChatStream(() => setRevision((n) => n + 1), open);
+  useLayoutEffect(() => {
+    const panel = windowRef.current;
+    const hadFocus = panel.contains(document.activeElement);
+    // Change modality without remounting the conversation or its composer.
+    if (panel.open) panel.close();
+    if (mode === "full") panel.showModal();
+    else if (mode === "mini") panel.show();
+    else if (hadFocus && document.activeElement === document.body)
+      launcher.current.focus();
+  }, [mode]);
   useEffect(() => {
+    if (!open) return;
     const controller = new AbortController();
     const timer = setTimeout(
       () => {
@@ -274,87 +304,145 @@ export default function Chat() {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [query, revision, staff]);
+  }, [open, query, revision, staff]);
   return (
-    <section className="zen-chat" aria-label="Conversas">
-      <div className="zen-chat-heading">
-        <div>
-          <h2>{staff ? "Conversas com técnicos" : "Chat com a central"}</h2>
-          <p>
-            {staff
-              ? "Acompanhe as dúvidas e responda à equipe em campo."
-              : "Fale com a equipe de operação durante seu atendimento."}
-          </p>
-        </div>
-        <span
-          className={"zen-chat-status " + (live ? "is-live" : "")}
-          role="status"
-        >
-          {live ? "Em tempo real" : "Atualizando conversa"}
-        </span>
-      </div>
-      {error && (
-        <p className="error-banner" role="alert">
-          {error}
-        </p>
-      )}
-      <div
-        className={
-          "zen-chat-layout " +
-          (staff ? "is-staff " : "") +
-          (selected ? "has-thread" : "")
-        }
+    <>
+      <button
+        ref={launcher}
+        type="button"
+        className="primary-button zen-chat-launcher"
+        aria-haspopup="dialog"
+        aria-controls={id}
+        aria-expanded={open}
+        hidden={open}
+        onClick={() => onModeChange("mini")}
       >
-        {staff && (
-          <aside className="zen-chat-threads" aria-label="Lista de conversas">
-            <label className="zen-chat-search">
-              <Search size={17} />
-              <input
-                type="search"
-                aria-label="Buscar técnico nas conversas"
-                placeholder="Buscar técnico"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-              />
-            </label>
-            {!items && !error && <p role="status">Carregando técnicos…</p>}
-            {items?.length === 0 && <p>Nenhum técnico encontrado.</p>}
-            {items?.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                aria-current={selected?.id === t.id ? "true" : undefined}
-                className={selected?.id === t.id ? "is-selected" : ""}
-                onClick={() => setSelected(t)}
-              >
-                <MessageCircle size={17} />
-                <span>
-                  <strong>{t.name}</strong>
-                  <small>{t.preview || "Sem mensagens"}</small>
+        <MessageCircle size={19} aria-hidden="true" /> Mini chat
+      </button>
+      <dialog
+        ref={windowRef}
+        id={id}
+        className={"zen-chat-window " + (compact ? "is-mini" : "is-full")}
+        aria-labelledby={id + "-title"}
+        onCancel={(e) => {
+          e.preventDefault();
+          onModeChange("closed");
+        }}
+        onKeyDown={(e) => {
+          if (compact && e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            onModeChange("closed");
+          }
+        }}
+      >
+        <div className="zen-chat">
+          <header className="zen-chat-heading">
+            <div className="zen-chat-title">
+              <span className="zen-profile-avatar" aria-hidden="true">
+                <MessageCircle size={21} />
+              </span>
+              <div>
+                <h2 id={id + "-title"}>
+                  {staff ? "Conversas com técnicos" : "Chat com a central"}
+                </h2>
+                <span
+                  className={"zen-chat-status " + (live ? "is-live" : "")}
+                  role="status"
+                >
+                  {live ? "Em tempo real" : "Atualizando conversa"}
                 </span>
+              </div>
+            </div>
+            <div className="zen-chat-actions">
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={sizeLabel}
+                title={sizeLabel}
+                onClick={() => onModeChange(compact ? "full" : "mini")}
+              >
+                {compact ? <Maximize2 size={19} /> : <Minimize2 size={19} />}
               </button>
-            ))}
-          </aside>
-        )}
-        {selected ? (
-          <Conversation
-            key={selected.id}
-            thread={selected}
-            revision={revision}
-            staff={staff}
-            onBack={staff ? () => setSelected(null) : undefined}
-          />
-        ) : (
-          <div className="zen-chat-placeholder">
-            <MessageCircle size={28} />
-            <p>
-              {staff
-                ? "Selecione um técnico para abrir a conversa."
-                : "Abrindo conversa…"}
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Fechar chat"
+                title="Fechar chat"
+                onClick={() => onModeChange("closed")}
+              >
+                <X size={21} />
+              </button>
+            </div>
+          </header>
+          {error && (
+            <p className="error-banner" role="alert">
+              {error}
             </p>
+          )}
+          <div
+            className={
+              "zen-chat-layout " +
+              (staff ? "is-staff " : "") +
+              (selected ? "has-thread" : "")
+            }
+          >
+            {staff && (
+              <aside
+                className="zen-chat-threads"
+                aria-label="Lista de conversas"
+              >
+                <label className="zen-chat-search">
+                  <Search size={17} />
+                  <input
+                    type="search"
+                    aria-label="Buscar técnico nas conversas"
+                    placeholder="Buscar técnico"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                  />
+                </label>
+                {!items && !error && <p role="status">Carregando técnicos…</p>}
+                {items?.length === 0 && <p>Nenhum técnico encontrado.</p>}
+                {items?.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    aria-current={selected?.id === t.id ? "true" : undefined}
+                    className={selected?.id === t.id ? "is-selected" : ""}
+                    onClick={() => setSelected(t)}
+                  >
+                    <MessageCircle size={17} />
+                    <span>
+                      <strong>{t.name}</strong>
+                      <small>{t.preview || "Sem mensagens"}</small>
+                    </span>
+                  </button>
+                ))}
+              </aside>
+            )}
+            {selected ? (
+              <Conversation
+                key={selected.id}
+                thread={selected}
+                revision={revision}
+                staff={staff}
+                onBack={staff ? () => setSelected(null) : undefined}
+                mode={mode}
+              />
+            ) : (
+              <div className="zen-chat-placeholder">
+                <MessageCircle size={28} />
+                <p>
+                  {staff
+                    ? "Selecione um técnico para abrir a conversa."
+                    : "Abrindo conversa…"}
+                </p>
+              </div>
+            )}
           </div>
-        )}
-      </div>
-    </section>
+        </div>
+      </dialog>
+    </>
   );
 }
