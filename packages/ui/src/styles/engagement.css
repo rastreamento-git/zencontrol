@@ -92,6 +92,53 @@
   background: var(--ep-blue-bg, color-mix(in srgb, #387dff 13%, transparent));
   color: var(--ep-blue-ink, #3769cc);
 }
+.zen-person-avatar {
+  --zen-avatar-size: 38px;
+  display: inline-grid;
+  place-items: center;
+  width: var(--zen-avatar-size);
+  height: var(--zen-avatar-size);
+  flex: 0 0 var(--zen-avatar-size);
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--ep-primary-soft);
+  color: var(--ep-primary-ink);
+  font-size: 13px;
+  font-weight: 650;
+}
+.zen-person-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.zen-profile-identity .zen-person-avatar {
+  --zen-avatar-size: 46px;
+}
+.zen-person-status {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  width: fit-content;
+  gap: 5px;
+  color: var(--ep-muted);
+  font-size: 12px;
+}
+.zen-person-status::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.zen-person-status[data-status="online"] {
+  color: var(--ep-green-ink);
+}
+.zen-person-status[data-status="away"] {
+  color: var(--ep-amber-ink);
+}
+.zen-person-status[data-status="busy"] {
+  color: var(--ep-red-ink, #e66a75);
+}
 .zen-profile-security {
   border-top: 1px solid var(--ep-line);
   padding-top: 14px;
@@ -252,6 +299,28 @@
 .zen-chat-status.is-live {
   color: var(--ep-green-ink, #178451);
 }
+.zen-chat-preferences {
+  display: flex;
+  justify-content: flex-end;
+  padding: 5px var(--zen-chat-gap);
+  border-bottom: 1px solid var(--ep-line);
+}
+.zen-chat-preferences label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ep-muted);
+  font-size: 12px;
+}
+.zen-chat-preferences select {
+  min-height: 30px;
+  padding: 3px 7px;
+  border: 1px solid var(--ep-line);
+  border-radius: 8px;
+  background: var(--ep-canvas);
+  color: var(--ep-text);
+  font: inherit;
+}
 .zen-chat-layout {
   flex: 1;
   display: grid;
@@ -278,7 +347,31 @@
 .zen-chat-search input {
   width: 100%;
 }
-.zen-chat-threads > button {
+.zen-chat-sections {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin-bottom: 12px;
+  padding: 4px;
+  border: 1px solid var(--ep-line);
+  border-radius: 12px;
+  background: var(--ep-canvas);
+}
+.zen-chat-sections button {
+  min-height: 38px;
+  padding: 5px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ep-muted);
+  font-weight: 600;
+  line-height: 1.2;
+}
+.zen-chat-sections button[aria-pressed="true"] {
+  background: var(--ep-primary-soft);
+  color: var(--ep-primary-ink);
+}
+.zen-chat-thread {
   width: 100%;
   text-align: left;
   display: flex;
@@ -291,18 +384,31 @@
   background: transparent;
   cursor: pointer;
 }
-.zen-chat-threads > button:hover,
-.zen-chat-threads > button.is-selected {
+button.zen-chat-thread:not(:disabled):hover,
+button.zen-chat-thread[aria-current="true"] {
   background: color-mix(in srgb, var(--ep-blue-ink, #387dff) 12%, transparent);
 }
-.zen-chat-threads > button > span {
+.zen-chat-thread:disabled {
+  cursor: default;
+}
+.zen-chat-thread-name {
   display: grid;
   min-width: 0;
   gap: 4px;
   overflow-wrap: anywhere;
 }
-.zen-chat-threads > button > svg {
-  flex-shrink: 0;
+.zen-chat-roster-title {
+  margin: 14px 10px 4px;
+  color: var(--ep-muted);
+  font-size: 13px;
+}
+.zen-chat-roster {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.zen-chat-roster .zen-chat-thread {
+  cursor: default;
 }
 .zen-chat-threads small {
   overflow: hidden;
@@ -368,15 +474,29 @@
     var(--ep-surface)
   );
 }
-.zen-chat-messages li > div {
+.zen-chat-message-meta {
   display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 4px 12px;
+  align-items: center;
+  gap: 8px;
   font-size: 12px;
 }
+.zen-chat-message-meta .zen-person-avatar {
+  --zen-avatar-size: 30px;
+  font-size: 11px;
+}
+.zen-chat-message-author {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.zen-chat-message-author small {
+  color: var(--ep-muted);
+}
 .zen-chat-messages time {
+  align-self: start;
+  flex-shrink: 0;
+  margin-left: auto;
+  white-space: nowrap;
   font-size: 11px;
   color: var(--ep-muted);
 }

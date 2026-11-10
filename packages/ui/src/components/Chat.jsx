@@ -6,11 +6,24 @@ import {
   Minimize2,
   Search,
   Send,
+  Users,
   X,
 } from "lucide-react";
 import { api, errorMessage } from "../lib/api";
 import { useSession } from "../lib/session";
 import { useChatStream } from "../lib/chat-stream";
+import { presenceLabels, useChatPresence } from "../lib/chat-presence";
+import PersonAvatar, { roleLabels } from "./PersonAvatar";
+
+const teamThread = { id: "equipe", name: "Sala da operação" };
+function Presence({ status }) {
+  const value = presenceLabels[status] ? status : "offline";
+  return (
+    <span className="zen-person-status" data-status={value}>
+      {presenceLabels[value]}
+    </span>
+  );
+}
 
 const stamp = new Intl.DateTimeFormat("pt-BR", {
   day: "2-digit",
@@ -42,6 +55,7 @@ function Conversation({ thread, revision, staff, onBack, mode }) {
   const [readError, setReadError] = useState(""),
     [sendError, setSendError] = useState("");
   const route = "/chat/threads/" + thread.id + "/messages";
+  const team = thread.id === teamThread.id;
   const open = mode !== "closed";
   useEffect(() => {
     alive.current = true;
@@ -124,9 +138,7 @@ function Conversation({ thread, revision, staff, onBack, mode }) {
   return (
     <section
       className="zen-chat-conversation"
-      aria-label={
-        staff ? "Conversa com " + thread.name : "Conversa com a central"
-      }
+      aria-label={staff ? thread.name : "Conversa com a central"}
     >
       <div className="zen-chat-person">
         {onBack && (
@@ -139,16 +151,28 @@ function Conversation({ thread, revision, staff, onBack, mode }) {
             <ArrowLeft size={19} />
           </button>
         )}
-        <span className="zen-profile-avatar">
-          <MessageCircle size={21} />
-        </span>
+        {staff && !team ? (
+          <PersonAvatar
+            name={thread.name}
+            userId={thread.user_id}
+            version={thread.avatar_version}
+          />
+        ) : (
+          <span className="zen-person-avatar" aria-hidden="true">
+            <Users size={21} />
+          </span>
+        )}
         <div>
           <h3>{staff ? thread.name : "Central de operações"}</h3>
-          <small>
-            {staff
-              ? "Respondendo como " + user.nome
-              : "Operadores e administradores podem responder"}
-          </small>
+          {staff && !team ? (
+            <Presence status={thread.status} />
+          ) : (
+            <small>
+              {team
+                ? "Operadores e administradores"
+                : "Caixa compartilhada por operadores e administradores"}
+            </small>
+          )}
         </div>
       </div>
       {readError && (
@@ -196,10 +220,19 @@ function Conversation({ thread, revision, staff, onBack, mode }) {
               key={m.id}
               className={m.sender_user_id === user.id ? "is-mine" : ""}
             >
-              <div>
-                <strong>
-                  {m.sender_user_id === user.id ? "Você" : m.sender_name}
-                </strong>
+              <div className="zen-chat-message-meta">
+                <PersonAvatar
+                  name={m.sender_name}
+                  userId={m.sender_user_id}
+                  version={m.sender_avatar_version}
+                />
+                <div className="zen-chat-message-author">
+                  <strong>
+                    {m.sender_name}
+                    {m.sender_user_id === user.id ? " (você)" : ""}
+                  </strong>
+                  <small>{roleLabels[m.sender_role]}</small>
+                </div>
                 <time dateTime={m.created_at}>
                   {stamp.format(new Date(m.created_at))}
                 </time>
@@ -224,7 +257,11 @@ function Conversation({ thread, revision, staff, onBack, mode }) {
             value={draft}
             disabled={sending}
             placeholder={
-              staff ? "Escreva para o técnico…" : "Escreva para a central…"
+              team
+                ? "Escreva para a equipe…"
+                : staff
+                  ? "Escreva para o técnico…"
+                  : "Escreva para a central…"
             }
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
@@ -251,7 +288,7 @@ function Conversation({ thread, revision, staff, onBack, mode }) {
   );
 }
 
-export default function Chat({ mode, onModeChange }) {
+export default function Chat({ mode, onModeChange, targetThread, onNotice }) {
   const user = useSession(),
     staff = user.papel !== "tecnico";
   const id = useId(),
@@ -263,11 +300,31 @@ export default function Chat({ mode, onModeChange }) {
     ? "Abrir chat em tela cheia"
     : "Voltar ao mini chat";
   const [items, setItems] = useState(null),
-    [selected, setSelected] = useState(null);
+    [selected, setSelected] = useState(null),
+    [people, setPeople] = useState(null),
+    [section, setSection] = useState("inbox");
   const [query, setQuery] = useState(""),
     [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
-  const live = useChatStream(() => setRevision((n) => n + 1), open);
+  const [status, setStatus] = useChatPresence(user.id);
+  const live = useChatStream((reason) => {
+    if (open) setRevision((n) => n + 1);
+    if (staff && reason !== "change") onNotice?.(reason === "notice");
+  }, staff || open);
+  const activeThread =
+    items?.find((item) => item.id === selected?.id) || selected;
+  function showSection(next) {
+    if (next === section) return;
+    setSection(next);
+    setSelected(null);
+    setError("");
+  }
+  useEffect(() => {
+    if (!targetThread) return;
+    setSection("inbox");
+    setQuery("");
+    setSelected(targetThread);
+  }, [targetThread]);
   useLayoutEffect(() => {
     const panel = windowRef.current;
     const hadFocus = panel.contains(document.activeElement);
@@ -283,14 +340,16 @@ export default function Chat({ mode, onModeChange }) {
     const controller = new AbortController();
     const timer = setTimeout(
       () => {
+        const team = section === "team";
         api
-          .get("/chat/threads", {
+          .get(team ? "/chat/team" : "/chat/threads", {
             signal: controller.signal,
-            params: { q: query },
+            params: team ? undefined : { q: query },
           })
           .then(({ data }) => {
             if (controller.signal.aborted) return;
-            setItems(data.items);
+            if (team) setPeople(data.items);
+            else setItems(data.items);
             setError("");
             if (!staff) setSelected(data.items[0] || null);
           })
@@ -298,13 +357,13 @@ export default function Chat({ mode, onModeChange }) {
             if (!controller.signal.aborted) setError(errorMessage(e));
           });
       },
-      query ? 230 : 0,
+      section === "inbox" && query ? 230 : 0,
     );
     return () => {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [open, query, revision, staff]);
+  }, [open, query, revision, section, staff]);
   return (
     <>
       <button
@@ -344,7 +403,7 @@ export default function Chat({ mode, onModeChange }) {
               </span>
               <div>
                 <h2 id={id + "-title"}>
-                  {staff ? "Conversas com técnicos" : "Chat com a central"}
+                  {staff ? "Conversas da operação" : "Chat com a central"}
                 </h2>
                 <span
                   className={"zen-chat-status " + (live ? "is-live" : "")}
@@ -375,6 +434,19 @@ export default function Chat({ mode, onModeChange }) {
               </button>
             </div>
           </header>
+          <div className="zen-chat-preferences">
+            <label>
+              Meu status
+              <select
+                value={status}
+                onChange={(event) => setStatus(event.target.value)}
+              >
+                <option value="online">Online</option>
+                <option value="away">Ausente</option>
+                <option value="busy">Ocupado</option>
+              </select>
+            </label>
+          </div>
           {error && (
             <p className="error-banner" role="alert">
               {error}
@@ -384,7 +456,7 @@ export default function Chat({ mode, onModeChange }) {
             className={
               "zen-chat-layout " +
               (staff ? "is-staff " : "") +
-              (selected ? "has-thread" : "")
+              (activeThread ? "has-thread" : "")
             }
           >
             {staff && (
@@ -392,39 +464,109 @@ export default function Chat({ mode, onModeChange }) {
                 className="zen-chat-threads"
                 aria-label="Lista de conversas"
               >
-                <label className="zen-chat-search">
-                  <Search size={17} />
-                  <input
-                    type="search"
-                    aria-label="Buscar técnico nas conversas"
-                    placeholder="Buscar técnico"
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                  />
-                </label>
-                {!items && !error && <p role="status">Carregando técnicos…</p>}
-                {items?.length === 0 && <p>Nenhum técnico encontrado.</p>}
-                {items?.map((t) => (
+                <nav className="zen-chat-sections" aria-label="Seções do chat">
                   <button
-                    key={t.id}
                     type="button"
-                    aria-current={selected?.id === t.id ? "true" : undefined}
-                    className={selected?.id === t.id ? "is-selected" : ""}
-                    onClick={() => setSelected(t)}
+                    aria-pressed={section === "inbox"}
+                    onClick={() => showSection("inbox")}
                   >
-                    <MessageCircle size={17} />
-                    <span>
-                      <strong>{t.name}</strong>
-                      <small>{t.preview || "Sem mensagens"}</small>
-                    </span>
+                    Caixa da operação
                   </button>
-                ))}
+                  <button
+                    type="button"
+                    aria-pressed={section === "team"}
+                    onClick={() => showSection("team")}
+                  >
+                    Equipe interna
+                  </button>
+                </nav>
+                {section === "team" ? (
+                  <>
+                    <button
+                      type="button"
+                      className="zen-chat-thread"
+                      onClick={() => setSelected(teamThread)}
+                      aria-current={
+                        activeThread?.id === teamThread.id ? "true" : undefined
+                      }
+                    >
+                      <span className="zen-person-avatar" aria-hidden="true">
+                        <Users size={18} />
+                      </span>
+                      <strong>{teamThread.name}</strong>
+                    </button>
+                    <h3 className="zen-chat-roster-title">Colaboradores</h3>
+                    {!people && !error && (
+                      <p role="status">Carregando equipe…</p>
+                    )}
+                    <ul className="zen-chat-roster">
+                      {people?.map((person) => (
+                        <li key={person.id} className="zen-chat-thread">
+                          <PersonAvatar
+                            name={person.name}
+                            userId={person.id}
+                            version={person.avatar_version}
+                          />
+                          <span className="zen-chat-thread-name">
+                            <strong>{person.name}</strong>
+                            <small>{roleLabels[person.role]}</small>
+                            <Presence status={person.status} />
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                ) : (
+                  <>
+                    <label className="zen-chat-search">
+                      <Search size={17} />
+                      <input
+                        type="search"
+                        aria-label="Buscar técnico nas conversas"
+                        placeholder="Buscar técnico ou empresa"
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                      />
+                    </label>
+                    {!items && !error && (
+                      <p role="status">Carregando técnicos…</p>
+                    )}
+                    {items?.length === 0 && <p>Nenhum técnico encontrado.</p>}
+                    {items?.map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        aria-current={
+                          activeThread?.id === t.id ? "true" : undefined
+                        }
+                        className="zen-chat-thread"
+                        disabled={t.user_id === null}
+                        onClick={() => setSelected(t)}
+                      >
+                        <PersonAvatar
+                          name={t.name}
+                          userId={t.user_id}
+                          version={t.avatar_version}
+                        />
+                        <span className="zen-chat-thread-name">
+                          <strong>{t.name}</strong>
+                          <Presence status={t.status} />
+                          <small>
+                            {t.user_id === null
+                              ? "Sem acesso ao chat"
+                              : t.preview || "Sem mensagens"}
+                          </small>
+                        </span>
+                      </button>
+                    ))}
+                  </>
+                )}
               </aside>
             )}
-            {selected ? (
+            {activeThread ? (
               <Conversation
-                key={selected.id}
-                thread={selected}
+                key={activeThread.id}
+                thread={activeThread}
                 revision={revision}
                 staff={staff}
                 onBack={staff ? () => setSelected(null) : undefined}
@@ -435,7 +577,9 @@ export default function Chat({ mode, onModeChange }) {
                 <MessageCircle size={28} />
                 <p>
                   {staff
-                    ? "Selecione um técnico para abrir a conversa."
+                    ? section === "team"
+                      ? "Abra a sala para conversar com a equipe."
+                      : "Selecione um técnico para abrir a conversa."
                     : "Abrindo conversa…"}
                 </p>
               </div>

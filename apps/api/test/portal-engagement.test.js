@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const { once } = require("node:events");
 const { randomUUID } = require("node:crypto");
 const { OAuth2Client } = require("google-auth-library");
+const sharp = require("sharp");
 const { testDatabase } = require("./helpers/database.cjs");
 const { migrate } = require("../scripts/migrate");
 const { createApp } = require("../src/app");
@@ -12,7 +13,7 @@ const password = "Somente1!Teste",
   central = "http://127.0.0.1:4320",
   field = "http://127.0.0.1:4319",
   clientId = "123456-test.apps.googleusercontent.com";
-let db, server, base, operator, technician, another, tid, otherTid;
+let db, server, base, admin, operator, technician, another, tid, otherTid;
 
 async function call(path, { method = "GET", token, body, origin } = {}) {
   const res = await fetch(base + path, {
@@ -24,7 +25,10 @@ async function call(path, { method = "GET", token, body, origin } = {}) {
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  return { status: res.status, data: await res.json() };
+  return {
+    status: res.status,
+    data: res.status === 204 ? null : await res.json(),
+  };
 }
 async function signIn(login) {
   const r = await call("/api/auth/login", {
@@ -77,7 +81,8 @@ before(async () => {
   server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
   base = "http://127.0.0.1:" + server.address().port;
-  [operator, technician, another] = await Promise.all([
+  [admin, operator, technician, another] = await Promise.all([
+    signIn("admin"),
     signIn("operador"),
     signIn("tecnico"),
     signIn("outrotecnico"),
@@ -209,6 +214,166 @@ test("mensagens chegam ao vivo, mantêm a identidade real e ficam isoladas por t
   } finally {
     await reader.cancel();
   }
+});
+
+test("a caixa da operação avisa cada colaborador uma vez e identifica a resposta com foto", async () => {
+  const route = "/api/chat/threads/" + otherTid + "/messages";
+  const photo = await sharp({
+    create: { width: 16, height: 16, channels: 3, background: "#1756ac" },
+  })
+    .png()
+    .toBuffer();
+  const avatar = await call("/api/account/avatar", {
+    method: "PUT",
+    token: operator.token,
+    body: { image: "data:image/png;base64," + photo.toString("base64") },
+  });
+  assert.equal(avatar.status, 200, JSON.stringify(avatar.data));
+  const version = avatar.data.avatar_version;
+  assert.match(version, /^[a-f0-9]{64}$/);
+  const photoPath = "/api/chat/avatars/" + operator.user.id + "/" + version;
+  assert.equal((await call(photoPath, { token: another.token })).status, 404);
+  const stream = await fetch(base + "/api/chat/stream", {
+    headers: { Authorization: "Bearer " + admin.token },
+    signal: AbortSignal.timeout(5000),
+  });
+  const reader = stream.body.getReader(),
+    decoder = new TextDecoder();
+  try {
+    assert.match(decoder.decode((await reader.read()).value), /event: ready/);
+    const payload = {
+      body: "Imprevisto a caminho do atendimento fictício",
+      request_id: randomUUID(),
+      recipient_user_id: operator.user.id,
+    };
+    const send = () =>
+      call(route, {
+        method: "POST",
+        token: another.token,
+        body: payload,
+      });
+    const sends = await Promise.all([send(), send()]);
+    assert.deepEqual(sends.map((x) => x.status).sort(), [200, 201]);
+    assert.equal(sends[0].data.message.id, sends[1].data.message.id);
+    assert.match(decoder.decode((await reader.read()).value), /event: notice/);
+    async function notice(token) {
+      const response = await call("/api/notifications", { token });
+      const items = response.data.items.filter(
+        (n) => n.target === "chat" && n.detail.technician_id === otherTid,
+      );
+      assert.equal(items.length, 1);
+      return items[0];
+    }
+    const operatorNotice = await notice(operator.token);
+    assert.equal((await notice(admin.token)).id, operatorNotice.id);
+    assert.equal(
+      (
+        await call("/api/notifications/" + operatorNotice.id + "/read", {
+          method: "POST",
+          token: operator.token,
+        })
+      ).status,
+      200,
+    );
+    assert.ok((await notice(operator.token)).read_at);
+    assert.equal((await notice(admin.token)).read_at, null);
+    const reply = await call(route, {
+      method: "POST",
+      token: operator.token,
+      body: { body: "Recebido pela operação", request_id: randomUUID() },
+    });
+    assert.equal(reply.status, 201);
+    const history = await call(route, { token: another.token });
+    const responder = history.data.items.at(-1);
+    assert.equal(responder.sender_name, "Operação fictícia");
+    assert.equal(responder.sender_role, "operador");
+    assert.equal(responder.sender_avatar_version, version);
+    const visible = await call(photoPath, { token: another.token });
+    assert.equal(visible.status, 200);
+    assert.match(visible.data.image, /^data:image\/webp;base64,/);
+    assert.equal((await call(photoPath)).status, 401);
+  } finally {
+    await reader.cancel();
+  }
+});
+
+test("a sala interna é restrita e a lista mostra presença por conta", async () => {
+  const route = "/api/chat/threads/equipe/messages";
+  const payload = { body: "Aviso interno fictício", request_id: randomUUID() };
+  assert.equal(
+    (await call("/api/chat/team", { token: technician.token })).status,
+    403,
+  );
+  assert.equal((await call(route, { token: technician.token })).status, 404);
+  assert.equal(
+    (
+      await call(route, {
+        method: "POST",
+        token: technician.token,
+        body: payload,
+      })
+    ).status,
+    404,
+  );
+  const send = () =>
+    call(route, { method: "POST", token: admin.token, body: payload });
+  const internal = await send();
+  assert.equal(internal.status, 201);
+  assert.equal((await send()).status, 200);
+  assert.equal(
+    (await call(route, { token: operator.token })).data.items[0].id,
+    internal.data.message.id,
+  );
+  const messages = await call("/api/chat/threads/" + tid + "/messages", {
+    token: technician.token,
+  });
+  assert.ok(
+    messages.data.items.every((message) => message.body !== payload.body),
+  );
+  const client = randomUUID(),
+    otherClient = randomUUID();
+  const mark = (token, status, clientId = client) =>
+    call("/api/chat/presence", {
+      method: "PUT",
+      token,
+      body: { client_id: clientId, status },
+    });
+  const list = () => call("/api/chat/threads", { token: operator.token });
+  const state = async () =>
+    (await list()).data.items.find((x) => x.id === tid).status;
+  assert.equal(await state(), "offline");
+  await db.pool.query(
+    "INSERT INTO zc_technicians(name) VALUES('Empresa fictícia sem conta')",
+  );
+  const company = (await list()).data.items.find(
+    (x) => x.name === "Empresa fictícia sem conta",
+  );
+  assert.equal(company.status, "offline");
+  assert.equal(company.user_id, null);
+  assert.equal((await mark(technician.token, "away")).status, 204);
+  assert.equal(await state(), "away");
+  assert.equal(
+    (await mark(technician.token, "online", otherClient)).status,
+    204,
+  );
+  assert.equal(await state(), "online");
+  assert.equal((await mark(technician.token, "busy")).status, 204);
+  assert.equal(await state(), "busy");
+  await db.pool.query(
+    "UPDATE zc_chat_presence SET seen_at=now()-interval '3 minutes' WHERE user_id=$1",
+    [technician.user.id],
+  );
+  assert.equal(await state(), "offline");
+  assert.equal((await mark(operator.token, "online")).status, 204);
+  const roster = await call("/api/chat/team", { token: admin.token });
+  assert.equal(
+    roster.data.items.find((x) => x.id === operator.user.id).status,
+    "online",
+  );
+  assert.equal(
+    roster.data.items.find((x) => x.id === admin.user.id).role,
+    "admin",
+  );
 });
 
 test("Google exige vínculo voluntário, nonce único, origem e a sessão do próprio usuário", async (t) => {
