@@ -1,13 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { api, sessionToken, saveToken } from "./api";
 
-export function useChatStream(onUpdate) {
+export function useChatStream(onUpdate, open) {
   const callback = useRef(onUpdate);
   const [live, setLive] = useState(false);
   useEffect(() => {
     callback.current = onUpdate;
   }, [onUpdate]);
   useEffect(() => {
+    if (!open) {
+      setLive(false);
+      return;
+    }
     const controller = new AbortController();
     let retry,
       delay = 1500;
@@ -79,6 +83,6 @@ export function useChatStream(onUpdate) {
       clearInterval(poll);
       document.removeEventListener("visibilitychange", refresh);
     };
-  }, []);
+  }, [open]);
   return live;
 }

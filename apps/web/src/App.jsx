@@ -77,12 +77,11 @@ const groups = [
 export default function App() {
   const user = useSession(),
     admin = ["admin", "operador"].includes(user.papel);
-  const [tab, setTab] = useState(() => {
-      const shortcut = new URLSearchParams(window.location.search).get("area");
-      return ["agenda", "batches", "chat"].includes(shortcut)
-        ? shortcut
-        : "dashboard";
-    }),
+  const shortcut = new URLSearchParams(window.location.search).get("area");
+  const [tab, setTab] = useState(
+      ["agenda", "batches"].includes(shortcut) ? shortcut : "dashboard",
+    ),
+    [chatMode, setChatMode] = useState(shortcut === "chat" ? "full" : "closed"),
     [menu, setMenu] = useState(false),
     [search, setSearch] = useState(""),
     [query, setQuery] = useState(""),
@@ -101,8 +100,9 @@ export default function App() {
     "Fila de integrações";
   const [loading, setLoading] = useState(true);
   function navigate(t) {
-    setTab(t);
     setMenu(false);
+    if (t === "chat") setChatMode("full");
+    else setTab(t);
   }
   function refresh() {
     setRevision((r) => r + 1);
@@ -208,6 +208,7 @@ export default function App() {
                     className={"nav-item " + (tab === id ? "is-active" : "")}
                     onClick={() => navigate(id)}
                     aria-current={tab === id ? "page" : undefined}
+                    aria-haspopup={id === "chat" ? "dialog" : undefined}
                   >
                     <Icon size={18} />
                     <span>{label}</span>
@@ -362,9 +363,7 @@ export default function App() {
                 {error}
               </div>
             )}
-            {tab === "chat" ? (
-              <Chat />
-            ) : !meta || !overview ? (
+            {!meta || !overview ? (
               <Loading error={error} />
             ) : tab === "dashboard" ? (
               <Dashboard {...props} />
@@ -395,6 +394,7 @@ export default function App() {
         </div>
         <AppFooter />
       </main>
+      <Chat mode={chatMode} onModeChange={setChatMode} />
       {order && (
         <OrderEditor
           key={order.id || "new"}

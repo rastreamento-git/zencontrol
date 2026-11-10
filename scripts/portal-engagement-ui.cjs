@@ -202,10 +202,34 @@ async function main() {
     .getByRole("navigation", { name: "Acesso rápido" })
     .getByRole("link", { name: /Conversas/ })
     .click();
+  const staffChat = staff.getByRole("dialog", {
+    name: "Conversas com técnicos",
+  });
+  await staffChat.waitFor();
+  assert.ok(await staffChat.evaluate((dialog) => dialog.matches(":modal")));
+  await staffChat.getByRole("button", { name: new RegExp(tech.name) }).click();
+  const staffDraft = staffChat.getByLabel("Mensagem", { exact: true });
+  await staffDraft.fill("Central confirmou o recebimento.");
+  await staffChat.getByRole("button", { name: "Voltar ao mini chat" }).click();
+  assert.ok(!(await staffChat.evaluate((dialog) => dialog.matches(":modal"))));
+  const miniBounds = await staffChat.boundingBox();
+  assert.ok(miniBounds && miniBounds.x > staff.viewportSize().width / 2);
+  await staff.getByRole("button", { name: "Agenda", exact: true }).click();
   await staff
-    .getByRole("heading", { name: "Conversas com técnicos" })
+    .getByRole("heading", { name: "Agenda", exact: true })
+    .first()
     .waitFor();
-  await staff.getByRole("button", { name: new RegExp(tech.name) }).click();
+  await staff.screenshot({
+    path: path.join(directory, "zencontrol-mini-chat.png"),
+    fullPage: true,
+  });
+  await staffChat
+    .getByRole("button", { name: "Abrir chat em tela cheia" })
+    .click();
+  assert.equal(
+    await staffDraft.inputValue(),
+    "Central confirmou o recebimento.",
+  );
 
   const mobile = await pageFor("tecnico", { width: 390, height: 844 });
   await passwordLogin(mobile, tech.login, technicalPassword);
@@ -221,73 +245,101 @@ async function main() {
   await mobile.getByRole("button", { name: "Continuar com o Google" }).click();
   await mobile.waitForURL("http://127.0.0.1:4319/**");
   summary.googleField = "passed (provider mocked, redirected to ZenField)";
+  const fieldNav = mobile.getByRole("navigation", { name: "Áreas do portal" });
+  await fieldNav
+    .getByRole("button", { name: "Meus serviços", exact: true })
+    .click();
   await mobile
+    .getByRole("heading", { name: "Meus serviços", exact: true })
+    .waitFor();
+  await mobile.locator(".portal-order").first().click();
+  const openService = mobile.locator(".portal-service");
+  await openService.waitFor();
+  await fieldNav
     .getByRole("button", { name: "Chat com a central", exact: true })
     .click();
-  await mobile.getByText("Em tempo real", { exact: true }).waitFor();
-  await staff.getByText("Em tempo real", { exact: true }).waitFor();
-  await mobile
-    .getByLabel("Mensagem", { exact: true })
-    .fill("Cheguei ao atendimento fictício.");
-  await mobile.getByRole("button", { name: "Enviar", exact: true }).click();
-  await staff
+  const fieldChat = mobile.getByRole("dialog", { name: "Chat com a central" });
+  await fieldChat.getByText("Em tempo real", { exact: true }).waitFor();
+  await staffChat.getByText("Em tempo real", { exact: true }).waitFor();
+  const fieldDraft = fieldChat.getByLabel("Mensagem", { exact: true });
+  await fieldDraft.fill("Cheguei ao atendimento fictício.");
+  await fieldChat.getByRole("button", { name: "Voltar ao mini chat" }).click();
+  const fieldMini = await fieldChat.boundingBox();
+  const navBounds = await fieldNav.boundingBox();
+  assert.ok(
+    fieldMini && navBounds && fieldMini.y + fieldMini.height <= navBounds.y,
+  );
+  assert.equal(
+    await fieldDraft.inputValue(),
+    "Cheguei ao atendimento fictício.",
+  );
+  await fieldChat.getByRole("button", { name: "Enviar", exact: true }).click();
+  await staffChat
     .getByText("Cheguei ao atendimento fictício.", { exact: true })
     .first()
     .waitFor({ timeout: 5000 });
-  await staff
-    .getByLabel("Mensagem", { exact: true })
-    .fill("Central confirmou o recebimento.");
-  await staff.getByRole("button", { name: "Enviar", exact: true }).click();
-  await mobile
+  await staffChat.getByRole("button", { name: "Enviar", exact: true }).click();
+  await fieldChat
     .getByText("Central confirmou o recebimento.", { exact: true })
     .waitFor({ timeout: 5000 });
+  await fieldChat.getByRole("button", { name: "Fechar chat" }).click();
+  await openService.waitFor();
+  await mobile.getByRole("button", { name: "Mini chat", exact: true }).click();
+  await fieldChat
+    .getByRole("button", { name: "Abrir chat em tela cheia" })
+    .click();
   await mobile.screenshot({
     path: path.join(directory, "zenfield-chat.png"),
-    fullPage: true,
   });
   await staff.screenshot({
     path: path.join(directory, "zencontrol-chat.png"),
     fullPage: true,
   });
   await noOverflow(mobile);
-  await mobile.setViewportSize({ width: 320, height: 720 });
+  await mobile.keyboard.press("Escape");
+  await fieldChat.waitFor({ state: "hidden" });
+  await mobile.setViewportSize({ width: 320, height: 568 });
   await noOverflow(mobile);
   await mobile.getByLabel("Aparência", { exact: true }).selectOption("dark");
   await mobile.reload();
-  await mobile
+  await fieldNav
     .getByRole("button", { name: "Chat com a central", exact: true })
     .click();
-  await mobile
+  await fieldChat
     .getByText("Central confirmou o recebimento.", { exact: true })
     .waitFor();
   assert.equal(await mobile.locator("html").getAttribute("data-theme"), "dark");
-  await mobile
-    .getByRole("button", { name: "Voltar ao início", exact: true })
-    .waitFor();
-  assert.equal(
-    await mobile
-      .getByRole("navigation", { name: "Áreas do portal" })
-      .isVisible(),
-    false,
-  );
+  assert.ok(await fieldChat.evaluate((dialog) => dialog.matches(":modal")));
   await noOverflow(mobile);
-  const composerBounds = await mobile
+  const composerBounds = await fieldChat
     .locator(".zen-chat-compose")
     .boundingBox();
-  const sendBounds = await mobile
+  const sendBounds = await fieldChat
     .getByRole("button", { name: "Enviar", exact: true })
     .boundingBox();
   assert.ok(
     composerBounds &&
       sendBounds &&
       sendBounds.x + sendBounds.width <=
-        composerBounds.x + composerBounds.width + 1,
+        composerBounds.x + composerBounds.width + 1 &&
+      sendBounds.y + sendBounds.height <= mobile.viewportSize().height,
     "O botão Enviar deve caber inteiro dentro da conversa a 320 px",
   );
   await mobile.screenshot({
     path: path.join(directory, "zenfield-chat-escuro.png"),
-    fullPage: true,
   });
+  await fieldChat.getByRole("button", { name: "Voltar ao mini chat" }).click();
+  await mobile.setViewportSize({ width: 320, height: 400 });
+  const shortScreenSend = await fieldChat
+    .getByRole("button", { name: "Enviar", exact: true })
+    .boundingBox();
+  assert.ok(
+    shortScreenSend &&
+      shortScreenSend.y + shortScreenSend.height <=
+        mobile.viewportSize().height,
+    "O botão Enviar do mini chat deve caber em uma tela de 400 px de altura",
+  );
+  summary.chatModesAndDrafts = "passed";
   summary.liveChatBothDirections = "passed";
   summary.mobile320And390 = "passed";
   summary.historyAndDarkMode = "passed";
