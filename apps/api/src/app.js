@@ -16,7 +16,10 @@ const {
   configurePasswordRecovery,
   recoveryEmail,
 } = require("./password-recovery");
-const { configureChat } = require("./chat-routes");
+const {
+  configureChat,
+  directoryVersion: chatDirectoryVersion,
+} = require("./chat-routes");
 const { transaction } = require("./database");
 const { fail, HttpError, integer } = require("./errors");
 const { configuration } = require("./config");
@@ -106,6 +109,7 @@ function createApp(pool, env = process.env) {
         status: "ok",
         version: "6.4.0",
         media_storage: cfg.MEDIA_STORAGE || "local",
+        chat_directory_version: chatDirectoryVersion,
       });
     } catch {
       res.status(503).json({ status: "unavailable" });

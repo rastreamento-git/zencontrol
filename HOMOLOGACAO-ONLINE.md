@@ -4,7 +4,7 @@ Este modo publica uma demonstração descartável, com dados fictícios. **Não 
 
 Uma instância Render **Free** executa as duas APIs e PostgreSQL nativo com dois bancos separados para central e estoque. ZenField e Estoque Pro têm Static Sites e sessões independentes. O gateway expõe somente a API do estoque sob `/stock-api`, a central na raiz e arquivos fictícios sob `/demo-files`. Os demais listeners são locais. Os frontends e o backend usam a branch `feat/ecossistema-homologacao`, sem merge em `main`.
 
-**Perda de dados:** reinício, novo deploy ou suspensão por inatividade do Render apagam os registros e imagens temporários e recriam os exemplos. A senha administrativa continua a mesma variável privada, mas as ativações individuais são recriadas. Obtenha novo código na central. Baixe o backup operacional autenticado antes de encerrar uma rodada. A cópia integral de disco do guia local não fica disponível remotamente.
+Reinício, novo deploy ou suspensão por inatividade do Render apagam os registros e imagens temporários e recriam os exemplos. A senha administrativa vem da variável privada. Obtenha novas credenciais temporárias para os técnicos na central. Baixe o backup operacional autenticado antes de encerrar uma rodada.
 
 Os dois bancos são acessíveis somente por loopback e usam pools separados; esse modo não é ensaio de carga. O demonstrador local original continua usando WASM. Uma instância Free tem memória limitada: use poucos usuários e fotos de teste pequenas. Fotos continuam limitadas e privadas pelas mesmas APIs autenticadas. Não se afirma disponibilidade contínua ou custo ilimitado: há franquias de horas, tráfego e builds compartilhadas no workspace.
 
@@ -36,7 +36,7 @@ Ambos: mesma branch de homologação, `NODE_VERSION=24`, `SKIP_INSTALL_DEPS=true
 
 ## Roteiro de teste
 
-1. Login de administrador na central e no estoque. No ZenControl, gerar ativação para José; ativar e definir senha no ZenField.
+1. Entre como administrador na central e no estoque. No ZenControl, obtenha a senha temporária de José em **Equipe e acessos**. Entre com ela no ZenField e defina a senha definitiva.
 2. Selecionar instalação; testar uma foto ilegível, depois a etiqueta fictícia em `/demo-files/rastreador-jose.jpg`.
 3. Anexar as etiquetas dos equipamentos previstos e `/demo-files/checklist-ficticio.pdf`; fotos gerais/vistoria são opcionais, sem mínimo. Concluir e enviar para conferência.
 4. Conferir/aprovar na central; verificar recibo e baixa única no estoque.
@@ -51,13 +51,15 @@ Criar projetos exclusivos `zencontrol-homolog` e `zenfield-homolog`, conectados 
 
 A API temporária continua no Render. Depois de obter os endereços estáveis dos dois novos projetos, definir `ONLINE_CENTRAL_URL` (origem HTTPS da central Vercel) e atualizar `ONLINE_FIELD_URL` (origem HTTPS do ZenField Vercel) no serviço `zencontrol-homolog`. Fazer um único deploy manual da API. `ONLINE_CENTRAL_URL` é opcional e, quando ausente, preserva a origem anterior no Render. O CORS aceita apenas as origens exatas configuradas, sem curinga para previews.
 
+Ao atualizar o chat, publique primeiro `zencontrol-homolog` no Render e confira `"chat_directory_version": 1` em [`/healthz`](https://zencontrol-homolog.onrender.com/healthz). O inicializador do ambiente temporário aplica as migrações. Os dois projetos Vercel devem apontar para a mesma API em `VITE_API_URL`.
+
 No Vercel, `Production` é o destino de publicação do projeto **exclusivo de homologação**; usar essa opção somente nesses dois projetos novos, com a branch de teste. Não promover a branch de teste em projetos produtivos. Os dados continuam temporários. Nunca copiar segredos do backend para variáveis `VITE_*`.
 
 Validar as telas, a resposta de sessão a partir de cada origem, a ativação individual, uma foto fictícia, checklist e conferência na central antes de retirar os frontends antigos do Render. Só a hospedagem das interfaces muda; nenhuma transferência de banco ou fotos é necessária.
 
 ## Acesso único ZenTracking
 
-A entrada principal é o **[ZenTracking](https://zencontrol-homolog.vercel.app)**. Administradores e operadores têm acesso completo aos três sistemas e recebem cards ilustrados para ZenControl, ZenField e EstoquePro. Técnicos seguem automaticamente para seu ZenField, sem passar pelos cards. Uma conta individual é cadastrada em **ZenControl → Equipe e acessos**. O ZenField e o estoque oferecem **Entrar no ZenTracking**. Na central, o ZenField permite selecionar um técnico ativo e operar seu ambiente, com aviso permanente e auditoria da identidade real. Consulte [o fluxo e suas verificações](docs/ZENTRACKING.md). O primeiro acesso do técnico continua exigindo o código individual e a troca da senha provisória; a ativação também está disponível na entrada principal.
+A entrada principal é o **[ZenTracking](https://zencontrol-homolog.vercel.app)**. Administradores e operadores recebem os cards de ZenControl, ZenField e Estoque Pro. Técnicos seguem automaticamente para o ZenField. Uma conta individual é cadastrada em **ZenControl → Equipe e acessos**. O ZenField e o estoque oferecem **Entrar no ZenTracking**. Na central, o ZenField permite selecionar um técnico ativo e operar seu ambiente, com aviso permanente e auditoria da identidade real. Consulte [o fluxo e suas verificações](docs/ZENTRACKING.md) e [o guia de primeiro acesso e conversas](docs/PERFIL-GOOGLE-CHAT.md).
 
 O inicializador de homologação configura `SSO_LOGIN_URL`, `SSO_STOCK_URL` e `TECHNICIAN_PORTAL_URL` na central, e `ZEN_IDENTITY_API_URL`, `ZEN_LOGIN_URL`, `ZENCONTROL_INTEGRATION_SECRET` no estoque. Apenas os endereços públicos aparecem nos frontends. A integração usa o segredo já existente do estoque, exclusivamente nos servidores. No modo normal, configurar os valores equivalentes explicitamente antes de ativar o recurso; sem essa configuração, o login legado é preservado.
 

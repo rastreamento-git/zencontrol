@@ -13,7 +13,6 @@ import { useEffect, useRef, useState } from "react";
 import {
   Activity,
   Bell,
-  CalendarDays,
   CheckCheck,
   ChevronRight,
   ClipboardList,
@@ -42,7 +41,6 @@ import { Orders, OrderEditor, Volunteers } from "./components/Records";
 import TeamAccess from "./components/TeamAccess";
 import {
   Batches,
-  Finance,
   SettingsPage,
   Queue,
   HistoryPage,
@@ -57,7 +55,6 @@ const groups = [
     label: "Operação",
     items: [
       ["orders", "Ordens de serviço", ClipboardList],
-      ["agenda", "Agenda", CalendarDays],
       ["batches", "Validações", CheckCheck],
       ["chat", "Conversas", MessageCircle],
       ["blocking", "Bloqueios", ShieldCheck],
@@ -79,7 +76,9 @@ export default function App() {
     admin = ["admin", "operador"].includes(user.papel);
   const shortcut = new URLSearchParams(window.location.search).get("area");
   const [tab, setTab] = useState(
-      ["agenda", "batches"].includes(shortcut) ? shortcut : "dashboard",
+      ["orders", "agenda", "batches"].includes(shortcut)
+        ? shortcut
+        : "dashboard",
     ),
     [chatMode, setChatMode] = useState(shortcut === "chat" ? "full" : "closed"),
     [chatTarget, setChatTarget] = useState(null),
@@ -97,9 +96,12 @@ export default function App() {
     [updated, setUpdated] = useState(null);
   const body = useRef(null),
     menuToggle = useRef(null);
+  const menuTab = tab === "agenda" ? "orders" : tab;
   const title =
-    groups.flatMap((g) => g.items).find((v) => v[0] === tab)?.[1] ||
-    "Fila de integrações";
+    tab === "agenda"
+      ? "Agenda"
+      : groups.flatMap((g) => g.items).find((v) => v[0] === tab)?.[1] ||
+        "Fila de integrações";
   const [loading, setLoading] = useState(true);
   function navigate(t) {
     setMenu(false);
@@ -207,14 +209,16 @@ export default function App() {
                 .map(([id, label, Icon]) => (
                   <button
                     key={id}
-                    className={"nav-item " + (tab === id ? "is-active" : "")}
+                    className={
+                      "nav-item " + (menuTab === id ? "is-active" : "")
+                    }
                     onClick={() => navigate(id)}
-                    aria-current={tab === id ? "page" : undefined}
+                    aria-current={menuTab === id ? "page" : undefined}
                     aria-haspopup={id === "chat" ? "dialog" : undefined}
                   >
                     <Icon size={18} />
                     <span>{label}</span>
-                    {tab === id && <ChevronRight size={15} />}
+                    {menuTab === id && <ChevronRight size={15} />}
                   </button>
                 ))}
             </div>
@@ -274,28 +278,30 @@ export default function App() {
               <h1>{title}</h1>
             </div>
           </div>
-          <form
-            className="topbar-search"
-            role="search"
-            onSubmit={(e) => {
-              e.preventDefault();
-              setQuery(search.trim());
-              navigate("orders");
-            }}
-          >
-            <Search size={17} />
-            <input
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Pesquisar OS, placa ou associado…"
-              aria-label="Pesquisar OS, placa ou associado"
-              maxLength={200}
-            />
-            <button type="submit" aria-label="Executar pesquisa">
-              <ChevronRight size={18} />
-            </button>
-          </form>
+          {tab !== "orders" && (
+            <form
+              className="topbar-search"
+              role="search"
+              onSubmit={(e) => {
+                e.preventDefault();
+                setQuery(search.trim());
+                navigate("orders");
+              }}
+            >
+              <Search size={17} />
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Pesquisar OS, placa ou associado…"
+                aria-label="Pesquisar OS, placa ou associado"
+                maxLength={200}
+              />
+              <button type="submit" aria-label="Executar pesquisa">
+                <ChevronRight size={18} />
+              </button>
+            </form>
+          )}
           <div className="topbar-actions">
             <ThemeControl />
             <span className="header-date">
@@ -383,9 +389,11 @@ export default function App() {
               <Dashboard {...props} />
             ) : ["orders", "agenda"].includes(tab) ? (
               <Orders
+                key={tab}
                 {...props}
                 agenda={tab === "agenda"}
                 globalQuery={query}
+                onChangeView={navigate}
               />
             ) : tab === "volunteers" ? (
               <Volunteers {...props} />
