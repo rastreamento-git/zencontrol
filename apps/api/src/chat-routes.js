@@ -58,7 +58,7 @@ function configureChat(app, pool) {
     if (
       !(
         await pool.query(
-          "SELECT 1 FROM zc_technicians t JOIN zc_technician_accounts a ON a.technician_id=t.id JOIN usuarios u ON u.id=a.user_id WHERE t.id=$1 AND t.active=true AND u.ativo=true AND u.papel='tecnico' AND u.activation_required=false",
+          "SELECT 1 FROM zc_technicians t JOIN zc_technician_accounts a ON a.technician_id=t.id JOIN usuarios u ON u.id=a.user_id WHERE t.id=$1 AND t.active=true AND u.ativo=true AND u.papel='tecnico'",
           [id],
         )
       ).rowCount
@@ -66,10 +66,10 @@ function configureChat(app, pool) {
       fail(404, "Conversa não encontrada.");
     return { id, access };
   }
-  function signal(id, notice) {
+  function signal(id, fromStaff) {
     for (const client of subscribers) {
       if (client.staff || client.technicianId === id)
-        client.update(client.staff && notice);
+        client.update(id !== null && client.staff !== fromStaff);
     }
   }
 
@@ -132,12 +132,12 @@ function configureChat(app, pool) {
     const search =
       typeof req.query.q === "string" ? req.query.q.trim().slice(0, 120) : "";
     const { rows } = await pool.query(
-      `SELECT t.id,t.name,account.id user_id,p.avatar_version,${presence("account")} status,
+      `SELECT t.id,t.name,account.id user_id,account.activation_required,p.avatar_version,${presence("account")} status,
               recent.body preview,recent.created_at,recent.id::text last_id
        FROM zc_technicians t
        LEFT JOIN LATERAL (
-         SELECT u.id FROM zc_technician_accounts a JOIN usuarios u ON u.id=a.user_id
-         WHERE a.technician_id=t.id AND u.ativo=true AND u.papel='tecnico' AND u.activation_required=false
+         SELECT u.id,u.activation_required FROM zc_technician_accounts a JOIN usuarios u ON u.id=a.user_id
+         WHERE a.technician_id=t.id AND u.ativo=true AND u.papel='tecnico'
          ORDER BY u.id LIMIT 1
        ) account ON true
        LEFT JOIN zc_user_profiles p ON p.user_id=account.id
@@ -214,6 +214,16 @@ function configureChat(app, pool) {
             { technician_id: id, technician: access.technician.name },
             "chat",
           );
+        else if (id !== null)
+          await notify(
+            db,
+            "technician",
+            id,
+            "chat-message:" + rows[0].id,
+            "Nova mensagem da central",
+            { reason: req.user.nome || req.user.login },
+            "chat",
+          );
         return { message: rows[0], created: true };
       }
       const duplicate = (
@@ -228,7 +238,7 @@ function configureChat(app, pool) {
         fail(409, "Este envio já foi usado.");
       return { message: duplicate, created: false };
     });
-    if (created) signal(id, !access.staff);
+    if (created) signal(id, access.staff);
     res.status(created ? 201 : 200).json({ message });
   });
   app.get("/api/chat/stream", async (req, res) => {

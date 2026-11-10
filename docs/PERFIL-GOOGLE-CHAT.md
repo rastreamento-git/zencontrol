@@ -11,11 +11,21 @@ O ZenTracking reúne atalhos para agenda, conferência e conversas, além dos tr
 
 O fluxo usa Google Identity Services e valida a credencial assinada na API. Não precisa de segredo Google nem de URI de redirecionamento. Uma conta Google não cadastrada não cria usuário nem recebe permissões. A sessão emitida é a do ZenTracking; não são guardados tokens do Google. Sem o ID configurado, o acesso por usuário e senha segue disponível. O modo `online-demo` não habilita vínculo com contas Google reais.
 
+## Primeiro acesso e recuperação
+
+Em **Equipe e acessos**, cadastre o e-mail de recuperação da conta. Ao criar um técnico ou gerar nova senha temporária, entregue os dados por um canal verificado. A senha vence em 24 horas e permite apenas abrir a etapa de troca. Para contas ainda pendentes da ativação antiga, gere uma nova senha temporária ou use a recuperação com o e-mail cadastrado.
+
+Configure `RESEND_API_KEY` e `PASSWORD_RESET_FROM` na API do ZenControl. Use um remetente de domínio verificado e mantenha o rastreamento de cliques desativado para esses e-mails. O endereço confiável do ZenTracking vem de `SSO_LOGIN_URL` ou, quando a API serve a interface, de `ZEN_PUBLIC_URL`. [Configuração de domínio no Resend](https://resend.com/docs/dashboard/domains/introduction)
+
+Em **Esqueci minha senha**, o link segue para o e-mail da conta, vale por 30 minutos e só pode ser usado uma vez. A troca invalida as sessões anteriores. A demonstração precisa de um e-mail cadastrado e de remetente configurado para fazer um envio real.
+
 ## Conversas
 
 No ZenControl, abra **Conversas → Caixa da operação** para ver os técnicos cadastrados e sua presença. Técnicos ativos que ainda precisam liberar o acesso aparecem como Offline, com a indicação **Sem acesso ao chat**. No ZenField, o técnico usa **Chat com a central**. Cada mensagem entra na conversa desse técnico na caixa compartilhada e gera um aviso no sino de operadores e administradores, com leitura por conta. O aviso abre a conversa. Na resposta, o técnico vê o nome, a função e a foto de quem respondeu. Contas sem foto aparecem com iniciais.
 
 Use **Conversas → Equipe interna → Sala da operação** para conversar com os demais operadores e administradores. A lista da sala mostra os colaboradores e seu status. O histórico da sala e as conversas de cada técnico ficam separados no PostgreSQL do ZenControl.
+
+Use **Técnicos** na janela do chat para abrir a lista e iniciar uma mensagem mesmo com uma conversa aberta. O técnico recebe o aviso no sino do ZenField e pode abrir a conversa por ele.
 
 Em **Meu status**, selecione **Online**, **Ausente** ou **Ocupado**. Em Online, a presença passa para Ausente quando a aba fica oculta ou após cinco minutos sem interação. A lista mostra Offline cerca de dois minutos após o último sinal do aplicativo. Os avisos ficam no sino até a leitura, inclusive para quem entrar depois.
 
@@ -23,7 +33,7 @@ O backup operacional inclui as mensagens e preserva o nome e o papel de quem esc
 
 ## Aplicar e validar
 
-Aplique as migrações pendentes, incluindo `013_caixa_operacao.sql`, em um banco de homologação do ZenControl, separado do banco do Estoque Pro. Publique primeiro a API e depois os frontends do ZenControl e ZenField. Valide com três contas (técnico, operador e administrador), incluindo o aviso com o chat fechado e a abertura da conversa pelo sino.
+Aplique as migrações pendentes, incluindo `014_primeiro_acesso_recuperacao.sql`, em um banco de homologação do ZenControl, separado do banco do Estoque Pro. Publique primeiro a API e depois os frontends do ZenControl e ZenField. Valide o primeiro acesso, a recuperação e os avisos no sino com contas de técnico, operador e administrador.
 
 Os testes de API usam dados fictícios e simulam a confirmação de identidade do Google para verificar vínculo, reaproveitamento de credencial, edição de perfil, privacidade das conversas e entrega pelo canal em tempo real:
 

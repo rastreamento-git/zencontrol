@@ -50,6 +50,8 @@ function accessStatus(role, account, technician) {
   if (!account) return { id: "missing", text: "Sem acesso", tone: "amber" };
   if (!account.ativo)
     return { id: "inactive", text: "Desativado", tone: "gray" };
+  if (account.activation_required)
+    return { id: "pending", text: "Troca de senha pendente", tone: "amber" };
   return { id: "enabled", text: "Habilitado", tone: "mint" };
 }
 
@@ -257,6 +259,7 @@ export default function TeamAccess({ revision, refresh }) {
           >
             <option value="all">Todos os status</option>
             <option value="enabled">Habilitado</option>
+            <option value="pending">Troca de senha pendente</option>
             <option value="inactive">Inativo ou desativado</option>
             <option value="missing">Sem acesso</option>
             <option value="unlinked">Vínculo pendente</option>

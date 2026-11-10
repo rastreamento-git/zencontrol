@@ -54,8 +54,7 @@ async function main() {
     password = "Photos1!browser";
   await api("/auth/activate", {
     login: access.login,
-    password: "zen123",
-    code: access.code,
+    password: access.temporary_password,
     new_password: password,
   });
   const token = (

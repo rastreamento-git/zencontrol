@@ -12,6 +12,10 @@ const instance =
   "frontend-" + randomBytes(4).toString("hex");
 if (instance && !/^[a-zA-Z0-9_-]{1,64}$/.test(instance))
   throw Error("Nome de instância inválido.");
+const directory = path.join(
+  root,
+  ".homologation" + (instance ? "-" + instance : ""),
+);
 const results = [];
 let browser, server;
 async function api(port, endpoint, body, token) {
@@ -72,14 +76,7 @@ async function main() {
     30000,
   );
   const credentials = JSON.parse(
-    await fs.readFile(
-      path.join(
-        root,
-        ".homologation" + (instance ? "-" + instance : ""),
-        "access.json",
-      ),
-      "utf8",
-    ),
+    await fs.readFile(path.join(directory, "access.json"), "utf8"),
   );
   const centralToken = (
     await api(4317, "/auth/login", {
@@ -311,7 +308,30 @@ async function main() {
       const token = await tokenFor("stock", 4318);
       const page = await pageFor(4321, token, "invent.session");
       await page
-        .getByRole("button", { name: "Rastreabilidade global", exact: true })
+        .getByRole("heading", { name: "Visão do estoque", exact: true })
+        .waitFor();
+      const size = page.viewportSize();
+      await page.setViewportSize({ width: 320, height: 720 });
+      const quickActions = page.getByRole("group", {
+        name: "Ações rápidas do estoque",
+      });
+      assert.ok(
+        await quickActions
+          .getByRole("button", { name: /Registrar entrada/ })
+          .isVisible(),
+      );
+      assert.ok(
+        await quickActions
+          .getByRole("button", { name: /Rastrear IMEI ou serial/ })
+          .isVisible(),
+      );
+      await page.screenshot({
+        path: path.join(directory, "estoque-mobile.png"),
+      });
+      await page.setViewportSize(size);
+      await page
+        .getByRole("group", { name: "Ações rápidas do estoque" })
+        .getByRole("button", { name: /Rastrear IMEI ou serial/ })
         .click();
       const search = page.getByLabel(
         "Pesquisar equipamento ou digitar atalho",
@@ -411,10 +431,10 @@ async function main() {
           .getByRole("button", { name: "Salvar", exact: true })
           .click();
         const activation = page.getByRole("dialog", {
-          name: "Dados de ativação do ZenField",
+          name: "Primeiro acesso ao ZenField",
         });
         await activation
-          .getByText("Código de uso único", { exact: true })
+          .getByText("Senha temporária", { exact: true })
           .waitFor();
         assert.ok((await activation.locator("code").textContent()).trim());
         await activation

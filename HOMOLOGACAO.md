@@ -37,7 +37,7 @@ O inicializador recusa `DATABASE_URL`, `TEST_DATABASE_URL` e `NODE_ENV=productio
 
 A entrada **ZenTracking** apresenta cards dos três aplicativos para administradores e operadores, ambos com acesso completo. Técnicos entram diretamente no ZenField. No ZenField, a central pode selecionar e operar o ambiente de um técnico ativo; a auditoria preserva a identidade real. Veja [o fluxo detalhado](docs/ZENTRACKING.md).
 
-O terminal informa a senha fictícia do administrador. O login é `admin` no ZenControl e no Estoque Pro. As credenciais locais geradas ficam em `.homologation/access.json`, protegido e ignorado pelo Git. Não são credenciais produtivas. O primeiro acesso dos técnicos usa login individual, `zen123`, código de ativação e uma nova senha de no mínimo 8 caracteres, com maiúscula, minúscula, número e símbolo. Nenhuma senha definitiva de técnico é gravada em texto simples.
+O terminal informa a senha fictícia do administrador. O login é `admin` no ZenControl e no Estoque Pro. As credenciais locais de teste ficam em `.homologation/access.json`, protegido e ignorado pelo Git. No primeiro acesso, o técnico entra com seu usuário e a senha temporária individual e define uma senha com pelo menos oito caracteres, com maiúscula, minúscula, número e símbolo.
 
 Use Ctrl+C para encerrar: o worker termina a tarefa atual, os servidores fecham e os bancos são persistidos. Os dados permanecem ao reiniciar. Não rode dois inicializadores nas mesmas portas. Se uma inicialização for interrompida antes de popular a base, preserve a pasta incompleta com outro nome e inicie uma instância nova; não use comandos de reset em banco remoto.
 
@@ -60,10 +60,10 @@ Os arquivos também podem ser baixados, por exemplo, em http://127.0.0.1:4319/de
 ### A — Cadastro e primeiro acesso
 
 1. Entre no ZenTracking como administrador, abra o card **ZenControl** e **Equipe técnica** e cadastre José da Silva Martins, ou use o José já populado.
-2. Um cadastro novo devolve login e ativação. Para um existente, use **Gerar código de acesso ZenField**. A emissão revoga as sessões desse usuário e expira em 24 horas.
-3. Abra o ZenField. A senha `zen123` sozinha deve falhar.
-4. Marque **Primeiro acesso ou redefinição**, informe login, senha provisória, código e nova senha com pelo menos 8 caracteres, com maiúscula, minúscula, número e símbolo.
-5. Entre com a nova senha. Reutilizar o código deve falhar.
+2. Um cadastro novo devolve o usuário e a senha temporária. Para renovar, abra **Acesso ao ZenField → Gerar nova senha temporária**. A emissão revoga as sessões e vence em 24 horas.
+3. Abra o ZenField e entre com o usuário e a senha temporária.
+4. Em **Defina sua primeira senha**, informe e confirme a nova senha.
+5. Entre com a nova senha e confira que a temporária deixou de funcionar.
 6. Entre como Maria e confirme que OS, evidências, estoque, solicitações e demonstrativos de José não aparecem. As APIs também recusam IDs de outro técnico.
 
 ### B — Distribuição interna

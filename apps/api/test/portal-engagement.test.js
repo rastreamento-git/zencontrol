@@ -180,7 +180,7 @@ test("mensagens chegam ao vivo, mantêm a identidade real e ficam isoladas por t
     assert.equal(sent.status, 201, JSON.stringify(sent.data));
     assert.equal(sent.data.message.sender_user_id, operator.user.id);
     assert.equal(sent.data.message.sender_role, "operador");
-    assert.match(decoder.decode((await reader.read()).value), /event: change/);
+    assert.match(decoder.decode((await reader.read()).value), /event: notice/);
     const retry = await call(route, {
       method: "POST",
       token: operator.token,
