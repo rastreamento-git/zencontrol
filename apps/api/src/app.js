@@ -20,6 +20,7 @@ const {
   configureChat,
   directoryVersion: chatDirectoryVersion,
 } = require("./chat-routes");
+const { chatPhotoVersion } = require("./chat-photos");
 const { transaction } = require("./database");
 const { fail, HttpError, integer } = require("./errors");
 const { configuration } = require("./config");
@@ -110,6 +111,7 @@ function createApp(pool, env = process.env) {
         version: "6.4.0",
         media_storage: cfg.MEDIA_STORAGE || "local",
         chat_directory_version: chatDirectoryVersion,
+        chat_photo_version: chatPhotoVersion,
       });
     } catch {
       res.status(503).json({ status: "unavailable" });
@@ -133,7 +135,7 @@ function createApp(pool, env = process.env) {
   };
   app.locals.config = cfg;
   configureProfile(app, pool);
-  configureChat(app, pool);
+  configureChat(app, pool, cfg);
   require("./field-access").configureFieldAccess(app, pool);
   require("./operational-routes").configureOperational(app, pool, auth);
   require("./ecosystem-routes").configureEcosystem(app, pool, cfg, auth);

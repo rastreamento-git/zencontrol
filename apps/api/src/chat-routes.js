@@ -1,7 +1,16 @@
+const { json } = require("express");
 const { rateLimit } = require("express-rate-limit");
+const {
+  chatPhotoVersion,
+  photoMessageType,
+  maxChatPhotos,
+  decodePhotos,
+  preparePhotos,
+} = require("./chat-photos");
 const { transaction } = require("./database");
 const { fail, integer } = require("./errors");
 const { isStaff } = require("./field-access");
+const { createMediaStore } = require("./media-store");
 const { notify } = require("./notifications");
 
 const pageSize = 50;
@@ -10,7 +19,11 @@ const directoryVersion = 1;
 const uuidPattern =
   /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const messageColumns =
-  "m.id::text id,m.technician_id,m.sender_user_id,m.sender_name,m.sender_role,m.body,m.created_at";
+  "m.id::text id,m.technician_id,m.sender_user_id,m.sender_name,m.sender_role,m.body,m.created_at,jsonb_array_length(m.photos) photo_count";
+const messageId = (value) =>
+  typeof value === "string" &&
+  /^[1-9]\d{0,18}$/.test(value) &&
+  BigInt(value) <= 9223372036854775807n;
 const presence = (user) => `COALESCE((
   SELECT status FROM zc_chat_presence
   WHERE user_id=${user}.id AND seen_at>now()-interval '2 minutes'
@@ -18,8 +31,33 @@ const presence = (user) => `COALESCE((
   LIMIT 1
 ),'offline')`;
 
-function configureChat(app, pool) {
+async function existingMessage(db, id, userId, requestId) {
+  const { rows } = await db.query(
+    `SELECT ${messageColumns},m.photos,p.avatar_version sender_avatar_version
+     FROM zc_chat_messages m LEFT JOIN zc_user_profiles p ON p.user_id=m.sender_user_id
+     WHERE m.technician_id IS NOT DISTINCT FROM $1::int AND m.sender_user_id=$2 AND m.request_id=$3`,
+    [id, userId, requestId],
+  );
+  return rows[0];
+}
+
+function retryMessage(previous, body, photos) {
+  const { photos: references, ...message } = previous || {};
+  if (
+    !previous ||
+    message.body !== body ||
+    references.length !== photos.length ||
+    references.some(
+      (photo, i) => photo.source_sha256 !== photos[i].source_sha256,
+    )
+  )
+    fail(409, "Este envio já foi usado.");
+  return message;
+}
+
+function configureChat(app, pool, cfg) {
   const subscribers = new Set();
+  const media = createMediaStore(cfg);
   const chatLimit = (limit, error) =>
     rateLimit({
       windowMs: 60000,
@@ -30,6 +68,11 @@ function configureChat(app, pool) {
       message: { error },
     });
   const sendLimit = chatLimit(30, "Muitas mensagens. Aguarde um minuto.");
+  const photoParser = json({
+    type: photoMessageType,
+    limit: "6mb",
+    inflate: false,
+  });
   const presenceLimit = chatLimit(60, "Aguarde para atualizar seu status.");
 
   async function scope(req) {
@@ -103,7 +146,7 @@ function configureChat(app, pool) {
        WHERE u.ativo=true AND u.papel IN ('admin','operador')
        ORDER BY u.nome,u.id`,
     );
-    res.json({ items: rows });
+    res.json({ items: rows, photo_version: chatPhotoVersion });
   });
   app.get("/api/chat/avatars/:id/:version", async (req, res) => {
     const access = await scope(req);
@@ -130,7 +173,11 @@ function configureChat(app, pool) {
   });
   app.get("/api/chat/threads", async (req, res) => {
     const access = await scope(req);
-    if (!access.staff) return res.json({ items: [access.technician] });
+    if (!access.staff)
+      return res.json({
+        items: [access.technician],
+        photo_version: chatPhotoVersion,
+      });
     const search =
       typeof req.query.q === "string" ? req.query.q.trim().slice(0, 120) : "";
     const { rows } = await pool.query(
@@ -144,7 +191,8 @@ function configureChat(app, pool) {
        ) account ON true
        LEFT JOIN zc_user_profiles p ON p.user_id=account.id
        LEFT JOIN LATERAL (
-         SELECT id,body,created_at FROM zc_chat_messages WHERE technician_id=t.id ORDER BY id DESC LIMIT 1
+         SELECT id,COALESCE(NULLIF(body,''),'Foto') body,created_at
+         FROM zc_chat_messages WHERE technician_id=t.id ORDER BY id DESC LIMIT 1
        ) recent ON true
        WHERE t.active=true AND ($1='' OR strpos(lower(t.name),lower($1))>0)
        ORDER BY recent.id DESC NULLS LAST,t.name,t.id LIMIT $2`,
@@ -154,17 +202,13 @@ function configureChat(app, pool) {
       items: rows.slice(0, directoryLimit),
       has_more: rows.length > directoryLimit,
       directory_version: directoryVersion,
+      photo_version: chatPhotoVersion,
     });
   });
   app.get("/api/chat/threads/:id/messages", async (req, res) => {
     const { id } = await thread(req);
     const before = req.query.before || null;
-    if (
-      before !== null &&
-      (typeof before !== "string" ||
-        !/^[1-9]\d{0,18}$/.test(before) ||
-        BigInt(before) > 9223372036854775807n)
-    )
+    if (before !== null && !messageId(before))
       fail(400, "Página de mensagens inválida.");
     const where =
       id === null ? "m.technician_id IS NULL" : "m.technician_id=$3";
@@ -182,71 +226,139 @@ function configureChat(app, pool) {
       has_older: rows.length > pageSize,
     });
   });
-  app.post("/api/chat/threads/:id/messages", sendLimit, async (req, res) => {
-    const { id, access } = await thread(req);
-    const body = typeof req.body.body === "string" ? req.body.body.trim() : "";
-    const requestId = req.body.request_id;
-    if (
-      !body ||
-      body.length > 2000 ||
-      /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(body)
-    )
-      fail(400, "Escreva uma mensagem de até 2.000 caracteres.");
-    if (typeof requestId !== "string" || !uuidPattern.test(requestId))
-      fail(400, "Envio inválido. Tente novamente.");
-    const { message, created } = await transaction(pool, async (db) => {
-      const { rows } = await db.query(
-        `INSERT INTO zc_chat_messages AS m(technician_id,sender_user_id,sender_name,sender_role,body,request_id)
-         VALUES($1,$2,$3,$4,$5,$6)
-         ON CONFLICT DO NOTHING RETURNING ${messageColumns},
-           (SELECT avatar_version FROM zc_user_profiles WHERE user_id=m.sender_user_id) sender_avatar_version`,
-        [
+  app.get(
+    "/api/chat/threads/:id/messages/:messageId/photos/:position",
+    async (req, res) => {
+      const { id } = await thread(req);
+      const { messageId: message, position } = req.params;
+      const index = Number(position) - 1;
+      if (
+        !messageId(message) ||
+        !Number.isInteger(index) ||
+        index < 0 ||
+        index >= maxChatPhotos
+      )
+        fail(404, "Foto não encontrada.");
+      const { rows } = await pool.query(
+        "SELECT photos -> $3::int photo FROM zc_chat_messages WHERE technician_id IS NOT DISTINCT FROM $1::int AND id=$2::bigint",
+        [id, message, index],
+      );
+      if (!rows[0]?.photo) fail(404, "Foto não encontrada.");
+      try {
+        res
+          .type("image/jpeg")
+          .set("Cache-Control", "private, no-store")
+          .send(await media.read(rows[0].photo.path));
+      } catch (error) {
+        if (error.code === "ENOENT") fail(404, "Foto não encontrada.");
+        throw error;
+      }
+    },
+  );
+  app.post(
+    "/api/chat/threads/:id/messages",
+    sendLimit,
+    photoParser,
+    async (req, res) => {
+      const { id, access } = await thread(req);
+      if (!req.body || typeof req.body !== "object" || Array.isArray(req.body))
+        fail(400, "Mensagem inválida.");
+      const body =
+        typeof req.body.body === "string" ? req.body.body.trim() : "";
+      const requestId = req.body.request_id;
+      if (body.length > 2000 || /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(body))
+        fail(400, "Escreva uma mensagem de até 2.000 caracteres.");
+      if (typeof requestId !== "string" || !uuidPattern.test(requestId))
+        fail(400, "Envio inválido. Tente novamente.");
+      const photos = decodePhotos(req.body.photos);
+      if (!body && !photos.length)
+        fail(400, "Escreva uma mensagem ou anexe uma foto.");
+      if (photos.length) {
+        const previous = await existingMessage(
+          pool,
           id,
           req.user.id,
-          req.user.nome || req.user.login,
-          req.user.papel,
-          body,
           requestId,
-        ],
-      );
-      if (rows[0]) {
-        if (!access.staff)
-          await notify(
-            db,
-            "central",
-            null,
-            "chat-message:" + rows[0].id,
-            "Nova mensagem de técnico",
-            { technician_id: id, technician: access.technician.name },
-            "chat",
-          );
-        else if (id !== null)
-          await notify(
-            db,
-            "technician",
-            id,
-            "chat-message:" + rows[0].id,
-            "Nova mensagem da central",
-            { reason: req.user.nome || req.user.login },
-            "chat",
-          );
-        return { message: rows[0], created: true };
+        );
+        if (previous)
+          return res.json({ message: retryMessage(previous, body, photos) });
       }
-      const duplicate = (
-        await db.query(
-          `SELECT ${messageColumns},p.avatar_version sender_avatar_version
-           FROM zc_chat_messages m LEFT JOIN zc_user_profiles p ON p.user_id=m.sender_user_id
-           WHERE m.technician_id IS NOT DISTINCT FROM $1::int AND m.sender_user_id=$2 AND m.request_id=$3`,
-          [id, req.user.id, requestId],
-        )
-      ).rows[0];
-      if (!duplicate || duplicate.body !== body)
-        fail(409, "Este envio já foi usado.");
-      return { message: duplicate, created: false };
-    });
-    if (created) signal(id, access.staff);
-    res.status(created ? 201 : 200).json({ message });
-  });
+      const prepared = await preparePhotos(photos);
+      const uploaded = [];
+      let commitPending = false;
+      let result;
+      try {
+        for (const photo of prepared) {
+          uploaded.push(photo.reference.path);
+          await media.put(photo.reference.path, photo.bytes);
+        }
+        result = await transaction(pool, async (db) => {
+          const { rows } = await db.query(
+            `INSERT INTO zc_chat_messages AS m(technician_id,sender_user_id,sender_name,sender_role,body,request_id,photos)
+         VALUES($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT DO NOTHING RETURNING ${messageColumns},
+           (SELECT avatar_version FROM zc_user_profiles WHERE user_id=m.sender_user_id) sender_avatar_version`,
+            [
+              id,
+              req.user.id,
+              req.user.nome || req.user.login,
+              req.user.papel,
+              body,
+              requestId,
+              JSON.stringify(prepared.map((photo) => photo.reference)),
+            ],
+          );
+          if (rows[0]) {
+            if (!access.staff)
+              await notify(
+                db,
+                "central",
+                null,
+                "chat-message:" + rows[0].id,
+                "Nova mensagem de técnico",
+                { technician_id: id, technician: access.technician.name },
+                "chat",
+              );
+            else if (id !== null)
+              await notify(
+                db,
+                "technician",
+                id,
+                "chat-message:" + rows[0].id,
+                "Nova mensagem da central",
+                { reason: req.user.nome || req.user.login },
+                "chat",
+              );
+            // A connection error during COMMIT may still leave a valid message.
+            commitPending = true;
+            return { message: rows[0], created: true };
+          }
+          const duplicate = await existingMessage(
+            db,
+            id,
+            req.user.id,
+            requestId,
+          );
+          return {
+            message: retryMessage(duplicate, body, photos),
+            created: false,
+          };
+        });
+      } finally {
+        if (!commitPending && uploaded.length) {
+          try {
+            await media.remove(uploaded);
+          } catch {
+            console.warn(
+              JSON.stringify({ event: "chat_photo_cleanup_failed" }),
+            );
+          }
+        }
+      }
+      if (result.created) signal(id, access.staff);
+      res.status(result.created ? 201 : 200).json({ message: result.message });
+    },
+  );
   app.get("/api/chat/stream", async (req, res) => {
     const access = await scope(req);
     if (

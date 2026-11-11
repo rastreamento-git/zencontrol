@@ -58,6 +58,13 @@ function createMediaStore(cfg) {
     store = {
       ready: async () => {},
       read: (name) => fs.readFile(path.join(root, checked(name))),
+      async remove(names) {
+        await Promise.all(
+          names.map((name) =>
+            fs.rm(path.join(root, checked(name)), { force: true }),
+          ),
+        );
+      },
       async put(name, bytes) {
         checked(name);
         await fs.mkdir(root, { recursive: true });
@@ -106,6 +113,10 @@ function createMediaStore(cfg) {
         if (error || !data) throw unavailable();
         if (data.size > 16 * 1024 * 1024) throw unavailable();
         return Buffer.from(await data.arrayBuffer());
+      },
+      async remove(names) {
+        const { error } = await bucket.remove(names.map(checked));
+        if (error) throw unavailable();
       },
       async put(name, bytes) {
         checked(name);

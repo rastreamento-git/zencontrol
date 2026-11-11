@@ -2,6 +2,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const os = require("node:os");
 const { createMediaStore, photoName } = require("./media-store");
+const { maxChatPhotos, validPhotoReference } = require("./chat-photos");
 const { createHash } = require("node:crypto");
 const { transaction } = require("./database");
 const { fail } = require("./errors");
@@ -65,6 +66,9 @@ async function prepareBackup(pool, cfg) {
     for (const name of new Set(
       [
         ...snapshot.data.zc_evidence.flatMap((e) => [e.path, e.original_path]),
+        ...snapshot.data.zc_chat_messages.flatMap((m) =>
+          m.photos.map((p) => p.path),
+        ),
         ...snapshot.data.zc_payments.map((p) => p.receipt_path),
         ...snapshot.data.zc_requests
           .filter((r) => r.kind === "expense")
@@ -185,6 +189,19 @@ async function restoreBackup(pool, cfg, source, apply = false) {
     for (const name of [e.path, e.original_path].filter(Boolean))
       if (!media.has(name))
         fail(400, "Uma foto referenciada não está no backup.");
+  if (!Array.isArray(snapshot.data.zc_chat_messages))
+    fail(400, "Mensagens em formato inválido.");
+  for (const message of snapshot.data.zc_chat_messages) {
+    if (message?.photos === undefined) continue;
+    if (
+      !Array.isArray(message.photos) ||
+      message.photos.length > maxChatPhotos ||
+      message.photos.some(
+        (photo) => !validPhotoReference(photo) || !media.has(photo.path),
+      )
+    )
+      fail(400, "Foto do chat inválida ou ausente no backup.");
+  }
   for (const p of snapshot.data.zc_payments)
     if (p.receipt_path && !media.has(p.receipt_path))
       fail(400, "Comprovante ausente no backup.");
