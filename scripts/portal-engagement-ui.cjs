@@ -687,6 +687,39 @@ async function main() {
     .click();
   const expanded = staff.getByRole("dialog", { name: "etiqueta.png" });
   await expanded.getByRole("img").waitFor();
+  assert.ok(
+    await expanded
+      .getByRole("button", { name: "Imagem anterior", exact: true })
+      .isDisabled(),
+  );
+  await expanded
+    .getByRole("button", { name: "Próxima imagem", exact: true })
+    .click();
+  const nextPhoto = staff.getByRole("dialog", {
+    name: "Foto da câmera.jpg",
+    exact: true,
+  });
+  await nextPhoto.getByRole("img").waitFor();
+  await nextPhoto.getByText("2 de 2", { exact: true }).waitFor();
+  const downloadEvent = staff.waitForEvent("download");
+  await nextPhoto
+    .getByRole("link", { name: "Baixar Foto da câmera.jpg", exact: true })
+    .click();
+  const download = await downloadEvent;
+  assert.equal(download.suggestedFilename(), "Foto da câmera.jpg");
+  assert.equal(await download.failure(), null);
+  const downloadedBytes = await fs.readFile(await download.path());
+  assert.equal((await sharp(downloadedBytes).metadata()).format, "jpeg");
+
+  assert.ok(
+    await nextPhoto
+      .getByRole("button", { name: "Próxima imagem", exact: true })
+      .isDisabled(),
+  );
+  await staff.keyboard.press("ArrowLeft");
+  await expanded.getByRole("img").waitFor();
+  await expanded.getByText("1 de 2", { exact: true }).waitFor();
+
   await staff.keyboard.press("Escape");
   await expanded.waitFor({ state: "hidden" });
   await staffChat.waitFor();
