@@ -214,7 +214,10 @@ function Conversation({
     if (request.current?.body !== body || request.current.photos !== photos)
       request.current = { body, photos, request_id: crypto.randomUUID() };
     const payload = { body, request_id: request.current.request_id };
-    if (photos.length) payload.photos = photos.map((photo) => photo.data);
+    if (photos.length) {
+      payload.photos = photos.map((photo) => photo.data);
+      payload.photo_names = photos.map((photo) => photo.name);
+    }
     setSending(true);
     setSendError("");
     try {
@@ -326,52 +329,70 @@ function Conversation({
           aria-label="Histórico de mensagens"
           aria-live="polite"
         >
-          {messages.map((m) => (
-            <li
-              key={m.id}
-              className={
-                (m.sender_user_id === user.id ? "is-mine " : "") +
-                (m.photo_count > 0 ? "has-photos" : "")
-              }
-            >
-              <div className="zen-chat-message-meta">
-                <PersonAvatar
-                  name={m.sender_name}
-                  userId={m.sender_user_id}
-                  version={m.sender_avatar_version}
-                />
-                <div className="zen-chat-message-author">
-                  <strong>
-                    {m.sender_name}
-                    {m.sender_user_id === user.id ? " (você)" : ""}
-                  </strong>
-                  <small>{roleLabels[m.sender_role]}</small>
-                </div>
-                <time dateTime={m.created_at}>
-                  {stamp.format(new Date(m.created_at))}
-                </time>
-              </div>
-              {m.body && <p>{m.body}</p>}
-              {m.photo_count > 0 && (
-                <div
-                  className={
-                    "zen-chat-photo-grid" +
-                    (m.photo_count === 1 ? " is-single" : "")
-                  }
-                >
-                  {Array.from({ length: m.photo_count }, (_, index) => (
-                    <ChatMessagePhoto
-                      key={index}
-                      path={route + "/" + m.id + "/photos/" + (index + 1)}
-                      author={m.sender_name}
-                      position={index + 1}
-                      open={open}
+          {messages.map((m, index) => {
+            const previous = messages[index - 1];
+            const grouped =
+              previous?.sender_user_id === m.sender_user_id &&
+              new Date(m.created_at) - new Date(previous.created_at) < 300000;
+            return (
+              <li
+                key={m.id}
+                className={
+                  (m.sender_user_id === user.id ? "is-mine " : "") +
+                  (m.photo_count > 0 ? "has-photos " : "") +
+                  (grouped ? "is-grouped" : "")
+                }
+              >
+                {!grouped && (
+                  <div className="zen-chat-message-meta">
+                    <PersonAvatar
+                      name={m.sender_name}
+                      userId={m.sender_user_id}
+                      version={m.sender_avatar_version}
                     />
-                  ))}
-                </div>
-              )}
-            </li>
-          ))}
+                    <div className="zen-chat-message-author">
+                      <strong>
+                        {m.sender_name}
+                        {m.sender_user_id === user.id ? " (você)" : ""}
+                      </strong>
+                      <small>{roleLabels[m.sender_role]}</small>
+                    </div>
+                    <time dateTime={m.created_at}>
+                      {stamp.format(new Date(m.created_at))}
+                    </time>
+                  </div>
+                )}
+                {grouped && (
+                  <time
+                    className="zen-chat-inline-time"
+                    dateTime={m.created_at}
+                  >
+                    {stamp.format(new Date(m.created_at))}
+                  </time>
+                )}
+                {m.body && <p>{m.body}</p>}
+                {m.photo_count > 0 && (
+                  <div
+                    className={
+                      "zen-chat-photo-grid" +
+                      (m.photo_count === 1 ? " is-single" : "")
+                    }
+                  >
+                    {Array.from({ length: m.photo_count }, (_, index) => (
+                      <ChatMessagePhoto
+                        key={index}
+                        path={route + "/" + m.id + "/photos/" + (index + 1)}
+                        name={m.photo_names?.[index]}
+                        author={m.sender_name}
+                        position={index + 1}
+                        open={open}
+                      />
+                    ))}
+                  </div>
+                )}
+              </li>
+            );
+          })}
         </ol>
       </div>
       <form onSubmit={send} className="zen-chat-compose">
@@ -393,7 +414,8 @@ function Conversation({
             <div className="zen-chat-photo-drafts" aria-label="Fotos a enviar">
               {photos.map((photo) => (
                 <div className="zen-chat-photo-draft" key={photo.id}>
-                  <img src={photo.data} alt={photo.name} />
+                  <ImageIcon size={15} aria-hidden="true" />
+                  <span title={photo.name}>{photo.name}</span>
                   <button
                     type="button"
                     className="icon-button"
@@ -450,7 +472,7 @@ function Conversation({
                 disabled={!canAttach}
                 onClick={() => attachmentInput.current.click()}
               >
-                <Paperclip size={17} /> Anexar
+                <Paperclip size={17} /> <span>Anexar</span>
               </button>
               <button
                 type="button"
@@ -459,7 +481,7 @@ function Conversation({
                 disabled={!canAttach}
                 onClick={openCamera}
               >
-                <Camera size={17} /> Câmera
+                <Camera size={17} /> <span>Câmera</span>
               </button>
               <input
                 ref={attachmentInput}
@@ -483,9 +505,10 @@ function Conversation({
             <button
               type="submit"
               className="primary-button"
+              aria-label={sending ? "Enviando…" : "Enviar"}
               disabled={!canSend}
             >
-              <Send size={17} /> {sending ? "Enviando…" : "Enviar"}
+              <Send size={17} /> <span>{sending ? "Enviando…" : "Enviar"}</span>
             </button>
           </div>
         </div>

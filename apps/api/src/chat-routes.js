@@ -19,7 +19,7 @@ const directoryVersion = 1;
 const uuidPattern =
   /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const messageColumns =
-  "m.id::text id,m.technician_id,m.sender_user_id,m.sender_name,m.sender_role,m.body,m.created_at,jsonb_array_length(m.photos) photo_count";
+  "m.id::text id,m.technician_id,m.sender_user_id,m.sender_name,m.sender_role,m.body,m.created_at,jsonb_array_length(m.photos) photo_count, ARRAY(SELECT photo->>'name' FROM jsonb_array_elements(m.photos) AS photo) photo_names";
 const messageId = (value) =>
   typeof value === "string" &&
   /^[1-9]\d{0,18}$/.test(value) &&
@@ -270,7 +270,7 @@ function configureChat(app, pool, cfg) {
         fail(400, "Escreva uma mensagem de até 2.000 caracteres.");
       if (typeof requestId !== "string" || !uuidPattern.test(requestId))
         fail(400, "Envio inválido. Tente novamente.");
-      const photos = decodePhotos(req.body.photos);
+      const photos = decodePhotos(req.body.photos, req.body.photo_names);
       if (!body && !photos.length)
         fail(400, "Escreva uma mensagem ou anexe uma foto.");
       if (photos.length) {
