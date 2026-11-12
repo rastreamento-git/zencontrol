@@ -1119,3 +1119,26 @@ button.zen-chat-thread[aria-current="true"] {
   text-decoration: none;
   min-height: 40px;
 }
+
+.zen-chat-gallery-nav {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--ep-surface);
+  padding-block: 6px;
+  flex-wrap: nowrap;
+}
+.zen-chat-gallery-nav button {
+  padding-inline: 8px;
+  gap: 4px;
+  font-size: 12px;
+}
+.zen-chat-gallery-nav span {
+  white-space: nowrap;
+}
+.zen-chat-gallery-scope {
+  display: block;
+  color: var(--ep-muted);
+  margin-bottom: 6px;
+  font-size: 12px;
+}
