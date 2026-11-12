@@ -1093,3 +1093,29 @@ button.zen-chat-thread[aria-current="true"] {
 .zen-chat-messages li.is-grouped > .zen-chat-photo-grid {
   grid-column: 1 / -1;
 }
+
+.zen-chat-gallery-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.zen-chat-gallery-nav button {
+  min-width: 44px;
+  min-height: 44px;
+}
+.zen-chat-gallery-nav span {
+  color: var(--ep-muted);
+  font-size: 13px;
+}
+
+.zen-chat-gallery-download {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+.zen-chat-gallery-download a {
+  text-decoration: none;
+  min-height: 40px;
+}

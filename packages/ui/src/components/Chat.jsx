@@ -383,6 +383,8 @@ function Conversation({
                         key={index}
                         path={route + "/" + m.id + "/photos/" + (index + 1)}
                         name={m.photo_names?.[index]}
+                        names={m.photo_names}
+                        count={m.photo_count}
                         author={m.sender_name}
                         position={index + 1}
                         open={open}

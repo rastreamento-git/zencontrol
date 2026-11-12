@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { Camera, Image as ImageIcon } from "lucide-react";
+import {
+  Camera,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  Image as ImageIcon,
+} from "lucide-react";
 import { api } from "../lib/api";
 import Modal from "./Modal";
 
@@ -143,8 +149,18 @@ export function ChatCamera({ onClose, onCapture, onNative }) {
   );
 }
 
-export function ChatMessagePhoto({ path, author, position, name, open }) {
-  const [source, setSource] = useState("");
+export function ChatMessagePhoto({
+  path,
+  author,
+  position,
+  name,
+  names = [],
+  count = 1,
+  open,
+}) {
+  const [selected, setSelected] = useState(position);
+  const activePath = path.slice(0, path.lastIndexOf("/") + 1) + selected;
+  const [source, setSource] = useState(null);
   const [error, setError] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [expanded, setExpanded] = useState(false);
@@ -152,14 +168,14 @@ export function ChatMessagePhoto({ path, author, position, name, open }) {
     if (!expanded || !open) return;
     const controller = new AbortController();
     let url;
-    setSource("");
+    setSource(null);
     setError(false);
     api
-      .get(path, { signal: controller.signal, responseType: "blob" })
+      .get(activePath, { signal: controller.signal, responseType: "blob" })
       .then(({ data }) => {
         if (controller.signal.aborted) return;
         url = URL.createObjectURL(data);
-        setSource(url);
+        setSource({ path: activePath, url });
       })
       .catch(() => {
         if (!controller.signal.aborted) setError(true);
@@ -168,15 +184,37 @@ export function ChatMessagePhoto({ path, author, position, name, open }) {
       controller.abort();
       if (url) URL.revokeObjectURL(url);
     };
-  }, [path, attempt, expanded, open]);
+  }, [activePath, attempt, expanded, open]);
+  useEffect(() => {
+    if (!expanded || !open || count < 2) return;
+    function navigate(event) {
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        setSelected((n) => Math.max(1, n - 1));
+      }
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        setSelected((n) => Math.min(count, n + 1));
+      }
+    }
+    window.addEventListener("keydown", navigate);
+    return () => window.removeEventListener("keydown", navigate);
+  }, [expanded, open, count]);
   const filename =
     name || "imagem-" + path.split("/").at(-3) + "-" + position + ".jpg";
+  const activeName =
+    names[selected - 1] ||
+    (selected === position ? name : null) ||
+    "imagem-" + path.split("/").at(-3) + "-" + selected + ".jpg";
   return (
     <>
       <button
         type="button"
         className="zen-chat-file"
-        onClick={() => setExpanded(true)}
+        onClick={() => {
+          setSelected(position);
+          setExpanded(true);
+        }}
         aria-label={"Abrir imagem " + filename}
         title={filename}
       >
@@ -184,7 +222,50 @@ export function ChatMessagePhoto({ path, author, position, name, open }) {
         <span>{filename}</span>
       </button>
       {open && expanded && (
-        <Modal title={filename} wide onClose={() => setExpanded(false)}>
+        <Modal title={activeName} wide onClose={() => setExpanded(false)}>
+          {count > 1 && (
+            <nav
+              className="zen-chat-gallery-nav"
+              aria-label="Navegar pelas imagens da mensagem"
+            >
+              <button
+                type="button"
+                className="secondary-button"
+                aria-label="Imagem anterior"
+                disabled={selected === 1}
+                onClick={() => setSelected((n) => Math.max(1, n - 1))}
+              >
+                <ChevronLeft size={20} />
+              </button>
+              <span role="status">
+                {selected} de {count}
+              </span>
+              <button
+                type="button"
+                className="secondary-button"
+                aria-label="Próxima imagem"
+                disabled={selected === count}
+                onClick={() => setSelected((n) => Math.min(count, n + 1))}
+              >
+                <ChevronRight size={20} />
+              </button>
+            </nav>
+          )}
+
+          {source?.path === activePath && !error && (
+            <div className="zen-chat-gallery-download">
+              <a
+                className="secondary-button"
+                href={source.url}
+                download={
+                  activeName.replace(/\.(png|webp|jpe?g)$/i, "") + ".jpg"
+                }
+                aria-label={"Baixar " + activeName}
+              >
+                <Download size={17} aria-hidden="true" /> Baixar
+              </a>
+            </div>
+          )}
           {error ? (
             <div role="alert">
               <p>Não foi possível carregar a imagem.</p>
@@ -195,10 +276,10 @@ export function ChatMessagePhoto({ path, author, position, name, open }) {
                 Tentar novamente
               </button>
             </div>
-          ) : source ? (
+          ) : source?.path === activePath ? (
             <img
               className="zen-chat-photo-expanded"
-              src={source}
+              src={source.url}
               alt={"Imagem enviada por " + author}
             />
           ) : (
