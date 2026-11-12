@@ -592,6 +592,10 @@ async function main() {
   summary.presenceAndPhoto = "passed";
 
   await mobile.setViewportSize({ width: 320, height: 680 });
+  let photoDownloads = 0;
+  staff.on("request", (request) => {
+    if (/\/messages\/\d+\/photos\//.test(request.url())) photoDownloads++;
+  });
   const fixture = await sharp({
     create: { width: 96, height: 72, channels: 3, background: "#18559e" },
   })
@@ -610,11 +614,17 @@ async function main() {
   const camera = mobile.getByRole("dialog", { name: "Câmera do chat" });
   await camera.getByRole("button", { name: "Tirar foto" }).click();
   await camera.waitFor({ state: "hidden" });
-  await fieldChat.getByRole("img", { name: "Foto da câmera.jpg" }).waitFor();
+  await fieldChat
+    .locator(".zen-chat-photo-drafts")
+    .getByText("Foto da câmera.jpg", { exact: true })
+    .waitFor();
   await fieldChat
     .getByRole("button", { name: "Abrir chat em tela cheia" })
     .click();
-  await fieldChat.getByRole("img", { name: "etiqueta.png" }).waitFor();
+  await fieldChat
+    .locator(".zen-chat-photo-drafts")
+    .getByText("etiqueta.png", { exact: true })
+    .waitFor();
   await noOverflow(mobile);
   await mobile.screenshot({
     path: path.join(directory, "chat-fotos-pre-envio.png"),
@@ -641,14 +651,18 @@ async function main() {
     .getByText(/Não foi possível acessar a API/)
     .waitFor();
   assert.equal(posted.status, 201);
-  await fieldChat.getByRole("img", { name: "etiqueta.png" }).waitFor();
+  await fieldChat
+    .locator(".zen-chat-photo-drafts")
+    .getByText("etiqueta.png", { exact: true })
+    .waitFor();
   assert.equal(
     await fieldChat.getByLabel("Mensagem", { exact: true }).inputValue(),
     caption,
   );
   await fieldChat.getByRole("button", { name: "Enviar", exact: true }).click();
   await fieldChat
-    .getByRole("img", { name: "etiqueta.png" })
+    .locator(".zen-chat-photo-drafts")
+    .getByText("etiqueta.png", { exact: true })
     .waitFor({ state: "hidden" });
   assert.equal(posted.retried, posted.first);
   await mobile.unroute(uploadRoute);
@@ -660,17 +674,47 @@ async function main() {
   const photoMessage = staffChat
     .locator(".zen-chat-messages li")
     .filter({ hasText: caption });
-  await photoMessage.getByRole("button", { name: /Ampliar foto 1/ }).click();
-  const expanded = staff.getByRole("dialog", { name: /Foto 1 de/ });
+  await photoMessage
+    .getByRole("button", { name: /Abrir imagem etiqueta.png/ })
+    .waitFor();
+  assert.equal(
+    photoDownloads,
+    0,
+    "Imagens só são baixadas após clicar no arquivo",
+  );
+  await photoMessage
+    .getByRole("button", { name: /Abrir imagem etiqueta.png/ })
+    .click();
+  const expanded = staff.getByRole("dialog", { name: "etiqueta.png" });
   await expanded.getByRole("img").waitFor();
   await staff.keyboard.press("Escape");
   await expanded.waitFor({ state: "hidden" });
   await staffChat.waitFor();
-  assert.equal(await photoMessage.locator(".zen-chat-photo").count(), 2);
+  assert.equal(await photoMessage.locator(".zen-chat-file").count(), 2);
   await staff.screenshot({
     path: path.join(directory, "chat-fotos-recebidas.png"),
   });
   summary.cameraAndAttachmentsWithRetry = "passed";
+  await staff.setViewportSize({ width: 1358, height: 594 });
+  for (let i = 1; i <= 3; i++) {
+    await staffChat
+      .getByLabel("Mensagem", { exact: true })
+      .fill("Linha compacta " + i);
+    await staffChat
+      .getByRole("button", { name: "Enviar", exact: true })
+      .click();
+    await staffChat.getByText("Linha compacta " + i, { exact: true }).waitFor();
+  }
+  const compactRows = staffChat
+    .locator(".zen-chat-messages li")
+    .filter({ hasText: /Linha compacta/ });
+  assert.equal(await compactRows.locator(".zen-chat-message-meta").count(), 1);
+  assert.ok(
+    (await staffChat.locator(".zen-chat-scroll").boundingBox()).height >= 350,
+  );
+  await staff.screenshot({
+    path: path.join(directory, "chat-compacto-1358.png"),
+  });
 
   const recoveryPage = await pageFor("recovery", { width: 390, height: 844 });
   await recoveryPage.goto(hub);

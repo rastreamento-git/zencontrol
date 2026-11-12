@@ -261,6 +261,7 @@
   overflow: hidden;
 }
 .zen-chat {
+  position: relative;
   container-type: inline-size;
   display: flex;
   flex-direction: column;
@@ -898,4 +899,197 @@ button.zen-chat-thread[aria-current="true"] {
   .zen-chat-compose-box textarea {
     max-height: 60px;
   }
+}
+
+/* Dense conversation layout: history takes precedence over chrome. */
+.zen-chat-heading {
+  padding: 7px 12px;
+}
+.zen-chat-heading h2,
+.zen-chat-window.is-mini .zen-chat-heading h2 {
+  font-size: 16px;
+}
+.zen-chat-title > .zen-profile-avatar {
+  display: none;
+}
+.zen-chat-status {
+  font-size: 11px;
+  margin-top: 2px;
+}
+.zen-chat-preferences {
+  padding: 4px 10px;
+}
+.zen-chat-person {
+  padding: 6px 12px;
+}
+.zen-chat-person .zen-person-avatar {
+  --zen-avatar-size: 28px;
+}
+.zen-chat-person h3 {
+  font-size: 14px;
+}
+.zen-chat-person small {
+  font-size: 11px;
+}
+.zen-chat-layout.is-staff {
+  grid-template-columns: clamp(220px, 22vw, 280px) minmax(0, 1fr);
+}
+.zen-chat-scroll {
+  padding: 10px 14px;
+}
+.zen-chat-messages {
+  gap: 5px;
+  max-width: none;
+}
+.zen-chat-messages li {
+  padding: 6px 9px;
+  max-width: min(94%, 760px);
+  border-radius: 9px;
+}
+.zen-chat-messages li.has-photos {
+  width: auto;
+}
+.zen-chat-message-meta {
+  gap: 6px;
+  font-size: 11px;
+}
+.zen-chat-message-meta .zen-person-avatar {
+  --zen-avatar-size: 24px;
+}
+.zen-chat-message-author {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 5px;
+}
+.zen-chat-message-author small {
+  font-size: 10px;
+}
+.zen-chat-messages p {
+  margin-top: 2px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+.zen-chat-messages li.is-grouped {
+  padding-block: 4px;
+}
+.zen-chat-messages .zen-chat-inline-time {
+  float: right;
+  margin: 3px 0 0 12px;
+  font-size: 10px;
+}
+.zen-chat-compose {
+  padding: 6px 10px;
+  gap: 3px;
+}
+.zen-chat-compose > * {
+  width: 100%;
+}
+.zen-chat-compose-box {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+}
+.zen-chat-compose-toolbar {
+  padding: 3px;
+  flex-wrap: nowrap;
+}
+.zen-chat-compose-toolbar button {
+  min-height: 34px;
+}
+.zen-chat-photo-drafts {
+  grid-column: 1 / -1;
+  padding: 5px;
+}
+.zen-chat-photo-draft {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: auto;
+  max-width: 220px;
+  height: 28px;
+  padding: 2px 5px;
+  border: 1px solid var(--ep-line);
+  border-radius: 6px;
+  font-size: 12px;
+}
+.zen-chat-photo-draft span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.zen-chat-photo-draft button {
+  position: static;
+  flex-shrink: 0;
+}
+.zen-chat-photo-grid,
+.zen-chat-photo-grid.is-single {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 3px;
+  margin-top: 4px;
+}
+.zen-chat-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 30px;
+  padding: 3px 5px;
+  border: 0;
+  background: transparent;
+  color: var(--ep-primary-ink);
+  text-align: left;
+  text-decoration: underline;
+}
+.zen-chat-file svg {
+  flex-shrink: 0;
+}
+.zen-chat-file span {
+  overflow-wrap: anywhere;
+}
+@container (min-width: 1000px) {
+  .zen-chat-preferences {
+    position: absolute;
+    right: 95px;
+    top: 5px;
+    border: 0;
+    width: min(50%, 500px);
+  }
+}
+@container (max-width: 700px) {
+  .zen-chat-layout.is-staff {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .zen-chat-compose-toolbar button span {
+    display: none;
+  }
+  .zen-chat-compose-toolbar button {
+    padding: 7px;
+  }
+  .zen-chat-attachment-actions {
+    gap: 2px;
+    flex-wrap: nowrap;
+  }
+  .zen-chat-compose-toolbar {
+    gap: 2px;
+  }
+}
+.zen-chat-messages li.is-grouped {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 10px;
+  width: max-content;
+}
+.zen-chat-messages li.is-grouped > p {
+  grid-column: 1;
+  grid-row: 1;
+}
+.zen-chat-messages li.is-grouped > .zen-chat-inline-time {
+  grid-column: 2;
+  grid-row: 1;
+  float: none;
+  margin: 3px 0 0;
+}
+.zen-chat-messages li.is-grouped > .zen-chat-photo-grid {
+  grid-column: 1 / -1;
 }

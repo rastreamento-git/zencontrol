@@ -423,6 +423,7 @@ test("fotos privadas aceitam legenda opcional, repetição de envio e restauraç
     body: "",
     request_id: randomUUID(),
     photos: [image(png, "png"), image(jpeg, "jpeg")],
+    photo_names: ["etiqueta.png", "camera.jpg"],
   };
   assert.ok(JSON.stringify(payload).length > 512 * 1024);
   const send = (body, token = technician.token) =>
@@ -443,6 +444,7 @@ test("fotos privadas aceitam legenda opcional, repetição de envio e restauraç
   const [message, repeat] = sends.map((r) => r.data.message);
   assert.equal(message.id, repeat.id);
   assert.equal(message.photo_count, 2);
+  assert.deepEqual(message.photo_names, ["etiqueta.png", "camera.jpg"]);
   assert.equal(message.body, "");
   assert.equal(message.photos, undefined);
   assert.equal(

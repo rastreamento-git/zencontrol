@@ -143,79 +143,67 @@ export function ChatCamera({ onClose, onCapture, onNative }) {
   );
 }
 
-export function ChatMessagePhoto({ path, author, position, open }) {
-  const button = useRef(null);
+export function ChatMessagePhoto({ path, author, position, name, open }) {
   const [source, setSource] = useState("");
   const [error, setError] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [expanded, setExpanded] = useState(false);
   useEffect(() => {
+    if (!expanded || !open) return;
     const controller = new AbortController();
     let url;
-    async function load() {
-      try {
-        const { data } = await api.get(path, {
-          signal: controller.signal,
-          responseType: "blob",
-        });
+    setSource("");
+    setError(false);
+    api
+      .get(path, { signal: controller.signal, responseType: "blob" })
+      .then(({ data }) => {
         if (controller.signal.aborted) return;
         url = URL.createObjectURL(data);
         setSource(url);
-      } catch {
+      })
+      .catch(() => {
         if (!controller.signal.aborted) setError(true);
-      }
-    }
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) {
-        observer.disconnect();
-        load();
-      }
-    });
-    observer.observe(button.current);
+      });
     return () => {
-      observer.disconnect();
       controller.abort();
       if (url) URL.revokeObjectURL(url);
     };
-  }, [path, attempt]);
-
-  const label = "Foto " + position + " de " + author;
-  function show() {
-    if (source) setExpanded(true);
-    else {
-      setError(false);
-      setAttempt((value) => value + 1);
-    }
-  }
-
+  }, [path, attempt, expanded, open]);
+  const filename =
+    name || "imagem-" + path.split("/").at(-3) + "-" + position + ".jpg";
   return (
     <>
       <button
-        ref={button}
         type="button"
-        className="zen-chat-photo"
-        disabled={!source && !error}
-        aria-label={
-          source
-            ? "Ampliar " + label.toLowerCase()
-            : error
-              ? "Carregar foto novamente"
-              : label
-        }
-        onClick={show}
+        className="zen-chat-file"
+        onClick={() => setExpanded(true)}
+        aria-label={"Abrir imagem " + filename}
+        title={filename}
       >
-        {source ? (
-          <img src={source} alt={label} />
-        ) : (
-          <span>
-            <ImageIcon size={20} />{" "}
-            {error ? "Tentar novamente" : "Carregando foto…"}
-          </span>
-        )}
+        <ImageIcon size={16} aria-hidden="true" />
+        <span>{filename}</span>
       </button>
-      {open && expanded && source && (
-        <Modal title={label} wide onClose={() => setExpanded(false)}>
-          <img className="zen-chat-photo-expanded" src={source} alt={label} />
+      {open && expanded && (
+        <Modal title={filename} wide onClose={() => setExpanded(false)}>
+          {error ? (
+            <div role="alert">
+              <p>Não foi possível carregar a imagem.</p>
+              <button
+                className="secondary-button"
+                onClick={() => setAttempt((n) => n + 1)}
+              >
+                Tentar novamente
+              </button>
+            </div>
+          ) : source ? (
+            <img
+              className="zen-chat-photo-expanded"
+              src={source}
+              alt={"Imagem enviada por " + author}
+            />
+          ) : (
+            <p role="status">Carregando imagem…</p>
+          )}
         </Modal>
       )}
     </>

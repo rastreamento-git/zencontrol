@@ -9,10 +9,16 @@ const maxBytes = 1024 * 1024;
 const maxDataLength = 32 + Math.ceil(maxBytes / 3) * 4;
 const dataUrl = /^data:image\/(jpeg|png|webp);base64,([a-zA-Z0-9+/]+={0,2})$/;
 
-function decodePhotos(value = []) {
+function decodePhotos(value = [], names = []) {
+  if (
+    !Array.isArray(names) ||
+    names.length > maxChatPhotos ||
+    names.some((name) => typeof name !== "string" || name.length > 255)
+  )
+    fail(400, "Nome de arquivo inválido.");
   if (!Array.isArray(value) || value.length > maxChatPhotos)
     fail(400, "Envie até quatro fotos por mensagem.");
-  return value.map((photo) => {
+  return value.map((photo, index) => {
     if (typeof photo !== "string")
       fail(400, "Escolha uma foto JPEG, PNG ou WebP.");
     if (photo.length > maxDataLength)
@@ -24,6 +30,9 @@ function decodePhotos(value = []) {
     if (input.length > maxBytes)
       fail(413, "Uma foto excede o limite de envio.");
     return {
+      name: (names[index] || "imagem-" + (index + 1) + ".jpg")
+        .replace(/[\\/\x00-\x1f\x7f]/g, "_")
+        .slice(0, 255),
       input,
       format: match[1],
       source_sha256: createHash("sha256").update(input).digest("hex"),
@@ -52,6 +61,7 @@ async function preparePhotos(photos) {
         .toBuffer();
       prepared.push({
         reference: {
+          name: photo.name,
           path: randomUUID() + ".jpg",
           source_sha256: photo.source_sha256,
         },
