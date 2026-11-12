@@ -1,4 +1,11 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ArrowLeft,
   Camera,
@@ -104,6 +111,19 @@ function Conversation({
     [sendError, setSendError] = useState(""),
     [retry, setRetry] = useState(0);
   const route = "/chat/threads/" + thread.id + "/messages";
+  const gallery = useMemo(
+    () =>
+      messages.flatMap((message) =>
+        Array.from({ length: message.photo_count || 0 }, (_, index) => ({
+          path: route + "/" + message.id + "/photos/" + (index + 1),
+          name:
+            message.photo_names?.[index] ||
+            "imagem-" + message.id + "-" + (index + 1) + ".jpg",
+          author: message.sender_name,
+        })),
+      ),
+    [messages, route],
+  );
   const team = thread.id === teamThread.id;
   const open = mode !== "closed";
   const blocked = sending || loading || Boolean(readError);
@@ -383,8 +403,7 @@ function Conversation({
                         key={index}
                         path={route + "/" + m.id + "/photos/" + (index + 1)}
                         name={m.photo_names?.[index]}
-                        names={m.photo_names}
-                        count={m.photo_count}
+                        gallery={gallery}
                         author={m.sender_name}
                         position={index + 1}
                         open={open}

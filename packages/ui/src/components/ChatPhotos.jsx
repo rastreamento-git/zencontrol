@@ -154,12 +154,22 @@ export function ChatMessagePhoto({
   author,
   position,
   name,
-  names = [],
-  count = 1,
+  gallery = [],
   open,
 }) {
-  const [selected, setSelected] = useState(position);
-  const activePath = path.slice(0, path.lastIndexOf("/") + 1) + selected;
+  const [selectedPath, setSelectedPath] = useState(path);
+  const entries = gallery.length ? gallery : [{ path, name, author }];
+  const selected = Math.max(
+    0,
+    entries.findIndex((item) => item.path === selectedPath),
+  );
+  const active = entries[selected];
+  const activePath = active.path;
+  const count = entries.length;
+  function move(offset) {
+    const next = entries[Math.max(0, Math.min(count - 1, selected + offset))];
+    setSelectedPath(next.path);
+  }
   const [source, setSource] = useState(null);
   const [error, setError] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -190,29 +200,32 @@ export function ChatMessagePhoto({
     function navigate(event) {
       if (event.key === "ArrowLeft") {
         event.preventDefault();
-        setSelected((n) => Math.max(1, n - 1));
+        move(-1);
       }
       if (event.key === "ArrowRight") {
         event.preventDefault();
-        setSelected((n) => Math.min(count, n + 1));
+        move(1);
       }
     }
     window.addEventListener("keydown", navigate);
     return () => window.removeEventListener("keydown", navigate);
-  }, [expanded, open, count]);
+  }, [expanded, open, selected, gallery]);
   const filename =
     name || "imagem-" + path.split("/").at(-3) + "-" + position + ".jpg";
   const activeName =
-    names[selected - 1] ||
-    (selected === position ? name : null) ||
-    "imagem-" + path.split("/").at(-3) + "-" + selected + ".jpg";
+    active.name ||
+    "imagem-" +
+      activePath.split("/").at(-3) +
+      "-" +
+      activePath.split("/").at(-1) +
+      ".jpg";
   return (
     <>
       <button
         type="button"
         className="zen-chat-file"
         onClick={() => {
-          setSelected(position);
+          setSelectedPath(path);
           setExpanded(true);
         }}
         aria-label={"Abrir imagem " + filename}
@@ -223,35 +236,38 @@ export function ChatMessagePhoto({
       </button>
       {open && expanded && (
         <Modal title={activeName} wide onClose={() => setExpanded(false)}>
-          {count > 1 && (
+          {
             <nav
               className="zen-chat-gallery-nav"
-              aria-label="Navegar pelas imagens da mensagem"
+              aria-label="Navegar pelas imagens da conversa"
             >
               <button
                 type="button"
                 className="secondary-button"
                 aria-label="Imagem anterior"
-                disabled={selected === 1}
-                onClick={() => setSelected((n) => Math.max(1, n - 1))}
+                disabled={selected === 0}
+                onClick={() => move(-1)}
               >
-                <ChevronLeft size={20} />
+                <ChevronLeft size={20} /> Anterior
               </button>
               <span role="status">
-                {selected} de {count}
+                {selected + 1} de {count}
               </span>
               <button
                 type="button"
                 className="secondary-button"
                 aria-label="Próxima imagem"
-                disabled={selected === count}
-                onClick={() => setSelected((n) => Math.min(count, n + 1))}
+                disabled={selected === count - 1}
+                onClick={() => move(1)}
               >
-                <ChevronRight size={20} />
+                Próxima <ChevronRight size={20} />
               </button>
             </nav>
-          )}
+          }
 
+          <small className="zen-chat-gallery-scope">
+            Imagens carregadas desta conversa
+          </small>
           {source?.path === activePath && !error && (
             <div className="zen-chat-gallery-download">
               <a
@@ -280,7 +296,7 @@ export function ChatMessagePhoto({
             <img
               className="zen-chat-photo-expanded"
               src={source.url}
-              alt={"Imagem enviada por " + author}
+              alt={"Imagem enviada por " + active.author}
             />
           ) : (
             <p role="status">Carregando imagem…</p>
