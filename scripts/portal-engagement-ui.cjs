@@ -220,16 +220,18 @@ async function main() {
   await staff.getByRole("button", { name: "Continuar com o Google" }).click();
   await staff.getByRole("heading", { name: "Olá, Operação." }).waitFor();
   summary.googleCentral = "passed (provider mocked)";
-  await staff.getByRole("button", { name: "Abrir Estoque Pro" }).click();
-  await staff.getByRole("link", { name: "Meu perfil ZenTracking" }).click();
-  const shared = staff.getByRole("dialog", { name: "Meu perfil" });
-  await shared.getByLabel("Nome de exibição").waitFor();
-  assert.equal(
-    await shared.getByLabel("Nome de exibição").inputValue(),
-    "Operação local",
-  );
-  await shared.getByRole("button", { name: "Fechar diálogo" }).click();
-  summary.stockProfile = "passed";
+  if (process.env.ZEN_PORTAL_CHAT_ONLY !== "1") {
+    await staff.getByRole("button", { name: "Abrir Estoque Pro" }).click();
+    await staff.getByRole("link", { name: "Meu perfil ZenTracking" }).click();
+    const shared = staff.getByRole("dialog", { name: "Meu perfil" });
+    await shared.getByLabel("Nome de exibição").waitFor();
+    assert.equal(
+      await shared.getByLabel("Nome de exibição").inputValue(),
+      "Operação local",
+    );
+    await shared.getByRole("button", { name: "Fechar diálogo" }).click();
+    summary.stockProfile = "passed";
+  }
   const legacyDirectory = (url) => url.pathname === "/api/chat/threads";
   const missingTeam = (url) => url.pathname === "/api/chat/team";
   await staff.route(legacyDirectory, (route) =>
@@ -283,6 +285,17 @@ async function main() {
   );
   await staffChat.getByRole("button", { name: new RegExp(tech.name) }).click();
   const staffDraft = staffChat.getByLabel("Mensagem", { exact: true });
+  const emptyDraftHeight = (await staffDraft.boundingBox()).height;
+  await staffDraft.fill(
+    "Primeira linha\nSegunda linha\nTerceira linha\nQuarta linha\nQuinta linha\nSexta linha",
+  );
+  const grownDraftHeight = (await staffDraft.boundingBox()).height;
+  assert.ok(
+    grownDraftHeight > emptyDraftHeight && grownDraftHeight <= 112,
+    "O campo cresce com o texto sem ocupar toda a conversa",
+  );
+  const fullHistory = await staffChat.locator(".zen-chat-scroll").boundingBox();
+  assert.ok(fullHistory.height > 400, "Tela cheia prioriza o histórico");
   await staffDraft.fill("Central confirmou o recebimento.");
   await staffChat.getByRole("button", { name: "Voltar ao mini chat" }).click();
   assert.ok(!(await staffChat.evaluate((dialog) => dialog.matches(":modal"))));
@@ -478,9 +491,22 @@ async function main() {
   await operatorChat
     .getByRole("button", { name: "Voltar ao mini chat" })
     .click();
+  await operatorChat.locator(".zen-chat-team-members:not([open])").waitFor();
+  await operatorChat.locator(".zen-chat-team-members summary").click();
   assert.ok(
     await operatorChat.getByText("Operação local", { exact: true }).isVisible(),
   );
+  await operatorChat.locator(".zen-chat-team-members summary").click();
+  const messageViewport = await operatorChat
+    .locator(".zen-chat-scroll")
+    .boundingBox();
+  assert.ok(
+    messageViewport.height >= 300,
+    "Mini chat da equipe deve reservar ao menos 300 px às mensagens",
+  );
+  await operatorChat.screenshot({
+    path: path.join(directory, "chat-equipe-layout.png"),
+  });
   await operatorChat
     .getByLabel("Mensagem", { exact: true })
     .fill("Mensagem interna fictícia");
@@ -552,6 +578,13 @@ async function main() {
       shortScreenSend.y + shortScreenSend.height <=
         mobile.viewportSize().height,
     "O botão Enviar do mini chat deve caber em uma tela de 400 px de altura",
+  );
+  const shortHistory = await fieldChat
+    .locator(".zen-chat-scroll")
+    .boundingBox();
+  assert.ok(
+    shortHistory.height >= 80,
+    "Mesmo a 400 px, o histórico precisa ter espaço útil",
   );
   summary.chatModesAndDrafts = "passed";
   summary.liveChatBothDirections = "passed";

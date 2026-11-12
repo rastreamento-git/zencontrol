@@ -87,6 +87,7 @@ function Conversation({
     olderLoaded = useRef(false);
   const request = useRef(null),
     alive = useRef(true);
+  const draftInput = useRef(null);
   const attachmentInput = useRef(null);
   const cameraInput = useRef(null);
   const [messages, setMessages] = useState([]),
@@ -145,6 +146,12 @@ function Conversation({
     if (mode !== "closed" && list && pinned.current)
       list.scrollTop = list.scrollHeight;
   }, [messages, mode]);
+  useLayoutEffect(() => {
+    const input = draftInput.current;
+    if (!input || !open) return;
+    input.style.height = "0px";
+    input.style.height = Math.min(input.scrollHeight, 112) + "px";
+  }, [draft, mode, open]);
   async function loadOlder() {
     if (loadingOlder || !messages[0]) return;
     setLoadingOlder(true);
@@ -378,7 +385,9 @@ function Conversation({
             {photoError}
           </p>
         )}
-        <label htmlFor={composer}>Mensagem</label>
+        <label className="zen-chat-sr-only" htmlFor={composer}>
+          Mensagem
+        </label>
         <div className="zen-chat-compose-box">
           {photos.length > 0 && (
             <div className="zen-chat-photo-drafts" aria-label="Fotos a enviar">
@@ -406,7 +415,8 @@ function Conversation({
           )}
           <textarea
             id={composer}
-            rows={2}
+            ref={draftInput}
+            rows={1}
             maxLength={2000}
             value={draft}
             disabled={blocked}
@@ -520,6 +530,7 @@ export default function Chat({ mode, onModeChange, targetThread, onNotice }) {
     staff = user.papel !== "tecnico";
   const id = useId(),
     windowRef = useRef(null),
+    rosterRef = useRef(null),
     launcher = useRef(null);
   const open = mode !== "closed",
     compact = mode === "mini";
@@ -550,6 +561,19 @@ export default function Chat({ mode, onModeChange, targetThread, onNotice }) {
     ? items?.find((item) => item.id === selected?.id) || selected
     : items?.[0];
   const activeThread = team ? items && teamThread : technicianThread;
+  useLayoutEffect(() => {
+    const roster = rosterRef.current;
+    const panel = windowRef.current;
+    if (!roster || !open) return;
+    let wide;
+    const observer = new ResizeObserver(([entry]) => {
+      const next = entry.contentRect.width > 700;
+      if (next !== wide) roster.open = next;
+      wide = next;
+    });
+    observer.observe(panel);
+    return () => observer.disconnect();
+  }, [team, open, mode]);
   function showSection(next) {
     if (next === section) return;
     setSection(next);
@@ -716,7 +740,7 @@ export default function Chat({ mode, onModeChange, targetThread, onNotice }) {
               </nav>
             )}
             <label>
-              Meu status
+              <span className="zen-chat-status-label">Meu status</span>
               <select
                 value={status}
                 onChange={(event) => setStatus(event.target.value)}
@@ -749,7 +773,7 @@ export default function Chat({ mode, onModeChange, targetThread, onNotice }) {
                 }
               >
                 {team ? (
-                  <details className="zen-chat-team-members" open>
+                  <details ref={rosterRef} className="zen-chat-team-members">
                     <summary>
                       Colaboradores {items ? "(" + items.length + ")" : ""}
                     </summary>
