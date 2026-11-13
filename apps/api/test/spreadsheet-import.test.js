@@ -12,6 +12,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 let db, server, base, token, operator;
+const reviewTokens = new Map();
 const password = "Importacao1!Teste";
 async function call(
   path,
@@ -19,6 +20,8 @@ async function call(
   auth = token,
   contentType = "application/json",
 ) {
+  if (body?.confirmation && path.endsWith("/approve") && !body.review_token)
+    body = { ...body, review_token: reviewTokens.get(path.split("/")[3]) };
   const r = await fetch(base + path, {
     method: body ? "POST" : "GET",
     headers: {
@@ -70,13 +73,24 @@ const row = (plate = "ABC1D23") => [
   "CONCLUÍDO",
 ];
 async function stage(bytes) {
-  return call(
+  const upload = await call(
     "/api/spreadsheet-imports",
     { filename: "controle.xlsx", content: bytes.toString("base64") },
     token,
     type,
   );
+  if (upload.status !== 201) return upload;
+  const reviewed = await call(
+    `/api/spreadsheet-imports/${upload.data.id}/review`,
+    {
+      sheets: upload.data.sheets.filter((s) => s.eligible).map((s) => s.name),
+      group_equipment: true,
+    },
+  );
+  reviewTokens.set(upload.data.id, reviewed.data.review_token);
+  return { ...reviewed, status: 201 };
 }
+
 before(async () => {
   db = await testDatabase();
   await migrate(db.pool);
@@ -437,4 +451,122 @@ test("converte duas TAGs em instalação com OS adicional sem movimentações au
     (await db.pool.query("SELECT * FROM zc_notifications")).rows.length,
     0,
   );
+});
+
+test("seleciona somente os meses revisados e une rastreador + TAG com dois seriais", async () => {
+  const w = new ExcelJS.Workbook();
+  const header = [
+    "",
+    "SERVIÇOS",
+    "NOME DO ASSOCIADO",
+    "PLACA / CHASSI",
+    "IMEI",
+    "DATA DE ENVIO DO TERMO",
+    "DATA DE CONCLUSÃO",
+    "TÉCNICO",
+    "REGIÃO",
+    "VOLUNTÁRIO",
+    "VALOR FIPE",
+    "FIPE",
+    "INCLUIU",
+    "CONCLUIU",
+    "SITUAÇÃO",
+  ];
+  const nov = w.addWorksheet("NOVEMBRO 2026");
+  nov.addRow(header);
+  const tracker = row("HIJ9K01"),
+    tag = row("HIJ9K01");
+  tracker[14] = tag[14] = "PENDENTE";
+  tracker[6] = tag[6] = "";
+  tag[1] = "TAG";
+  tag[4] = "000007260510341";
+  nov.addRow(tracker);
+  nov.addRow(tag);
+  const jun = w.addWorksheet("JUNHO 2026");
+  jun.addRow(header);
+  jun.addRow(row("KLM1N23"));
+  const aux = w.addWorksheet("Ativos");
+  aux.addRow(header);
+  aux.addRow(row("NOP2Q34"));
+  const upload = await call(
+    "/api/spreadsheet-imports",
+    {
+      filename: "controle.xlsx",
+      content: Buffer.from(await w.xlsx.writeBuffer()).toString("base64"),
+    },
+    token,
+    type,
+  );
+  assert.equal(upload.status, 201);
+  assert.equal(upload.data.reviewed, false);
+  assert.equal(upload.data.rows.length, 0);
+  const id = upload.data.id;
+  assert.equal(
+    (
+      await call(`/api/spreadsheet-imports/${id}/approve`, {
+        confirmation: "IMPORTAR SERVICOS",
+      })
+    ).status,
+    409,
+  );
+  assert.equal(
+    (
+      await call(`/api/spreadsheet-imports/${id}/review`, {
+        sheets: ["Ativos"],
+        group_equipment: true,
+      })
+    ).status,
+    400,
+  );
+  const review = await call(`/api/spreadsheet-imports/${id}/review`, {
+    sheets: ["NOVEMBRO 2026"],
+    group_equipment: true,
+  });
+  assert.equal(review.status, 200);
+  assert.equal(review.data.counts.ready, 1);
+  assert.equal(review.data.rows[0].sources.length, 2);
+  assert.equal(review.data.rows[0].equipment[1].serial, tag[4]);
+  assert.deepEqual(review.data.selected_sheets, ["NOVEMBRO 2026"]);
+  const changed = await call(`/api/spreadsheet-imports/${id}/review`, {
+    sheets: ["JUNHO 2026"],
+    group_equipment: true,
+  });
+  assert.equal(
+    (
+      await call(`/api/spreadsheet-imports/${id}/approve`, {
+        confirmation: "IMPORTAR SERVICOS",
+        review_token: review.data.review_token,
+      })
+    ).status,
+    409,
+  );
+  const final = await call(`/api/spreadsheet-imports/${id}/review`, {
+    sheets: ["NOVEMBRO 2026"],
+    group_equipment: true,
+  });
+  const result = await call(`/api/spreadsheet-imports/${id}/approve`, {
+    confirmation: "IMPORTAR SERVICOS",
+    review_token: final.data.review_token,
+  });
+  assert.equal(result.data.imported, 1);
+  assert.equal(result.data.additional_orders, 1);
+  const saved = (
+    await db.pool.query(
+      "SELECT * FROM zc_orders WHERE vehicle='HIJ9K01' ORDER BY parent_order_id NULLS FIRST",
+    )
+  ).rows;
+  assert.equal(saved.length, 2);
+  assert.equal(saved[1].parent_order_id, saved[0].id);
+  assert.equal(saved[1].imei, tag[4]);
+  assert.equal(saved[0].raw_legacy.sources.length, 2);
+  assert.equal(
+    (
+      await db.pool.query(
+        "SELECT * FROM zc_orders WHERE vehicle IN ('KLM1N23','NOP2Q34')",
+      )
+    ).rows.length,
+    0,
+  );
+  const page = await call("/api/orders?q=HIJ9K01");
+  assert.equal(page.data.items.length, 1); // groupedPage presents a single service with equipment children.
 });
