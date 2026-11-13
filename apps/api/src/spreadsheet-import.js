@@ -1,4 +1,5 @@
 const ExcelJS = require("exceljs");
+const { Readable } = require("node:stream");
 const unzipper = require("unzipper");
 const { createHash, randomUUID } = require("node:crypto");
 const express = require("express");
@@ -52,16 +53,28 @@ async function preview(bytes, today = d.today(), deduplicate = true) {
     fail(413, "Planilha excede o limite de leitura.");
   if (!zip.files.some((f) => f.path === "xl/workbook.xml"))
     fail(400, "Envie um arquivo XLSX.");
-  const book = new ExcelJS.Workbook();
-  try {
-    await book.xlsx.load(bytes);
-  } catch {
-    fail(400, "Não foi possível ler a planilha.");
-  }
-  const rows = [];
+  const reader = new ExcelJS.stream.xlsx.WorkbookReader(
+    Readable.from([bytes]),
+    {
+      worksheets: "emit",
+      sharedStrings: "cache",
+      styles: "cache",
+      hyperlinks: "ignore",
+    },
+  );
+  const rows = [],
+    sheets = [];
+  Object.defineProperty(rows, "sheets", { value: sheets });
   let total = 0;
-  for (const sheet of book.worksheets) {
+  for await (const sheet of reader) {
     const month = layout.period(sheet.name);
+    const descriptor = {
+      name: sheet.name,
+      period: month,
+      rows: 0,
+      eligible: !!month,
+    };
+    sheets.push(descriptor);
     if (!month) {
       rows.push({
         sheet: sheet.name,
@@ -69,27 +82,30 @@ async function preview(bytes, today = d.today(), deduplicate = true) {
         state: "ignored",
         reason: "Aba auxiliar ou não mensal; não será importada.",
       });
+      for await (const ignored of sheet) {
+        /* Drain without retaining auxiliary rows. */
+      }
       continue;
     }
-    const schema = layout.structure(sheet, value);
-    if (!schema) {
-      rows.push({
-        sheet: sheet.name,
-        row: 0,
-        state: "pending",
-        reason:
-          "Não foi possível identificar cabeçalhos de serviço, associado e placa/chassi nas primeiras 30 linhas.",
-      });
-      continue;
-    }
-    if (sheet.rowCount > 20000) fail(413, "Aba com mais de 20 mil linhas.");
-    for (let n = schema.headerRow + 1; n <= sheet.rowCount; n++) {
-      const r = sheet.getRow(n);
+    let schema = null;
+    for await (const r of sheet) {
+      const n = r.number;
+      if (n > 20000) fail(413, "Aba com mais de 20 mil linhas.");
+      if (!schema) {
+        if (n <= 30) {
+          const found = layout.structure(
+            { rowCount: 1, columnCount: 64, getRow: () => r },
+            value,
+          );
+          if (found) schema = { ...found, headerRow: n };
+        }
+        continue;
+      }
       if (!r.hasValues) continue;
       if (++total > 30000)
         fail(413, "Limite de 30 mil linhas preenchidas por arquivo.");
       const raw = Array.from(
-        { length: Math.min(sheet.columnCount, 64) },
+        { length: Math.max(20, Math.min(r.cellCount, 64)) },
         (_, i) => value(r.getCell(i + 1)),
       );
       const v = schema.columns.map((c) => (c ? value(r.getCell(c)) : ""));
@@ -239,6 +255,7 @@ async function preview(bytes, today = d.today(), deduplicate = true) {
           equipment.tracker + equipment.tag - 1,
         );
       }
+      descriptor.rows++;
       out.key = digest(
         JSON.stringify([
           norm(v[1]),
@@ -255,6 +272,14 @@ async function preview(bytes, today = d.today(), deduplicate = true) {
         out.reason = issues.join("; ");
       }
     }
+    if (!schema)
+      rows.push({
+        sheet: sheet.name,
+        row: 0,
+        state: "pending",
+        reason:
+          "Não foi possível identificar cabeçalhos nas primeiras 30 linhas.",
+      });
   }
   if (!deduplicate) return rows;
   const seen = new Map();
@@ -362,14 +387,7 @@ function configureSpreadsheetImport(app, pool, auth) {
         fail(400, "Selecione uma planilha XLSX de até 10 MB.");
       const bytes = Buffer.from(content, "base64");
       const source = await preview(bytes, d.today(), false);
-      const book = new ExcelJS.Workbook();
-      await book.xlsx.load(bytes);
-      const sheets = book.worksheets.map((sh) => ({
-        name: sh.name,
-        period: layout.period(sh.name),
-        rows: source.filter((r) => r.sheet === sh.name && r.data).length,
-        eligible: !!layout.period(sh.name),
-      }));
+      const sheets = source.sheets;
       const plan = {
         source,
         sheets,

@@ -607,3 +607,17 @@ test("seleciona somente os meses revisados e une rastreador + TAG com dois seria
   const page = await call("/api/orders?q=HIJ9K01");
   assert.equal(page.data.items.length, 1); // groupedPage presents a single service with equipment children.
 });
+
+test("leitura de aba auxiliar extensa cabe em heap de 128 MB", async () => {
+  const { promisify } = require("node:util"),
+    { execFile } = require("node:child_process");
+  const { stdout } = await promisify(execFile)(
+    process.execPath,
+    [
+      "--max-old-space-size=128",
+      path.join(__dirname, "fixtures/spreadsheet-memory.cjs"),
+    ],
+    { timeout: 60000, maxBuffer: 4096 },
+  );
+  assert.match(stdout, /streaming-memory-ok/);
+});
