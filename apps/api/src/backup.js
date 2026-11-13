@@ -22,6 +22,7 @@ const tables = [
   "zc_batches",
   "zc_evidence",
   "zc_migration_runs",
+  "zc_spreadsheet_imports",
   "zc_rates",
   "zc_closing_policies",
   "zc_holidays",
@@ -169,6 +170,8 @@ async function restoreBackup(pool, cfg, source, apply = false) {
     snapshot.data.zc_operational_services = [];
   if (!Object.hasOwn(snapshot.data, "zc_chat_messages"))
     snapshot.data.zc_chat_messages = [];
+  if (!Object.hasOwn(snapshot.data, "zc_spreadsheet_imports"))
+    snapshot.data.zc_spreadsheet_imports = [];
   const legacy = tables.filter((t) => !additions.includes(t));
   if (Object.keys(snapshot.data).sort().join() === legacy.sort().join())
     for (const table of additions) snapshot.data[table] = [];
@@ -258,6 +261,10 @@ async function restoreBackup(pool, cfg, source, apply = false) {
             copy.available_at = 0;
           }
           if (table === "zc_batches") copy.source_user_id = null;
+          if (table === "zc_spreadsheet_imports") {
+            copy.created_by = null;
+            copy.approved_by = null;
+          }
           if (table === "zc_chat_messages") copy.sender_user_id = null;
           const keys = Object.keys(copy);
           if (!keys.length || keys.some((k) => !allowed.has(k)))

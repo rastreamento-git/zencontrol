@@ -140,6 +140,7 @@ function createApp(pool, env = process.env) {
   require("./operational-routes").configureOperational(app, pool, auth);
   require("./ecosystem-routes").configureEcosystem(app, pool, cfg, auth);
   configurePortal(app, pool, cfg, auth);
+  require("./spreadsheet-import").configureSpreadsheetImport(app, pool, auth);
   const admin = auth.requireAdmin;
   const actor = (req) => req.user.nome || req.user.login;
   const page = (req) => ({
