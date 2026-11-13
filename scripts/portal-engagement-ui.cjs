@@ -933,21 +933,12 @@ async function main() {
   await importPanel
     .getByRole("button", { name: "Revisar abas selecionadas", exact: true })
     .click();
-  await importPanel
-    .getByRole("button", { name: "Possíveis duplicidades (2)", exact: true })
-    .click();
-  await importPanel
-    .getByRole("button", {
-      name: "Selecionar todos os resultados (2)",
-      exact: true,
-    })
-    .click();
-  await importPanel
-    .getByRole("button", {
-      name: "Agrupar pares selecionados",
-      exact: true,
-    })
-    .click();
+  assert.equal(
+    await importPanel
+      .getByRole("button", { name: "Agrupar pares selecionados", exact: true })
+      .count(),
+    0,
+  );
   await importPanel
     .getByRole("button", { name: "Prontas (2)", exact: true })
     .waitFor();

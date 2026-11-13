@@ -370,7 +370,7 @@ function report(batch) {
     result: batch.result,
     counts,
     review_token: revision(batch.rows),
-    reviewed: batch.plan?.version === 7 && !!batch.plan?.reviewed,
+    reviewed: batch.plan?.version === 8 && !!batch.plan?.reviewed,
     selected_sheets: batch.plan?.selected_sheets || [],
     sheets: batch.plan?.sheets || [],
     groups: batch.plan?.groups || [],
@@ -408,7 +408,7 @@ function configureSpreadsheetImport(app, pool, auth) {
         selected_sheets: [],
         reviewed: false,
         groups: [],
-        version: 7,
+        version: 8,
       };
       const rows = [];
       const id = randomUUID();
@@ -445,9 +445,9 @@ function configureSpreadsheetImport(app, pool, auth) {
   );
   app.get("/api/spreadsheet-imports/capabilities", admin, (req, res) =>
     res.json({
-      version: 7,
+      version: 8,
       sheet_selection: true,
-      manual_equipment_grouping: true,
+      automatic_equipment_grouping: true,
       admin_archive: true,
       full_export: true,
     }),
@@ -464,7 +464,7 @@ function configureSpreadsheetImport(app, pool, auth) {
       if (!b) fail(404, "Importação não encontrada.");
       if (b.approved_at || new Date(b.expires_at) < new Date())
         fail(409, "Lote confirmado ou expirado. Envie novamente.");
-      if (b.plan?.version !== 7)
+      if (b.plan?.version !== 8)
         fail(409, "Gere uma nova prévia para escolher as abas.");
       const selected = req.body?.sheets;
       if (
@@ -476,18 +476,12 @@ function configureSpreadsheetImport(app, pool, auth) {
         )
       )
         fail(400, "Escolha uma ou mais abas mensais válidas.");
-      if (req.body.group_equipment)
-        fail(
-          400,
-          "O agrupamento deve ser manual. Selecione cada par de linhas.",
-        );
       const archive = req.body.archive;
       if (!["HOT", "WARM", "COLD"].includes(archive))
         fail(400, "Escolha a base de destino: HOT, WARM ou COLD.");
-      const groups = req.body.groups || [];
+
       const rows = groupRows(
         b.plan.source.filter((r) => selected.includes(r.sheet)),
-        groups,
       );
       for (const row of rows)
         if (row.data) {
@@ -502,7 +496,9 @@ function configureSpreadsheetImport(app, pool, auth) {
         selected_sheets: selected,
         reviewed: true,
         archive,
-        groups,
+        groups: rows
+          .filter((r) => r.sources)
+          .map((r) => r.sources.map((s) => s.sheet + ":" + s.row)),
       };
       await db.query(
         "UPDATE zc_spreadsheet_imports SET rows=$2,plan=$3 WHERE id=$1",
@@ -521,7 +517,7 @@ function configureSpreadsheetImport(app, pool, auth) {
       [req.params.id],
     );
     if (!batch) fail(404, "Importação não encontrada.");
-    if (!batch.plan?.reviewed || batch.plan.version !== 7)
+    if (!batch.plan?.reviewed || batch.plan.version !== 8)
       fail(409, "Escolha as abas e a base para gerar a revisão completa.");
     await exportReview(batch, res);
   });
@@ -551,7 +547,7 @@ function configureSpreadsheetImport(app, pool, auth) {
         fail(409, "Prévia expirada. Envie a planilha novamente.");
       if (
         !b.plan?.reviewed ||
-        b.plan.version !== 7 ||
+        b.plan.version !== 8 ||
         !["HOT", "WARM", "COLD"].includes(b.plan.archive)
       )
         fail(

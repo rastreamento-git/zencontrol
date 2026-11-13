@@ -30,7 +30,7 @@ async function exportReview(batch, res) {
       "Linha",
       "Classificação",
       "Motivo",
-      "Agrupamento manual",
+      "Agrupamento automático",
       "IMEI adicional",
       "Origem da data de conclusão",
       ...fields,
@@ -44,7 +44,13 @@ async function exportReview(batch, res) {
         row.state,
         row.reason || "",
         row.sources?.map((s) => s.sheet + ":" + s.row).join(" + ") || "",
-        row.additional_imei || row.equipment?.[1]?.serial || "",
+        row.equipment
+          ?.slice(1)
+          .map((e) => e.serial)
+          .filter(Boolean)
+          .join(" / ") ||
+          row.additional_imei ||
+          "",
         row.completion_date_source === "import_date"
           ? "Data da importação"
           : "Original",

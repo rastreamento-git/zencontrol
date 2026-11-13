@@ -28,26 +28,15 @@ identificadas e não podem ser selecionadas. A aprovação grava somente as linh
 prontas da seleção salva. Alterar meses ou agrupamento exige nova revisão; o token
 da prévia evita aprovar uma composição antiga em outra janela.
 
-O agrupamento é exclusivamente manual: o responsável marca dois registros do mesmo
-nome e placa/chassi e clica em **Agrupar pares selecionados**. A primeira linha
-selecionada fornece os dados principais e o IMEI principal. A segunda fornece o
-IMEI adicional. Podem ser dois rastreadores ou rastreador e TAG.
-Não há seleção global que una pares automaticamente. Mesmo um par compatível
-permanece separado até a escolha explícita; situações semelhantes podem ser
-sinalizadas como possíveis duplicidades para conferência.
+Duplicidades das abas escolhidas são agrupadas **automaticamente por nome e
+placa/chassi**, sem caixas de seleção ou botão de agrupamento. A primeira linha
+define os dados principais e o equipamento principal. Os demais IMEIs distintos
+ficam como equipamentos adicionais, com uma única entrada na listagem.
 
-A API valida nome e placa/chassi normalizados, seriais distintos e uso único de
-cada linha. A detecção de possíveis duplicidades usa nome e veículo, sem depender
-do serviço, técnico ou data. Diferenças entre as linhas aparecem como alerta;
-serviço, situação, técnico e demais campos principais seguem a primeira linha.
-Ambas as origens ficam preservadas. A OS adicional segue vinculada à principal,
-com tipo e serial correspondentes à segunda linha, mantendo uma única entrada
-na listagem. Atendimentos que já contêm vários equipamentos não são reagrupados
-como se representassem um único equipamento.
-
-**Desfazer agrupamento** separa o par antes da aprovação e invalida a confirmação
-anterior. A escolha manual fica registrada no lote. O campo de busca aceita nome,
-placa/chassi ou IMEI; possíveis duplicidades são ordenadas por nome e veículo.
+Todas as linhas de origem são preservadas. O mesmo IMEI repetido conta uma única
+vez. Diferenças de serviço, situação, datas ou técnico geram alerta na prévia, sem
+bloquear o agrupamento por si só. Erros de preenchimento continuam identificados
+como pendências; o limite operacional de 20 equipamentos permanece válido.
 
 O resumo permite conferir situação, composição, seriais, destino e dados antes de
 confirmar. Conteúdos incorretos devem ser corrigidos na origem/cadastro e analisados
@@ -123,8 +112,8 @@ A planilha real foi analisada para validar o leitor, mas não importada no banco
 ## Verificação de rota e versão
 
 A interface verifica `GET /api/spreadsheet-imports/capabilities` antes de liberar
-análise (versão 7, seleção de abas, base administrativa e agrupamento manual). `GET /healthz` anuncia
-`spreadsheet_import_version: 7`. Os endpoints de consulta, envio, revisão e aprovação
+análise (versão 8, seleção de abas, base administrativa e agrupamento automático). `GET /healthz` anuncia
+`spreadsheet_import_version: 8`. Os endpoints de consulta, envio, revisão e aprovação
 são autenticados e exclusivos de administrador.
 
 Se aparecer rota inexistente/incompatibilidade, verificar o serviço apontado por
@@ -137,7 +126,7 @@ Se aparecer rota inexistente/incompatibilidade, verificar o serviço apontado po
 
 **Exportar revisão completa (XLSX)** baixa um arquivo com o resumo Nome/Placa/IMEI,
 uma aba de revisão com todos os campos mapeados, base, situação, classificação e
-agrupamentos manuais, e abas de origem com todos os valores lidos dos meses
+agrupamentos automáticos, e abas de origem com todos os valores lidos dos meses
 selecionados, incluindo linhas pendentes/ignoradas e campos complementares. Números
 de série são células de texto para preservar zeros iniciais. A exportação usa
 escrita por streaming e não grava OS nem confirma a importação.
@@ -156,20 +145,13 @@ alterado manualmente por edição comum do documento.
 
 A importação fica no menu próprio, exclusivo de administrador. Configurações mantém
 backup e conexões, com arquivamento avançado e regras de conferência recolhidos.
-API e frontend devem ser publicados juntos na versão 7. Não há nova migração.
+API e frontend devem ser publicados juntos na versão 8. Não há nova migração.
 
-## Ações em lote e confirmação simples
+## Fluxo simplificado
 
-A confirmação não exige digitar uma frase. O botão **Importar N atendimentos** envia
-a aprovação do administrador com o token da prévia revisada; permissões, revisão,
-expiração e proteção contra duplicidade permanecem verificadas no servidor.
-
-Todos os registros prontos da seleção mensal entram na importação. As caixas de
-seleção de linhas servem somente para agrupar equipamentos. Há ações para selecionar
-todos os meses, todos os registros, todos os resultados filtrados (inclusive fora
-da página atual) ou apenas a página atual, além de limpar a seleção.
-
-**Agrupar pares selecionados** processa de uma vez os pares de mesmo nome e veículo
-escolhidos pelo responsável. Registros sem par continuam separados. Mais de duas
-linhas do mesmo atendimento ou serial repetido ficam sinalizados para revisão;
-não é escolhido um par arbitrário. A primeira linha selecionada continua principal.
+Escolha os meses e a base, revise os atendimentos já agrupados e clique em
+**Importar N atendimentos**. Não há seleção manual de linhas nem frase a digitar.
+O resumo mostra Nome, Placa e IMEI; os detalhes, seriais adicionais e alertas ficam
+acessíveis em Revisar conteúdo completo. Todos os registros prontos são importados.
+Registros já existentes no banco continuam identificados para evitar sobrescrever
+OS com histórico operacional.
