@@ -64,6 +64,10 @@ function configuration(env = process.env) {
     INTEGRATIONS_ENABLED: yes(env.INTEGRATIONS_ENABLED),
     AUTO_CLOSE_ENABLED: yes(env.AUTO_CLOSE_ENABLED),
     SGA_SYNC_ENABLED: yes(env.SGA_SYNC_ENABLED),
+    SGA_READ_ENABLED:
+      env.SGA_READ_ENABLED === undefined
+        ? yes(env.INTEGRATIONS_ENABLED)
+        : yes(env.SGA_READ_ENABLED),
     RUN_WORKER: yes(env.ZEN_RUN_WORKER),
     STOCK_ENABLED: yes(env.STOCK_ENABLED),
     STOCK_API_URL: env.STOCK_API_URL || "",
@@ -77,8 +81,9 @@ function configuration(env = process.env) {
       /\/$/,
       "",
     ),
-    SGA_SCHEDULED_CODE: env.SGA_SCHEDULED_CODE || "21",
-    SGA_COMPLETED_CODE: env.SGA_COMPLETED_CODE || "1",
+    SGA_SCHEDULED_CODE: env.SGA_SCHEDULED_CODE || "",
+    SGA_PHOTO_TYPE_CODE: env.SGA_PHOTO_TYPE_CODE || "",
+    SGA_COMPLETED_CODE: env.SGA_COMPLETED_CODE || "",
   };
 }
 module.exports = { configuration, ROOT };

@@ -81,6 +81,7 @@ function groupRows(input) {
       values: r.raw,
       service: r.data.service,
       imei: r.data.imei,
+      sga: r.sga,
     }));
     primary.equipment = equipment;
     primary.additional_imei = equipment[1]?.serial || "";

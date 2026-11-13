@@ -865,6 +865,7 @@ test("classificação SGA só é gravada depois da resposta confirmada", async (
     o.complete(tx, row.id, "Teste", "Baixa conferida para SGA.", {
       ...cfg,
       SGA_SYNC_ENABLED: true,
+      SGA_COMPLETED_CODE: "1",
     }),
   );
   assert.equal((await fresh(row.id)).sga_classification, "");
@@ -879,7 +880,7 @@ test("classificação SGA só é gravada depois da resposta confirmada", async (
         },
       },
     },
-    { ...cfg, SGA_SYNC_ENABLED: true },
+    { ...cfg, SGA_SYNC_ENABLED: true, SGA_COMPLETED_CODE: "1" },
   );
   assert.equal(calls, 1);
   assert.equal((await fresh(row.id)).sga_classification, "Concluído");

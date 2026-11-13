@@ -155,3 +155,7 @@ O resumo mostra Nome, Placa e IMEI; os detalhes, seriais adicionais e alertas fi
 acessíveis em Revisar conteúdo completo. Todos os registros prontos são importados.
 Registros já existentes no banco continuam identificados para evitar sobrescrever
 OS com histórico operacional.
+
+## Preenchimento cadastral pelo SGA
+
+Com a consulta SGA configurada na API, gerar a revisão inicia automaticamente a busca dos veículos das abas escolhidas. A tela acompanha o progresso e apresenta os campos completados e divergências antes da confirmação. O modo padrão completa apenas campos vazios; a opção de usar o cadastro SGA atual exige escolha explícita do administrador. Consulte [Integração SGA](INTEGRACAO-SGA.md) para configuração, códigos atuais e regras de preservação.
