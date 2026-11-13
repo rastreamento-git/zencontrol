@@ -709,3 +709,71 @@ test("administrador escolhe a base e exporta todos os campos além do resumo", a
   assert.equal(warm.data.rows[0].data.archive, "WARM");
   assert.equal(warm.data.rows[0].data.status, "PENDENTE");
 });
+
+test("duplicidade usa nome e veículo, agrupa dois rastreadores e sinaliza conclusão na importação", async () => {
+  const first = row("WXY5Z67"),
+    second = row("WXY5Z67");
+  first[6] = "";
+  second[6] = "";
+  second[1] = "Manutenção";
+  second[4] = "000007260510342";
+  const staged = await stage(await workbook([first, second]));
+  assert.equal(staged.data.counts.duplicate, 2);
+  const endpoint = `/api/spreadsheet-imports/${staged.data.id}`;
+  const review = await call(endpoint + "/review", {
+    sheets: ["NOVEMBRO 2026"],
+    archive: "WARM",
+    groups: [["NOVEMBRO 2026:2", "NOVEMBRO 2026:3"]],
+  });
+  assert.equal(review.data.counts.ready, 1, JSON.stringify(review.data));
+  const entry = review.data.rows[0];
+  assert.equal(entry.additional_imei, second[4]);
+  assert.deepEqual(entry.data.document_data.equipment_counts, {
+    tracker: 2,
+    tag: 0,
+  });
+  assert.equal(entry.completion_date_source, "import_date");
+  assert.equal(entry.group_warning, true);
+  const download = await fetch(base + endpoint + "/export", {
+    headers: { Authorization: "Bearer " + token },
+  });
+  const file = new ExcelJS.Workbook();
+  await file.xlsx.load(Buffer.from(await download.arrayBuffer()));
+  assert.equal(
+    file.getWorksheet("Revisão completa").getCell("F2").value,
+    second[4],
+  );
+  assert.equal(
+    file.getWorksheet("Revisão completa").getCell("G2").value,
+    "Data da importação",
+  );
+
+  const approved = await call(endpoint + "/approve", {
+    confirmation: "IMPORTAR SERVICOS",
+    review_token: review.data.review_token,
+  });
+  assert.equal(approved.data.imported, 1);
+  assert.equal(approved.data.additional_orders, 1);
+  const saved = (
+    await db.pool.query(
+      "SELECT * FROM zc_orders WHERE vehicle='WXY5Z67' ORDER BY parent_order_id NULLS FIRST",
+    )
+  ).rows;
+  assert.equal(saved[0].imei, first[4]);
+  assert.equal(saved[1].imei, second[4]);
+  assert.equal(saved[1].additional_equipment, "RASTREADOR");
+  assert.ok(
+    saved.every(
+      (o) =>
+        o.completed_at === require("../src/domain").today() &&
+        o.document_data.completion_date_source === "import_date",
+    ),
+  );
+  assert.equal(saved[0].raw_legacy.completion_date_source, "import_date");
+  const different = row("WXY5Z67");
+  different[2] = "Outro associado";
+  const check = await preview(await workbook([first, different]));
+  assert.equal(check.filter((r) => r.state === "ready").length, 2);
+  const existing = await stage(await workbook([row("WXY5Z67")]));
+  assert.equal(existing.data.counts.duplicate, 1);
+});

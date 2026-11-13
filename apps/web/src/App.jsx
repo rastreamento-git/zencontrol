@@ -30,6 +30,7 @@ import {
   Wallet,
   X,
   Download,
+  FileUp,
   Heart,
   ShieldCheck,
 } from "lucide-react";
@@ -68,6 +69,7 @@ const groups = [
       ["finance", "Financeiro", Wallet, true],
       ["history", "Histórico", History, true],
       ["users", "Equipe e acessos", Users, true],
+      ["imports", "Importação", FileUp, true],
       ["settings", "Configurações", Settings, true],
     ],
   },
@@ -77,7 +79,12 @@ export default function App() {
     admin = ["admin", "operador"].includes(user.papel);
   const shortcut = new URLSearchParams(window.location.search).get("area");
   const [tab, setTab] = useState(
-      ["orders", "agenda", "batches"].includes(shortcut)
+      [
+        "orders",
+        "agenda",
+        "batches",
+        ...(user.papel === "admin" ? ["imports"] : []),
+      ].includes(shortcut)
         ? shortcut
         : "dashboard",
     ),
@@ -206,7 +213,11 @@ export default function App() {
             <div className="nav-group" key={g.label}>
               <p>{g.label}</p>
               {g.items
-                .filter(([, , , a]) => !a || admin)
+                .filter(
+                  ([id, , , a]) =>
+                    (id !== "imports" || user.papel === "admin") &&
+                    (!a || admin),
+                )
                 .map(([id, label, Icon]) => (
                   <button
                     key={id}
@@ -408,11 +419,10 @@ export default function App() {
               <FinancePanel />
             ) : tab === "history" ? (
               <HistoryPage {...props} />
+            ) : tab === "imports" && user.papel === "admin" ? (
+              <SpreadsheetImport />
             ) : tab === "settings" ? (
-              <>
-                <SettingsPage {...props} />
-                {user.papel === "admin" && <SpreadsheetImport />}
-              </>
+              <SettingsPage {...props} />
             ) : (
               <Queue {...props} />
             )}

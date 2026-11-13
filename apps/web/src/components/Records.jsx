@@ -232,6 +232,9 @@ export function Orders({
                             onClick={() => openOrder(extra.id)}
                           >
                             + {extra.additional_equipment} · {extra.status}
+                            {extra.imei
+                              ? ` · IMEI adicional: ${extra.imei}`
+                              : ""}
                           </button>
                         ))}
                       </td>
@@ -241,6 +244,13 @@ export function Orders({
                       </td>
                       <td data-label="Situação">
                         <Badge value={o.group_status || o.status} />
+                        {o.document_data?.completion_date_source ===
+                          "import_date" && (
+                          <small>
+                            Conclusão: {format(o.completed_at)} · data da
+                            importação
+                          </small>
+                        )}
                         {o.group_status && o.group_status !== o.status && (
                           <small>OS principal: {o.status}</small>
                         )}
@@ -1111,8 +1121,11 @@ export function OrderEditor({
         </div>
         {order?.completed_at && (
           <div className="zc-notice">
-            Concluída em {format(order.completed_at)} por{" "}
-            {order.closed_by || "Operação legada"}.
+            Concluída em {format(order.completed_at)}
+            {order.document_data?.completion_date_source === "import_date"
+              ? " (data da importação)"
+              : ""}{" "}
+            por {order.closed_by || "Operação legada"}.
           </div>
         )}
         {order?.sga_classification && (

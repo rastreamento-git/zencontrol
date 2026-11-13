@@ -31,6 +31,8 @@ async function exportReview(batch, res) {
       "Classificação",
       "Motivo",
       "Agrupamento manual",
+      "IMEI adicional",
+      "Origem da data de conclusão",
       ...fields,
     ])
     .commit();
@@ -42,6 +44,10 @@ async function exportReview(batch, res) {
         row.state,
         row.reason || "",
         row.sources?.map((s) => s.sheet + ":" + s.row).join(" + ") || "",
+        row.additional_imei || row.equipment?.[1]?.serial || "",
+        row.completion_date_source === "import_date"
+          ? "Data da importação"
+          : "Original",
         ...fields.map((key) => {
           const val = row.data?.[key];
           return val == null

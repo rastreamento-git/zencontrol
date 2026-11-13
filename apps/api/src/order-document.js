@@ -50,12 +50,18 @@ function normalizeDocumentData(value, previous = {}) {
     "equipment_counts",
     "reinstallation",
     "reuse_equipment",
+    "completion_date_source",
   ];
   if (Object.keys(value).some((k) => !allowed.includes(k)))
     fail(
       400,
       "Campo desconhecido nos dados do documento. Serviço, técnico e agendamento vêm da própria OS.",
     );
+  if (
+    value.completion_date_source !== undefined &&
+    value.completion_date_source !== previous.completion_date_source
+  )
+    fail(400, "A origem da data é registrada automaticamente na importação.");
   const result = { ...previous };
   for (const [key, max] of Object.entries(documentFields))
     if (value[key] !== undefined) result[key] = d.string(value[key], key, max);

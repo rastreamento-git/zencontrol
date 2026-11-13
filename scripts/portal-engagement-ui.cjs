@@ -841,6 +841,11 @@ async function main() {
   await staff
     .getByRole("button", { name: "Configurações", exact: true })
     .click();
+  assert.equal(
+    await staff.getByRole("region", { name: "Importação de planilha" }).count(),
+    0,
+  );
+  await staff.getByRole("button", { name: "Importação", exact: true }).click();
   const importPanel = staff.getByRole("region", {
     name: "Importação de planilha",
   });
@@ -872,7 +877,7 @@ async function main() {
     "IMP1A23",
     "000007260510340",
     "01/11/2026",
-    "02/11/2026",
+    "",
     "Técnico histórico",
     "Niterói",
     "",
@@ -939,7 +944,7 @@ async function main() {
     .check();
   await importPanel
     .getByRole("button", {
-      name: "Confirmar agrupamento das duas linhas",
+      name: "Agrupar registros selecionados",
       exact: true,
     })
     .click();

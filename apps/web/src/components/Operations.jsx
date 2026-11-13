@@ -1060,9 +1060,8 @@ export function SettingsPage({ revision, refresh, navigate }) {
         >
           <div className="zc-panel-padding">
             <div className="zc-notice">
-              A migração importa os bancos antigos em uma transação, com
-              simulação e cópias prévias. Os arquivos originais permanecem
-              preservados.
+              Baixe uma cópia dos seus dados para guardar ou consultar fora do
+              sistema. Para trazer uma planilha, use o menu Importação.
             </div>
             <div className="zc-info-row">
               <div>
@@ -1101,80 +1100,90 @@ export function SettingsPage({ revision, refresh, navigate }) {
                 Exportar CSV
               </button>
             </div>
-            <h3 className="zc-section-gap">Organizar bases por mês</h3>
-            <p className="zc-muted">
-              Ordens abertas permanecem no HOT. Serviços encerrados seguem para
-              WARM e COLD sem excluir dados.
-            </p>
-            <form
-              className="zc-actions"
-              onSubmit={async (e) => {
-                e.preventDefault();
-                setBusy(true);
-                try {
-                  setPreview(
-                    (await api.post("/archive-month", { month, dry_run: true }))
-                      .data,
-                  );
-                } catch (e) {
-                  notify(errorMessage(e), "error");
-                } finally {
-                  setBusy(false);
-                }
-              }}
-            >
-              <input
-                type="month"
-                aria-label="Mês de referência"
-                required
-                value={month}
-                onChange={(e) => {
-                  setMonth(e.target.value);
-                  setPreview(null);
+            <details>
+              <summary>Arquivamento avançado</summary>
+              <h3 className="zc-section-gap">Organizar bases por mês</h3>
+              <p className="zc-muted">
+                Ordens abertas permanecem no HOT. Serviços encerrados seguem
+                para WARM e COLD sem excluir dados.
+              </p>
+              <form
+                className="zc-actions"
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  setBusy(true);
+                  try {
+                    setPreview(
+                      (
+                        await api.post("/archive-month", {
+                          month,
+                          dry_run: true,
+                        })
+                      ).data,
+                    );
+                  } catch (e) {
+                    notify(errorMessage(e), "error");
+                  } finally {
+                    setBusy(false);
+                  }
                 }}
-              />
-              <button className="secondary-button" disabled={busy}>
-                Simular organização
-              </button>
-            </form>
-            {preview && (
-              <div className="zc-notice zc-section-gap">
-                {preview.count} OS terão a base alterada.
-                {preview.count > 0 && (
-                  <button
-                    type="button"
-                    className="zc-link"
-                    onClick={async () => {
-                      if (
-                        !(await confirmAction(
-                          "Aplicar a organização das bases referente a " +
-                            preview.month +
-                            "?",
-                        ))
-                      )
-                        return;
-                      try {
-                        const { data } = await api.post("/archive-month", {
-                          month: preview.month,
-                          dry_run: false,
-                        });
-                        notify(`${data.count} registro(s) reorganizados.`);
-                        setPreview(null);
-                        refresh();
-                      } catch (e) {
-                        notify(errorMessage(e), "error");
-                      }
-                    }}
-                  >
-                    Aplicar organização
-                  </button>
-                )}
-              </div>
-            )}
+              >
+                <input
+                  type="month"
+                  aria-label="Mês de referência"
+                  required
+                  value={month}
+                  onChange={(e) => {
+                    setMonth(e.target.value);
+                    setPreview(null);
+                  }}
+                />
+                <button className="secondary-button" disabled={busy}>
+                  Simular organização
+                </button>
+              </form>
+              {preview && (
+                <div className="zc-notice zc-section-gap">
+                  {preview.count} OS terão a base alterada.
+                  {preview.count > 0 && (
+                    <button
+                      type="button"
+                      className="zc-link"
+                      onClick={async () => {
+                        if (
+                          !(await confirmAction(
+                            "Aplicar a organização das bases referente a " +
+                              preview.month +
+                              "?",
+                          ))
+                        )
+                          return;
+                        try {
+                          const { data } = await api.post("/archive-month", {
+                            month: preview.month,
+                            dry_run: false,
+                          });
+                          notify(`${data.count} registro(s) reorganizados.`);
+                          setPreview(null);
+                          refresh();
+                        } catch (e) {
+                          notify(errorMessage(e), "error");
+                        }
+                      }}
+                    >
+                      Aplicar organização
+                    </button>
+                  )}
+                </div>
+              )}
+            </details>
           </div>
         </Panel>
       </div>
-      <ServiceRules revision={revision} refresh={refresh} />
+      <details className="zc-section-gap">
+        <summary>Regras de serviços e conferência</summary>
+        <ServiceRules revision={revision} refresh={refresh} />
+      </details>
       {result && (
         <Modal title={result.title} onClose={() => setResult(null)}>
           {result.data.items ? (
