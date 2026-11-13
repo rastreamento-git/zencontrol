@@ -1,4 +1,5 @@
 const { randomUUID } = require("node:crypto");
+const { nextOrderId } = require("./order-numbering");
 const { transaction } = require("./database");
 const { fail } = require("./errors");
 const d = require("./domain");
@@ -276,6 +277,7 @@ const additionalSummary = (row) => ({
 });
 async function ensureAdditionalOrders(db, parent, types, actor) {
   const result = [];
+  const generatedOn = d.today();
   const available = await d.rows(
     db,
     "SELECT * FROM zc_orders WHERE parent_order_id=$1 AND deleted_at='' ORDER BY created_date,id",
@@ -340,13 +342,7 @@ async function ensureAdditionalOrders(db, parent, types, actor) {
         .filter((k) => parent[k] !== undefined)
         .map((k) => [k, parent[k]]),
     );
-    const firstId = parent.id + "_EXTRA";
-    let id = (await d.one(db, "SELECT 1 FROM zc_orders WHERE id=$1", [firstId]))
-      ? firstId + "_" + type
-      : firstId;
-    let sequence = 2;
-    while (await d.one(db, "SELECT 1 FROM zc_orders WHERE id=$1", [id]))
-      id = firstId + "_" + type + "_" + sequence++;
+    const id = await nextOrderId(db, generatedOn);
     const baseService = d.services.find((s) => parent.service.startsWith(s));
     const extra = await insert(db, "zc_orders", {
       ...data,
@@ -384,7 +380,7 @@ async function ensureAdditionalOrders(db, parent, types, actor) {
             }
           : {}),
       }),
-      created_date: d.today(),
+      created_date: generatedOn,
       created_by: actor,
       updated_at: d.now(),
     });
@@ -431,11 +427,12 @@ async function create(pool, input, actor) {
   return transaction(pool, async (db) => {
     const data = await validate(db, input);
     const additional = prepareEquipment(data, input);
+    const generatedOn = d.today();
     const o = await insert(db, "zc_orders", {
       ...data,
       workflow_mode: "controlled",
-      id: "OS-" + randomUUID().replaceAll("-", "").slice(0, 12).toUpperCase(),
-      created_date: d.today(),
+      id: await nextOrderId(db, generatedOn),
+      created_date: generatedOn,
       created_by: actor,
       updated_at: d.now(),
     });

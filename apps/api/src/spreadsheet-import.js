@@ -10,6 +10,7 @@ const { fail } = require("./errors");
 const d = require("./domain");
 const { transaction } = require("./database");
 const { insert } = require("./orders");
+const { nextOrderId, importNumbering } = require("./order-numbering");
 const type = "application/vnd.zencontrol.spreadsheet+json";
 const digest = (x) => createHash("sha256").update(x).digest("hex");
 const stable = (value) =>
@@ -377,7 +378,12 @@ function report(batch) {
     groups: batch.plan?.groups || [],
     archive: batch.plan?.archive || "",
     sga_mode: batch.plan?.sga_mode || "fill_missing",
-    rows: batch.rows.map(({ raw, key, match, ...r }) => r),
+    rows: batch.rows.map(({ raw, key, match, ...r }) => ({
+      ...r,
+      ...(r.data
+        ? { numbering: r.numbering || importNumbering(r.data.term) }
+        : {}),
+    })),
   };
 }
 function configureSpreadsheetImport(app, pool, auth, sgaClient) {
@@ -471,6 +477,7 @@ function configureSpreadsheetImport(app, pool, auth, sgaClient) {
       automatic_equipment_grouping: true,
       admin_archive: true,
       full_export: true,
+      daily_hex_numbering: true,
     }),
   );
   app.post("/api/spreadsheet-imports/:id/review", admin, async (req, res) => {
@@ -600,21 +607,24 @@ function configureSpreadsheetImport(app, pool, auth, sgaClient) {
       await markExisting(db, b.rows);
       let imported = 0,
         additional = 0;
+      const importedOn = d.today();
       for (const r of b.rows.filter((x) => x.state === "ready")) {
+        r.numbering = importNumbering(r.data.term, importedOn);
         if (r.completion_date_source === "import_date")
-          r.data.completed_at = d.today();
+          r.data.completed_at = importedOn;
         const saved = await insert(db, "zc_orders", {
           ...r.data,
           ...(r.data.document_data
             ? { document_data: JSON.stringify(r.data.document_data) }
             : {}),
-          id: "XLSX-" + r.key,
+          id: await nextOrderId(db, r.numbering.date),
           legacy_id: r.sheet + ":" + r.row,
-          created_date: "",
+          created_date: r.numbering.date,
           updated_at: d.now(),
 
           raw_legacy: JSON.stringify({
             source: "spreadsheet",
+            numbering: r.numbering,
             batch: b.id,
             sheet: r.sheet,
             row: r.row,
@@ -630,6 +640,8 @@ function configureSpreadsheetImport(app, pool, auth, sgaClient) {
             completion_date_source: r.completion_date_source || "original",
           }),
         });
+        r.order_id = saved.id;
+        r.additional_order_ids = [];
         const counts = r.data.document_data?.equipment_counts;
         if (counts) {
           const types = (
@@ -639,9 +651,12 @@ function configureSpreadsheetImport(app, pool, auth, sgaClient) {
             ]
           ).slice(1);
           for (const [index, equipmentType] of types.entries()) {
-            await insert(db, "zc_orders", {
+            const term = r.equipment?.[index + 1]?.term ?? r.data.term;
+            const numbering = importNumbering(term, importedOn);
+            const additionalOrder = await insert(db, "zc_orders", {
               ...r.data,
-              id: saved.id + "_EXTRA_" + (index + 1),
+              id: await nextOrderId(db, numbering.date),
+              term,
               parent_order_id: saved.id,
               additional_equipment: equipmentType,
               service: r.data.service + " (Equipamento adicional)",
@@ -650,10 +665,10 @@ function configureSpreadsheetImport(app, pool, auth, sgaClient) {
                 r.data.status === "CONCLUÍDO" &&
                 r.equipment?.[index + 1]?.completion_date_source ===
                   "import_date"
-                  ? d.today()
+                  ? importedOn
                   : r.data.completed_at,
               legacy_id: saved.legacy_id,
-              created_date: "",
+              created_date: numbering.date,
               updated_at: d.now(),
               document_data: JSON.stringify({
                 ...(r.data.status === "CONCLUÍDO" &&
@@ -676,6 +691,7 @@ function configureSpreadsheetImport(app, pool, auth, sgaClient) {
               raw_legacy: JSON.stringify({
                 ...saved.raw_legacy,
                 parent_id: saved.id,
+                numbering,
                 completion_date_source:
                   r.equipment?.[index + 1]?.completion_date_source ===
                   "import_date"
@@ -683,6 +699,7 @@ function configureSpreadsheetImport(app, pool, auth, sgaClient) {
                     : saved.raw_legacy.completion_date_source,
               }),
             });
+            r.additional_order_ids.push(additionalOrder.id);
             additional++;
           }
         }

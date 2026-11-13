@@ -355,7 +355,7 @@ test("cadastro valida campos e preserva agendamento e adicional separado", async
   assert.equal(row.vehicle, "ABC1A23");
   assert.equal(row.status, "AGENDADO");
   assert.equal(
-    (await fresh(row.id + "_EXTRA")).service,
+    (await fresh(row.additional_orders[0].id)).service,
     "Instalação (Equipamento adicional)",
   );
   assert.equal(row.raw_legacy, undefined);

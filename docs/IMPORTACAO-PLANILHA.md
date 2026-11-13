@@ -159,3 +159,7 @@ OS com histórico operacional.
 ## Preenchimento cadastral pelo SGA
 
 Com a consulta SGA configurada na API, gerar a revisão inicia automaticamente a busca dos veículos das abas escolhidas. A tela acompanha o progresso e apresenta os campos completados e divergências antes da confirmação. O modo padrão completa apenas campos vazios; a opção de usar o cadastro SGA atual exige escolha explícita do administrador. Consulte [Integração SGA](INTEGRACAO-SGA.md) para configuração, códigos atuais e regras de preservação.
+
+## Número das OS importadas
+
+O padrão é `AAAAMMDDXXX`: data de envio do termo + contador hexadecimal de `001` a `FFF`. A data de envio do termo representa a emissão e o envio da OS ao técnico. Sem essa data, usa-se a data da importação com indicador de origem, conforme a regra aprovada pelo administrador. A prévia mostra a data escolhida; os números definitivos são atribuídos somente na confirmação. Consulte [Numeração das OS](NUMERACAO-OS.md) para limites, equipamentos agrupados e preservação do histórico.

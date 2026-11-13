@@ -10,6 +10,7 @@ const d = require("./domain");
 const tables = [
   "zc_technicians",
   "zc_volunteers",
+  "zc_order_counters",
   "zc_orders",
   "zc_order_extras",
   "zc_settlements",
@@ -175,6 +176,8 @@ async function restoreBackup(pool, cfg, source, apply = false) {
     snapshot.data.zc_spreadsheet_imports = [];
   if (!Object.hasOwn(snapshot.data, "zc_sga_import_tasks"))
     snapshot.data.zc_sga_import_tasks = [];
+  if (!Object.hasOwn(snapshot.data, "zc_order_counters"))
+    snapshot.data.zc_order_counters = [];
   const legacy = tables.filter((t) => !additions.includes(t));
   if (Object.keys(snapshot.data).sort().join() === legacy.sort().join())
     for (const table of additions) snapshot.data[table] = [];
