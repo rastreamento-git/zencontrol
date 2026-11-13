@@ -25,13 +25,19 @@ identificadas e não podem ser selecionadas. A aprovação grava somente as linh
 prontas da seleção salva. Alterar meses ou agrupamento exige nova revisão; o token
 da prévia evita aprovar uma composição antiga em outra janela.
 
-A opção de agrupar equipamentos combina apenas um par inequívoco de Instalação
-(rastreador) + TAG na mesma aba, com associado, veículo, técnico, situação, conclusão,
-agendamento e turno compatíveis. As duas linhas passam a um atendimento com plano
-de dois equipamentos. A OS adicional é vinculada à principal conforme o modelo
-existente; a listagem apresenta uma única entrada. Seriais e ambas as origens
-são preservados. Grupos maiores, conflitos ou repetição de serial não são unidos
-automaticamente e permanecem para conferência. A opção pode ser desmarcada.
+O agrupamento é exclusivamente manual: o responsável marca uma linha de instalação
+(rastreador) e outra de TAG e clica em **Confirmar agrupamento das duas linhas**.
+Não há seleção global que una pares automaticamente. Mesmo um par compatível
+permanece separado até a escolha explícita; situações semelhantes podem ser
+sinalizadas como possíveis duplicidades para conferência.
+
+A API valida o par escolhido: mesma aba, associado, veículo, técnico, situação,
+conclusão, agendamento e turno compatíveis; seriais iguais e uso repetido de uma
+linha em mais de um grupo são recusados. As duas linhas passam a um atendimento
+com plano de dois equipamentos. A OS adicional segue vinculada à principal e a
+listagem apresenta uma única entrada. Seriais e ambas as origens são preservados.
+O botão **Desfazer agrupamento** permite separar o par antes da aprovação, gerando
+nova prévia e invalidando a confirmação anterior. A escolha manual fica no lote.
 
 O resumo permite conferir situação, composição, seriais, destino e dados antes de
 confirmar. Conteúdos incorretos devem ser corrigidos na origem/cadastro e analisados
@@ -104,8 +110,8 @@ A planilha real foi analisada para validar o leitor, mas não importada no banco
 ## Verificação de rota e versão
 
 A interface verifica `GET /api/spreadsheet-imports/capabilities` antes de liberar
-análise (versão 3, seleção de abas e agrupamento). `GET /healthz` anuncia
-`spreadsheet_import_version: 3`. Os endpoints de consulta, envio, revisão e aprovação
+análise (versão 4, seleção de abas e agrupamento manual). `GET /healthz` anuncia
+`spreadsheet_import_version: 4`. Os endpoints de consulta, envio, revisão e aprovação
 são autenticados e exclusivos de administrador.
 
 Se aparecer rota inexistente/incompatibilidade, verificar o serviço apontado por

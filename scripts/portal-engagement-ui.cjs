@@ -926,6 +926,21 @@ async function main() {
     .getByRole("button", { name: "Revisar abas selecionadas", exact: true })
     .click();
   await importPanel
+    .getByRole("button", { name: "Possíveis duplicidades (2)", exact: true })
+    .click();
+  await importPanel
+    .getByLabel("Selecionar JUNHO 2026 linha 2", { exact: true })
+    .check();
+  await importPanel
+    .getByLabel("Selecionar JUNHO 2026 linha 3", { exact: true })
+    .check();
+  await importPanel
+    .getByRole("button", {
+      name: "Confirmar agrupamento das duas linhas",
+      exact: true,
+    })
+    .click();
+  await importPanel
     .getByRole("button", { name: "Prontas (2)", exact: true })
     .waitFor();
   await importPanel.getByText("Operação · HOT", { exact: true }).waitFor();
