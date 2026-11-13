@@ -284,6 +284,7 @@ async function preview(bytes, today = d.today(), deduplicate = true) {
         ]),
       );
       out.match = JSON.stringify([norm(v[2]), vehicle]);
+      out.validation_issues = issues;
       if (issues.length) {
         out.state = "pending";
         out.reason = issues.join("; ");
@@ -370,20 +371,40 @@ function report(batch) {
     result: batch.result,
     counts,
     review_token: revision(batch.rows),
-    reviewed: batch.plan?.version === 8 && !!batch.plan?.reviewed,
+    reviewed: batch.plan?.version === 9 && !!batch.plan?.reviewed,
     selected_sheets: batch.plan?.selected_sheets || [],
     sheets: batch.plan?.sheets || [],
     groups: batch.plan?.groups || [],
     archive: batch.plan?.archive || "",
+    sga_mode: batch.plan?.sga_mode || "fill_missing",
     rows: batch.rows.map(({ raw, key, match, ...r }) => r),
   };
 }
-function configureSpreadsheetImport(app, pool, auth) {
+function configureSpreadsheetImport(app, pool, auth, sgaClient) {
   const admin = (req, res, next) => {
     if (req.user?.papel !== "admin")
       fail(403, "Somente um administrador pode importar planilhas.");
     next();
   };
+  async function rebuild(db, source, selected, archive) {
+    const rows = groupRows(source.filter((r) => selected.includes(r.sheet)));
+    for (const row of rows)
+      if (row.data) {
+        row.data.archive = archive;
+        row.inference.push("Base escolhida pelo administrador: " + archive);
+      }
+    await resolveTechnicians(db, rows);
+    await markExisting(db, rows);
+    return rows;
+  }
+  const enrichment = require("./sga-enrichment").createEnrichment({
+    app,
+    pool,
+    client: sgaClient,
+    admin,
+    rebuild,
+    revision,
+  });
   app.post(
     "/api/spreadsheet-imports",
     admin,
@@ -408,7 +429,7 @@ function configureSpreadsheetImport(app, pool, auth) {
         selected_sheets: [],
         reviewed: false,
         groups: [],
-        version: 8,
+        version: 9,
       };
       const rows = [];
       const id = randomUUID();
@@ -445,7 +466,7 @@ function configureSpreadsheetImport(app, pool, auth) {
   );
   app.get("/api/spreadsheet-imports/capabilities", admin, (req, res) =>
     res.json({
-      version: 8,
+      version: 9,
       sheet_selection: true,
       automatic_equipment_grouping: true,
       admin_archive: true,
@@ -464,7 +485,7 @@ function configureSpreadsheetImport(app, pool, auth) {
       if (!b) fail(404, "Importação não encontrada.");
       if (b.approved_at || new Date(b.expires_at) < new Date())
         fail(409, "Lote confirmado ou expirado. Envie novamente.");
-      if (b.plan?.version !== 8)
+      if (b.plan?.version !== 9)
         fail(409, "Gere uma nova prévia para escolher as abas.");
       const selected = req.body?.sheets;
       if (
@@ -480,22 +501,17 @@ function configureSpreadsheetImport(app, pool, auth) {
       if (!["HOT", "WARM", "COLD"].includes(archive))
         fail(400, "Escolha a base de destino: HOT, WARM ou COLD.");
 
-      const rows = groupRows(
-        b.plan.source.filter((r) => selected.includes(r.sheet)),
-      );
-      for (const row of rows)
-        if (row.data) {
-          row.data.archive = archive;
-          row.inference.push("Base escolhida pelo administrador: " + archive);
-        }
-      await resolveTechnicians(db, rows);
-      await markExisting(db, rows);
+      const sgaMode = req.body.sga_mode || "fill_missing";
+      if (!["fill_missing", "prefer_sga"].includes(sgaMode))
+        fail(400, "Modo de preenchimento SGA inválido.");
+      const rows = await rebuild(db, b.plan.source, selected, archive);
       b.rows = rows;
       b.plan = {
         ...b.plan,
         selected_sheets: selected,
         reviewed: true,
         archive,
+        sga_mode: sgaMode,
         groups: rows
           .filter((r) => r.sources)
           .map((r) => r.sources.map((s) => s.sheet + ":" + s.row)),
@@ -506,6 +522,7 @@ function configureSpreadsheetImport(app, pool, auth) {
       );
       return report(b);
     });
+    result.enrichment = await enrichment.start(result.id, req.user.login);
     res.json(result);
   });
   app.get("/api/spreadsheet-imports/:id/export", admin, async (req, res) => {
@@ -517,7 +534,7 @@ function configureSpreadsheetImport(app, pool, auth) {
       [req.params.id],
     );
     if (!batch) fail(404, "Importação não encontrada.");
-    if (!batch.plan?.reviewed || batch.plan.version !== 8)
+    if (!batch.plan?.reviewed || batch.plan.version !== 9)
       fail(409, "Escolha as abas e a base para gerar a revisão completa.");
     await exportReview(batch, res);
   });
@@ -543,11 +560,17 @@ function configureSpreadsheetImport(app, pool, auth) {
       );
       if (!b) fail(404, "Importação não encontrada.");
       if (b.approved_at) return b.result;
+      const progress = await enrichment.status(b.id, db);
+      if (["running", "queued"].includes(progress.state))
+        fail(
+          409,
+          "Aguarde o preenchimento automático do SGA terminar antes de confirmar.",
+        );
       if (new Date(b.expires_at) < new Date())
         fail(409, "Prévia expirada. Envie a planilha novamente.");
       if (
         !b.plan?.reviewed ||
-        b.plan.version !== 8 ||
+        b.plan.version !== 9 ||
         !["HOT", "WARM", "COLD"].includes(b.plan.archive)
       )
         fail(
@@ -603,6 +626,7 @@ function configureSpreadsheetImport(app, pool, auth) {
             inference: r.inference,
             parser_version: 2,
             source_service: r.source_service,
+            sga: r.sga,
             completion_date_source: r.completion_date_source || "original",
           }),
         });

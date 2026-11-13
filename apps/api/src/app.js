@@ -113,7 +113,7 @@ function createApp(pool, env = process.env) {
         media_storage: cfg.MEDIA_STORAGE || "local",
         chat_directory_version: chatDirectoryVersion,
         chat_photo_version: chatPhotoVersion,
-        spreadsheet_import_version: 8,
+        spreadsheet_import_version: 9,
       });
     } catch {
       res.status(503).json({ status: "unavailable" });
@@ -142,7 +142,13 @@ function createApp(pool, env = process.env) {
   require("./operational-routes").configureOperational(app, pool, auth);
   require("./ecosystem-routes").configureEcosystem(app, pool, cfg, auth);
   configurePortal(app, pool, cfg, auth);
-  require("./spreadsheet-import").configureSpreadsheetImport(app, pool, auth);
+  const sgaClient = new SGAClient(cfg);
+  require("./spreadsheet-import").configureSpreadsheetImport(
+    app,
+    pool,
+    auth,
+    sgaClient,
+  );
   const admin = auth.requireAdmin;
   const actor = (req) => req.user.nome || req.user.login;
   const page = (req) => ({
@@ -1224,7 +1230,7 @@ function createApp(pool, env = process.env) {
   );
   app.post("/api/sga/lookup", async (req, res) =>
     res.json(
-      await new SGAClient(cfg).lookup({
+      await sgaClient.lookup({
         term: req.body.term,
         sga_id: req.body.sga_id,
         chassis: req.body.chassis,

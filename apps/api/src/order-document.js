@@ -20,6 +20,7 @@ const documentFields = {
   plate: 40,
   renavam: 30,
   brand: 120,
+  color: 120,
   model: 240,
   year: 30,
   vehicle_type: 120,
@@ -293,56 +294,14 @@ function money(value) {
     });
   return raw;
 }
-const sgaClassifications = {
-  1: "Concluído",
-  4: "Falta pagar 1º boleto",
-  5: "Falta pagar 2º boleto",
-  6: "1º boleto pago e s/ rastreador",
-  7: "Falta pagar 1º boleto - mg",
-  8: "1º e 2º pago e s/ rastreador",
-  9: "Moto abaixo de 8mil",
-  10: "Falta vistoria",
-  11: "Migração",
-  12: "Sem rastreador",
-  13: "Com rastreador",
-  14: "Instalação pendente",
-  15: "Aguardando taxa instalação",
-  16: "Carnê",
-  17: "Faltando vistoria, sem rastreador",
-  18: "Pendente",
-  19: "Aguardando indenização",
-  20: "Roubo/furto",
-  21: "Instalação agendada",
-};
-const sgaStatuses = {
-  1: "Ativo",
-  2: "Inativo",
-  3: "Pendente",
-  4: "Inadimplente",
-  5: "Negado",
-  6: "Cancelado",
-  7: "Evento",
-  8: "Indenizado",
-  9: "Pré-aprovado",
-  10: "Evento negado",
-  11: "Cancelado com rastreador",
-  12: "Inativos com rastreador",
-  13: "Inativos sem rastreador",
-  14: "Ativo com adesivo",
-  15: "Publicado no spc/serasa",
-  16: "Aguardando taxa instalação",
-  17: "Cancelamento pendente",
-  18: "Envio de termos",
-  19: "Desligado do corpo associativo",
-  22: "Aguardando indenização",
-};
-function displaySga(code, description, labels) {
-  const key = /^\d+$/.test(code) ? String(Number(code)) : code;
-  return (
-    labels[key] || description || (key && key !== "0" ? "Cód: " + key : "")
-  );
+function displaySga(code, description) {
+  return description || (code && code !== "0" ? "Cód: " + code : "");
 }
 function mapSgaVehicle(v) {
+  const phone = scalar(v.telefone_celular, v.telefone),
+    digits = phone.replace(/\D/g, ""),
+    area = scalar(v.ddd_celular, v.ddd).replace(/\D/g, ""),
+    contact = [8, 9].includes(digits.length) && area ? area + digits : phone;
   const address = ["logradouro", "numero", "bairro", "cidade", "estado", "cep"]
     .map((k) => scalar(v[k]))
     .filter(Boolean)
@@ -363,8 +322,7 @@ function mapSgaVehicle(v) {
     chassis: scalar(v.chassi),
     sga_id: scalar(v.codigo_veiculo),
     customer_name: scalar(v.nome),
-    contact:
-      scalar(v.ddd_celular, v.ddd) + scalar(v.telefone_celular, v.telefone),
+    contact,
     volunteer: scalar(v.voluntario_real, v.nome_voluntario, v.nome_usuario),
     fipe_value: money(scalar(v.valor_fipe, v.fipe_valor, v.valor_mercado)),
     fipe_risk: "",
@@ -375,12 +333,10 @@ function mapSgaVehicle(v) {
         v.id_classificacao,
       ),
       classification,
-      sgaClassifications,
     ),
     sga_status: displaySga(
       scalar(v.codigo_situacao_veiculo, v.codigo_situacao),
       status,
-      sgaStatuses,
     ),
     location: address,
     document_data: {
@@ -397,6 +353,7 @@ function mapSgaVehicle(v) {
       plate: scalar(v.placa),
       renavam: scalar(v.renavam),
       brand: scalar(v.marca, v.descricao_marca),
+      color: scalar(v.cor, v.descricao_cor),
       model: scalar(v.modelo, v.descricao_modelo),
       year: [scalar(v.ano_fabricacao), scalar(v.ano_modelo)]
         .filter(Boolean)
