@@ -882,35 +882,59 @@ async function main() {
     "Origem",
     "CONCLUÍDO",
   ]);
-  await importPanel
-    .getByLabel("Planilha XLSX (até 10 MB)")
-    .setInputFiles({
-      name: "controle-teste.xlsx",
-      mimeType:
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      buffer: Buffer.from(await importBook.xlsx.writeBuffer()),
-    });
+  const oldMonth = importBook.addWorksheet("JUNHO 2026");
+  oldMonth.addRow(importSheet.getRow(1).values);
+  oldMonth.addRow([
+    "",
+    "Instalação",
+    "Pendência antiga fictícia",
+    "IMP2B34",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "PENDENTE",
+  ]);
+  await importPanel.getByLabel("Planilha XLSX (até 10 MB)").setInputFiles({
+    name: "controle-teste.xlsx",
+    mimeType:
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    buffer: Buffer.from(await importBook.xlsx.writeBuffer()),
+  });
   await importPanel
     .getByRole("button", { name: "Analisar planilha", exact: true })
     .click();
   await importPanel
-    .getByRole("button", { name: "Prontas (1)", exact: true })
+    .getByRole("button", { name: "Prontas (2)", exact: true })
+    .waitFor();
+  await importPanel.getByText("Operação · HOT", { exact: true }).waitFor();
+  await importPanel
+    .getByText(
+      "Em aberto: permanece na operação, inclusive se a aba 2026-06 for antiga",
+      { exact: true },
+    )
     .waitFor();
   const approveImport = importPanel.getByRole("button", {
-    name: "Confirmar importação de 1 registros",
+    name: "Confirmar importação de 2 registros",
     exact: true,
   });
   assert.ok(await approveImport.isDisabled());
   await importPanel
-    .getByLabel("Digite IMPORTAR HISTORICO")
-    .fill("IMPORTAR HISTORICO");
+    .getByLabel("Digite IMPORTAR SERVICOS")
+    .fill("IMPORTAR SERVICOS");
   await staff.screenshot({
     path: path.join(directory, "importacao-previa.png"),
     fullPage: true,
   });
   await approveImport.click();
   await importPanel
-    .getByText("Importação confirmada: 1 registros gravados.", { exact: true })
+    .getByText("Importação confirmada: 2 registros gravados.", { exact: true })
     .waitFor();
   summary.administratorSpreadsheetImport = "passed";
   summary.firstAccessRecoveryAndProactiveChat = "passed";

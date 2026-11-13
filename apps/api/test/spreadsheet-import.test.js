@@ -158,7 +158,7 @@ test("exige administrador, confirmação e prévia persistida; repetições não
     (
       await call(
         "/api/spreadsheet-imports/" + p.data.id + "/approve",
-        { confirmation: "IMPORTAR HISTORICO" },
+        { confirmation: "IMPORTAR SERVICOS" },
         operator,
       )
     ).status,
@@ -167,7 +167,7 @@ test("exige administrador, confirmação e prévia persistida; repetições não
   const results = await Promise.all(
     [1, 2].map(() =>
       call("/api/spreadsheet-imports/" + p.data.id + "/approve", {
-        confirmation: "IMPORTAR HISTORICO",
+        confirmation: "IMPORTAR SERVICOS",
         rows: [{ fake: true }],
       }),
     ),
@@ -176,7 +176,7 @@ test("exige administrador, confirmação e prévia persistida; repetições não
   assert.ok(results.every((r) => r.data.imported === 1));
   const saved = (await db.pool.query("SELECT * FROM zc_orders")).rows;
   assert.equal(saved.length, 1);
-  assert.equal(saved[0].archive, "COLD");
+  assert.equal(saved[0].archive, "HOT");
   assert.equal(saved[0].technician_id, null);
   assert.equal(saved[0].created_date, "");
   assert.equal(saved[0].raw_legacy.row, 2);
@@ -208,7 +208,7 @@ test("revalida prévias concorrentes e recusa expiração, datas impossíveis e 
   assert.equal(
     (
       await call("/api/spreadsheet-imports/" + a.data.id + "/approve", {
-        confirmation: "IMPORTAR HISTORICO",
+        confirmation: "IMPORTAR SERVICOS",
       })
     ).data.imported,
     1,
@@ -216,7 +216,7 @@ test("revalida prévias concorrentes e recusa expiração, datas impossíveis e 
   assert.equal(
     (
       await call("/api/spreadsheet-imports/" + b.data.id + "/approve", {
-        confirmation: "IMPORTAR HISTORICO",
+        confirmation: "IMPORTAR SERVICOS",
       })
     ).data.imported,
     0,
@@ -229,7 +229,7 @@ test("revalida prévias concorrentes e recusa expiração, datas impossíveis e 
   assert.equal(
     (
       await call("/api/spreadsheet-imports/" + c.data.id + "/approve", {
-        confirmation: "IMPORTAR HISTORICO",
+        confirmation: "IMPORTAR SERVICOS",
       })
     ).status,
     409,
@@ -259,10 +259,182 @@ test("backup restaura lotes e origem das OS sem exigir contas da instalação or
     const orders = (await target.pool.query("SELECT * FROM zc_orders")).rows;
     assert.equal(orders.length, 2);
     assert.equal(orders[0].raw_legacy.source, "spreadsheet");
-    assert.equal(orders[0].archive, "COLD");
+    assert.equal(orders[0].archive, "HOT");
   } finally {
     await backup?.cleanup();
     await target.close();
     await fs.rm(root, { recursive: true, force: true });
   }
+});
+
+test("identifica etapa por evidências sem encerrar pendências de meses anteriores", async () => {
+  const { infer, period } = require("../src/spreadsheet-structure");
+  assert.equal(period("Março / 2027"), "2027-03");
+  assert.equal(period("NOVEMBRO-2026"), "2026-11");
+  const check = (status, completed = "", scheduled = "", month = "2026-06") =>
+    infer({ status, completed, scheduled, month, today: "2026-11-13" });
+  assert.equal(check("PENDENTE").archive, "HOT");
+  assert.equal(check("PENDENTE").workflow_mode, "controlled");
+  assert.equal(check("", "2026-06-20").status, "CONCLUÍDO");
+  assert.equal(check("", "2026-06-20").archive, "COLD");
+  assert.equal(check("CONCLUÍDO", "2026-10-20").archive, "WARM");
+  assert.equal(check("CONCLUÍDO", "2026-11-02").archive, "HOT");
+  assert.equal(check("", "", "2026-09-10").status, "AGENDADO");
+  assert.equal(check("CANCELADO EM SISTEMA").status, "CANCELADO");
+  assert.equal(check("REAGENDAR").archive, "HOT");
+  assert.ok(check("PENDENTE", "2026-06-20").issues.length);
+  assert.ok(check("CANCELAMENTO PENDENTE").issues.length);
+  assert.ok(check("SEGURADO SEM RASTREADOR").issues.length);
+  assert.ok(check("AGUARDANDO CONFERÊNCIA").issues.length);
+  assert.ok(check("CONCLUÍDO", "2026-12-01").issues.length);
+  const pending = row("MNO2P34");
+  pending[14] = "PENDENTE";
+  pending[6] = "";
+  const rows = await preview(
+    await workbook([pending], "JUNHO 2026"),
+    "2026-11-13",
+  );
+  assert.equal(rows[0].state, "ready");
+  assert.equal(rows[0].data.status, "PENDENTE");
+  assert.equal(rows[0].data.archive, "HOT");
+  assert.equal(rows[0].period, "2026-06");
+});
+
+test("descobre cabeçalho deslocado, colunas reordenadas e data sem ano pela aba", async () => {
+  const w = new ExcelJS.Workbook(),
+    s = w.addWorksheet("MARÇO - 2027");
+  s.addRow(["Controle geral"]);
+  s.addRow([]);
+  s.addRow([
+    "PLACA",
+    "SITUAÇÃO",
+    "ASSOCIADO",
+    "SERVIÇO",
+    "DATA DE AGENDAMENTO",
+    "TURNO",
+    "TÉCNICO",
+    "IMEI",
+  ]);
+  s.addRow([
+    "PQR3S45",
+    "",
+    "Cliente de teste",
+    "Instalação",
+    "14/03",
+    "Manhã",
+    "Técnico fictício",
+    "000007260510340",
+  ]);
+  const rows = await preview(
+    Buffer.from(await w.xlsx.writeBuffer()),
+    "2027-03-10",
+  );
+  assert.equal(rows[0].row, 4);
+  assert.equal(rows[0].state, "ready");
+  assert.equal(rows[0].data.status, "AGENDADO");
+  assert.equal(rows[0].data.scheduled_at, "2027-03-14");
+  assert.equal(rows[0].data.imei, "000007260510340");
+});
+
+test("migra pendentes e agenda para operação, vincula técnico único e bloqueia prévia antiga", async () => {
+  const tech = (
+    await db.pool.query(
+      "INSERT INTO zc_technicians(name) VALUES('Técnico fictício') RETURNING id",
+    )
+  ).rows[0];
+  const pending = row("STU4V56");
+  pending[14] = "PENDENTE";
+  pending[6] = "";
+  const scheduled = row("VWX5Y67");
+  scheduled[14] = "";
+  scheduled[6] = "";
+  scheduled[15] = "14/11/2026";
+  scheduled[16] = "Manhã";
+  const p = await stage(await workbook([pending, scheduled], "JUNHO 2026"));
+  assert.equal(p.data.counts.ready, 2, JSON.stringify(p.data));
+  assert.equal(p.data.rows[1].data.status, "AGENDADO");
+  assert.equal(p.data.rows[1].data.technician_id, tech.id);
+  assert.equal(
+    (
+      await call("/api/spreadsheet-imports/" + p.data.id + "/approve", {
+        confirmation: "IMPORTAR SERVICOS",
+      })
+    ).data.imported,
+    2,
+  );
+  const active = (
+    await db.pool.query(
+      "SELECT * FROM zc_orders WHERE workflow_mode='controlled'",
+    )
+  ).rows;
+  assert.equal(active.length, 2);
+  assert.ok(
+    active.every((o) => o.archive === "HOT" && o.technician_id === tech.id),
+  );
+  assert.equal(
+    active.find((o) => o.status === "AGENDADO").scheduled_at,
+    "2026-11-14",
+  );
+  assert.ok(active.every((o) => o.raw_legacy.period === "2026-06"));
+  const missing = row("YZA6B78");
+  missing[6] = "";
+  missing[14] = "AGENDADO";
+  missing[7] = "Não cadastrado";
+  missing[15] = "14/11/2026";
+  missing[16] = "Tarde";
+  assert.equal((await stage(await workbook([missing]))).data.counts.pending, 1);
+  const stale = await stage(await workbook([row("BCD7E89")]));
+  await db.pool.query("UPDATE zc_spreadsheet_imports SET rows=$2 WHERE id=$1", [
+    stale.data.id,
+    JSON.stringify([{ state: "ready", data: row() }]),
+  ]);
+  assert.equal(
+    (
+      await call("/api/spreadsheet-imports/" + stale.data.id + "/approve", {
+        confirmation: "IMPORTAR SERVICOS",
+      })
+    ).status,
+    409,
+  );
+  for (const table of ["zc_jobs", "zc_payments", "zc_financial_ledger"])
+    assert.equal(
+      (await db.pool.query("SELECT * FROM " + table)).rows.length,
+      0,
+    );
+});
+
+test("converte duas TAGs em instalação com OS adicional sem movimentações automáticas", async () => {
+  const r = row("EFG8H90");
+  r[1] = "Duas TAGs";
+  r[14] = "PENDENTE";
+  r[6] = "";
+  const p = await stage(await workbook([r]));
+  assert.equal(p.data.counts.ready, 1);
+  assert.equal(p.data.rows[0].additional_orders, 1);
+  assert.deepEqual(p.data.rows[0].data.document_data.equipment_counts, {
+    tracker: 0,
+    tag: 2,
+  });
+  const result = await call(
+    "/api/spreadsheet-imports/" + p.data.id + "/approve",
+    { confirmation: "IMPORTAR SERVICOS" },
+  );
+  assert.equal(result.data.imported, 1);
+  assert.equal(result.data.additional_orders, 1);
+  const saved = (
+    await db.pool.query(
+      "SELECT * FROM zc_orders WHERE vehicle='EFG8H90' ORDER BY parent_order_id NULLS FIRST",
+    )
+  ).rows;
+  assert.equal(saved.length, 2);
+  assert.equal(saved[1].parent_order_id, saved[0].id);
+  assert.equal(saved[1].additional_equipment, "TAG");
+  assert.equal(saved[1].raw_legacy.source, "spreadsheet");
+  assert.ok(
+    saved.every((o) => o.workflow_mode === "controlled" && o.archive === "HOT"),
+  );
+  assert.equal(
+    (await db.pool.query("SELECT * FROM zc_notifications")).rows.length,
+    0,
+  );
 });
