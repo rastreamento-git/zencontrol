@@ -1,7 +1,10 @@
 # Importação do controle geral por etapa
 
+A prévia mostra apenas **Nome, Placa e IMEI** no resumo. Os demais campos ficam
+disponíveis em **Revisar conteúdo completo** e permanecem na importação.
+
 Em **Configurações → Importar controle de serviços**, um administrador envia o
-XLSX (até 10 MB), escolhe os meses, gera a prévia de revisão e digita `IMPORTAR SERVICOS`. A análise
+XLSX (até 10 MB), escolhe os meses e a base de destino, gera a prévia de revisão e digita `IMPORTAR SERVICOS`. A análise
 não cria OS. Operadores e técnicos não têm acesso aos endpoints de importação.
 
 ## Leitura da estrutura
@@ -51,16 +54,18 @@ novamente; a prévia não libera conflitos automaticamente.
 | Situação vazia e data de conclusão válida | Concluído |
 | Situação vazia e agendamento identificado | Agendado, exigindo técnico ativo identificável |
 | Situação vazia, sem conclusão nem agendamento | Pendente |
-| Pendente, agendado, em execução ou reagendar | Operação integrada, base HOT, mesmo em aba antiga |
-| Concluído ou cancelado | Registro encerrado; HOT no mês corrente, WARM de 1 a 3 meses, COLD a partir de 4 meses |
+| Pendente, agendado, em execução ou reagendar | Operação integrada; base escolhida pelo administrador |
+| Concluído ou cancelado | Registro encerrado; base escolhida pelo administrador |
 | Agendamento vencido | Preservar etapa e indicar atraso, sem inventar conclusão/cancelamento |
 | Conclusão sem data, futura ou contraditória | Revisão necessária |
 | Inadimplente, cancelamento pendente, segurado sem rastreador ou outra situação administrativa | Revisão necessária; não presumir cancelamento nem dispensa autorizada |
 | Etapa de conferência/estoque sem dados do fluxo integrado | Revisão necessária, sem inventar evidências ou lançamentos |
 
-A retenção de encerrados usa a conclusão quando disponível e, caso contrário,
-a competência da aba, seguindo os intervalos já adotados pelo sistema. A aba de
-um mês passado, sozinha, nunca encerra um atendimento.
+A base não é inferida pelo mês, idade ou situação. O administrador escolhe
+explicitamente **HOT, WARM ou COLD** para o lote selecionado; não há opção inicial
+preenchida. A API recusa revisão sem uma base válida. Alterar a base invalida a
+confirmação anterior e exige nova revisão. A etapa do atendimento continua sendo
+identificada pelos dados, independentemente da base escolhida.
 
 A prévia exibe etapa, destino, competência, justificativas e contagens. Casos
 incompletos ou ambíguos ficam pendentes. Corrigir a origem/cadastro e gerar nova
@@ -68,7 +73,7 @@ prévia; não há liberação forçada de conflitos nem edição manual da prév
 
 ## Técnicos e equipamentos
 
-Serviços em aberto entram no fluxo `controlled`. O vínculo automático exige nome
+Serviços em aberto entram no fluxo `controlled`, na base escolhida pelo administrador. O vínculo automático exige nome
 exato normalizado e único de técnico ativo. Agendado/em execução sem esse vínculo
 fica pendente para revisão; outros serviços podem entrar na operação aguardando
 atribuição. Mudanças de vínculo entre análise e aprovação exigem nova prévia.
@@ -110,8 +115,8 @@ A planilha real foi analisada para validar o leitor, mas não importada no banco
 ## Verificação de rota e versão
 
 A interface verifica `GET /api/spreadsheet-imports/capabilities` antes de liberar
-análise (versão 4, seleção de abas e agrupamento manual). `GET /healthz` anuncia
-`spreadsheet_import_version: 4`. Os endpoints de consulta, envio, revisão e aprovação
+análise (versão 5, seleção de abas, base administrativa e agrupamento manual). `GET /healthz` anuncia
+`spreadsheet_import_version: 5`. Os endpoints de consulta, envio, revisão e aprovação
 são autenticados e exclusivos de administrador.
 
 Se aparecer rota inexistente/incompatibilidade, verificar o serviço apontado por
@@ -119,3 +124,15 @@ Se aparecer rota inexistente/incompatibilidade, verificar o serviço apontado po
 017. Publicar somente o site não adiciona endpoints ao backend. O Blueprint usa
 `npm run migrate && npm start` e deploy automático desligado. A compatibilidade
 é validada pela tela sem substituir uma falha de rota por uma lista vazia.
+
+## Exportação completa da revisão
+
+**Exportar revisão completa (XLSX)** baixa um arquivo com o resumo Nome/Placa/IMEI,
+uma aba de revisão com todos os campos mapeados, base, situação, classificação e
+agrupamentos manuais, e abas de origem com todos os valores lidos dos meses
+selecionados, incluindo linhas pendentes/ignoradas e campos complementares. Números
+de série são células de texto para preservar zeros iniciais. A exportação usa
+escrita por streaming e não grava OS nem confirma a importação.
+
+Prévias da versão 4 devem ser refeitas: sua base tinha sido calculada automaticamente.
+A versão 5 exige a escolha explícita do administrador. Não há nova migração de banco.

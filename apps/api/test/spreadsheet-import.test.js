@@ -85,6 +85,7 @@ async function stage(bytes) {
     {
       sheets: upload.data.sheets.filter((s) => s.eligible).map((s) => s.name),
       groups: [],
+      archive: "HOT",
     },
   );
   reviewTokens.set(upload.data.id, reviewed.data.review_token);
@@ -287,15 +288,15 @@ test("identifica etapa por evidências sem encerrar pendências de meses anterio
   assert.equal(period("NOVEMBRO-2026"), "2026-11");
   const check = (status, completed = "", scheduled = "", month = "2026-06") =>
     infer({ status, completed, scheduled, month, today: "2026-11-13" });
-  assert.equal(check("PENDENTE").archive, "HOT");
+  assert.equal(check("PENDENTE").archive, "");
   assert.equal(check("PENDENTE").workflow_mode, "controlled");
   assert.equal(check("", "2026-06-20").status, "CONCLUÍDO");
-  assert.equal(check("", "2026-06-20").archive, "COLD");
-  assert.equal(check("CONCLUÍDO", "2026-10-20").archive, "WARM");
-  assert.equal(check("CONCLUÍDO", "2026-11-02").archive, "HOT");
+  assert.equal(check("", "2026-06-20").archive, "");
+  assert.equal(check("CONCLUÍDO", "2026-10-20").archive, "");
+  assert.equal(check("CONCLUÍDO", "2026-11-02").archive, "");
   assert.equal(check("", "", "2026-09-10").status, "AGENDADO");
   assert.equal(check("CANCELADO EM SISTEMA").status, "CANCELADO");
-  assert.equal(check("REAGENDAR").archive, "HOT");
+  assert.equal(check("REAGENDAR").archive, "");
   assert.ok(check("PENDENTE", "2026-06-20").issues.length);
   assert.ok(check("CANCELAMENTO PENDENTE").issues.length);
   assert.ok(check("SEGURADO SEM RASTREADOR").issues.length);
@@ -310,7 +311,7 @@ test("identifica etapa por evidências sem encerrar pendências de meses anterio
   );
   assert.equal(rows[0].state, "ready");
   assert.equal(rows[0].data.status, "PENDENTE");
-  assert.equal(rows[0].data.archive, "HOT");
+  assert.equal(rows[0].data.archive, "");
   assert.equal(rows[0].period, "2026-06");
 });
 
@@ -514,6 +515,7 @@ test("seleciona somente os meses revisados e une rastreador + TAG com dois seria
       await call(`/api/spreadsheet-imports/${id}/review`, {
         sheets: ["Ativos"],
         groups: [],
+        archive: "HOT",
       })
     ).status,
     400,
@@ -521,6 +523,7 @@ test("seleciona somente os meses revisados e une rastreador + TAG com dois seria
   const separate = await call(`/api/spreadsheet-imports/${id}/review`, {
     sheets: ["NOVEMBRO 2026"],
     groups: [],
+    archive: "HOT",
   });
   assert.equal(separate.data.rows.length, 2);
   assert.equal(separate.data.counts.duplicate, 2);
@@ -552,6 +555,7 @@ test("seleciona somente os meses revisados e une rastreador + TAG com dois seria
   const review = await call(`/api/spreadsheet-imports/${id}/review`, {
     sheets: ["NOVEMBRO 2026"],
     groups: pairs,
+    archive: "HOT",
   });
   assert.equal(review.status, 200);
   assert.equal(review.data.counts.ready, 1);
@@ -561,12 +565,14 @@ test("seleciona somente os meses revisados e une rastreador + TAG com dois seria
   const undone = await call(`/api/spreadsheet-imports/${id}/review`, {
     sheets: ["NOVEMBRO 2026"],
     groups: [],
+    archive: "HOT",
   });
   assert.equal(undone.data.rows.length, 2);
   assert.equal(undone.data.groups.length, 0);
   const changed = await call(`/api/spreadsheet-imports/${id}/review`, {
     sheets: ["JUNHO 2026"],
     groups: [],
+    archive: "HOT",
   });
   assert.equal(
     (
@@ -580,6 +586,7 @@ test("seleciona somente os meses revisados e une rastreador + TAG com dois seria
   const final = await call(`/api/spreadsheet-imports/${id}/review`, {
     sheets: ["NOVEMBRO 2026"],
     groups: pairs,
+    archive: "HOT",
   });
   const result = await call(`/api/spreadsheet-imports/${id}/approve`, {
     confirmation: "IMPORTAR SERVICOS",
@@ -620,4 +627,85 @@ test("leitura de aba auxiliar extensa cabe em heap de 128 MB", async () => {
     { timeout: 60000, maxBuffer: 4096 },
   );
   assert.match(stdout, /streaming-memory-ok/);
+});
+
+test("administrador escolhe a base e exporta todos os campos além do resumo", async () => {
+  const source = row("QRS3T45");
+  source[19] = "Campo complementar integral";
+  const p = await stage(await workbook([source]));
+  const endpoint = `/api/spreadsheet-imports/${p.data.id}`;
+  assert.equal(
+    (
+      await call(endpoint + "/review", {
+        sheets: ["NOVEMBRO 2026"],
+        groups: [],
+      })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await call(endpoint + "/review", {
+        sheets: ["NOVEMBRO 2026"],
+        groups: [],
+        archive: "AUTOMATICO",
+      })
+    ).status,
+    400,
+  );
+  const cold = await call(endpoint + "/review", {
+    sheets: ["NOVEMBRO 2026"],
+    groups: [],
+    archive: "COLD",
+  });
+  assert.equal(cold.data.archive, "COLD");
+  assert.equal(cold.data.rows[0].data.archive, "COLD");
+  const forbidden = await fetch(base + endpoint + "/export", {
+    headers: { Authorization: "Bearer " + operator },
+  });
+  assert.equal(forbidden.status, 403);
+  const response = await fetch(base + endpoint + "/export", {
+    headers: { Authorization: "Bearer " + token },
+  });
+  assert.equal(response.status, 200);
+  const exported = new ExcelJS.Workbook();
+  await exported.xlsx.load(Buffer.from(await response.arrayBuffer()));
+  assert.deepEqual(exported.getWorksheet("Resumo").getRow(1).values.slice(1), [
+    "Nome",
+    "Placa",
+    "IMEI",
+  ]);
+  assert.equal(
+    exported.getWorksheet("Resumo").getCell("C2").value,
+    "000007260510340",
+  );
+  assert.equal(
+    exported.getWorksheet("Origem 1").getCell("G2").value,
+    "000007260510340",
+  );
+  assert.equal(
+    exported.getWorksheet("Origem 1").getCell("V2").value,
+    "Campo complementar integral",
+  );
+  const result = await call(endpoint + "/approve", {
+    confirmation: "IMPORTAR SERVICOS",
+    review_token: cold.data.review_token,
+  });
+  assert.equal(result.data.imported, 1);
+  const saved = (
+    await db.pool.query("SELECT * FROM zc_orders WHERE vehicle='QRS3T45'")
+  ).rows[0];
+  assert.equal(saved.archive, "COLD");
+  assert.match(saved.notes, /Campo complementar integral/);
+  const pending = row("TUV4W56");
+  pending[6] = "";
+  pending[14] = "PENDENTE";
+  const open = await stage(await workbook([pending]));
+  const warm = await call(`/api/spreadsheet-imports/${open.data.id}/review`, {
+    sheets: ["NOVEMBRO 2026"],
+    groups: [],
+    archive: "WARM",
+  });
+  assert.equal(warm.data.rows[0].data.archive, "WARM");
+  assert.equal(warm.data.rows[0].data.status, "PENDENTE");
 });

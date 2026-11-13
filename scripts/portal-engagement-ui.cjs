@@ -914,6 +914,9 @@ async function main() {
   await importPanel
     .getByRole("button", { name: "Analisar planilha", exact: true })
     .click();
+  await importPanel
+    .getByLabel("Base de destino (escolha do administrador)")
+    .selectOption("HOT");
   await importPanel.getByLabel(/NOVEMBRO 2026 —/).check();
   await importPanel
     .getByRole("button", { name: "Revisar abas selecionadas", exact: true })
@@ -943,13 +946,21 @@ async function main() {
   await importPanel
     .getByRole("button", { name: "Prontas (2)", exact: true })
     .waitFor();
-  await importPanel.getByText("Operação · HOT", { exact: true }).waitFor();
+  assert.deepEqual(await importPanel.locator("thead th").allTextContents(), [
+    "Nome",
+    "Placa",
+    "IMEI",
+  ]);
+  const exportDownload = staff.waitForEvent("download");
   await importPanel
-    .getByText(
-      "Em aberto: permanece na operação, inclusive se a aba 2026-06 for antiga",
-      { exact: true },
-    )
-    .waitFor();
+    .getByRole("button", {
+      name: "Exportar revisão completa (XLSX)",
+      exact: true,
+    })
+    .click();
+  await (
+    await exportDownload
+  ).saveAs(path.join(directory, "revisao-completa.xlsx"));
   const approveImport = importPanel.getByRole("button", {
     name: "Confirmar importação de 2 registros",
     exact: true,

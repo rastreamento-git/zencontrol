@@ -112,7 +112,7 @@ function createApp(pool, env = process.env) {
         media_storage: cfg.MEDIA_STORAGE || "local",
         chat_directory_version: chatDirectoryVersion,
         chat_photo_version: chatPhotoVersion,
-        spreadsheet_import_version: 4,
+        spreadsheet_import_version: 5,
       });
     } catch {
       res.status(503).json({ status: "unavailable" });

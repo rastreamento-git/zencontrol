@@ -131,23 +131,8 @@ function infer({ status, completed, scheduled, month, today = d.today() }) {
       "Etapa exige evidências e conferência do fluxo integrado; revisar antes de migrar",
     );
   const terminal = ["CONCLUÍDO", "CANCELADO"].includes(stage);
-  const reference = completed?.slice(0, 7) || month;
-  const age =
-    (Number(today.slice(0, 4)) - Number(reference.slice(0, 4))) * 12 +
-    Number(today.slice(5, 7)) -
-    Number(reference.slice(5, 7));
-  const archive = terminal
-    ? age >= 4
-      ? "COLD"
-      : age >= 1
-        ? "WARM"
-        : "HOT"
-    : "HOT";
-  reasons.push(
-    terminal
-      ? `Encerrado; retenção calculada pelo período ${reference}`
-      : `Em aberto: permanece na operação, inclusive se a aba ${month} for antiga`,
-  );
+  const archive = "";
+  reasons.push("Base de destino será escolhida pelo administrador");
   if (scheduled && scheduled < today && !terminal)
     reasons.push(
       "Agendamento vencido; atraso não significa conclusão ou cancelamento",

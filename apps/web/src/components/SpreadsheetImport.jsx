@@ -39,6 +39,7 @@ export default function SpreadsheetImport() {
     [history, setHistory] = useState([]),
     [selectedSheets, setSelectedSheets] = useState([]),
     [selectedLines, setSelectedLines] = useState([]),
+    [selectedArchive, setSelectedArchive] = useState(""),
     [compatible, setCompatible] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
@@ -51,7 +52,7 @@ export default function SpreadsheetImport() {
     api
       .get("/spreadsheet-imports/capabilities")
       .then(({ data }) => {
-        if (data.version !== 4) throw Error("API incompatível");
+        if (data.version !== 5) throw Error("API incompatível");
         setCompatible(true);
         return reload();
       })
@@ -100,6 +101,7 @@ export default function SpreadsheetImport() {
       );
       setBatch(data);
       setSelectedSheets([]);
+      setSelectedArchive("");
       setSelectedLines([]);
       setConfirmation("");
       setPage(0);
@@ -117,9 +119,9 @@ export default function SpreadsheetImport() {
       <p>
         <strong>Importação por etapa:</strong> o sistema identifica os
         cabeçalhos, o mês/ano da aba e os sinais de cada atendimento. Serviços
-        em aberto entram na operação; encerrados seguem a retenção por período.
-        Confira a etapa proposta e o motivo antes de confirmar. A importação não
-        lança pagamentos, movimenta estoque ou envia mensagens.
+        seguem a etapa identificada; a base HOT, WARM ou COLD é escolhida pelo
+        administrador. Confira a etapa proposta e o motivo antes de confirmar. A
+        importação não lança pagamentos, movimenta estoque ou envia mensagens.
       </p>
       <label>
         Planilha XLSX (até 10 MB)
@@ -152,6 +154,24 @@ export default function SpreadsheetImport() {
           {!batch.approved_at && (
             <fieldset disabled={busy}>
               <legend>1. Escolha os meses para importar</legend>
+              <label>
+                Base de destino (escolha do administrador)
+                <select
+                  value={selectedArchive}
+                  onChange={(e) => {
+                    setSelectedArchive(e.target.value);
+                    setBatch((b) => ({ ...b, reviewed: false }));
+                    setConfirmation("");
+                  }}
+                >
+                  <option value="">Selecione a base</option>
+                  {["HOT", "WARM", "COLD"].map((base) => (
+                    <option key={base} value={base}>
+                      {base}
+                    </option>
+                  ))}
+                </select>
+              </label>
               {batch.sheets.map((sheet) => (
                 <label key={sheet.name} style={{ display: "block" }}>
                   <input
@@ -176,13 +196,14 @@ export default function SpreadsheetImport() {
               ))}
               <button
                 className="primary-button"
-                disabled={!selectedSheets.length}
+                disabled={!selectedSheets.length || !selectedArchive}
                 onClick={() =>
                   run(async () => {
                     const { data } = await api.post(
                       `/spreadsheet-imports/${batch.id}/review`,
                       {
                         sheets: selectedSheets,
+                        archive: selectedArchive,
                         groups: (batch.groups || []).filter((pair) =>
                           pair.every((id) =>
                             selectedSheets.some((name) =>
@@ -253,6 +274,7 @@ export default function SpreadsheetImport() {
                       `/spreadsheet-imports/${batch.id}/review`,
                       {
                         sheets: batch.selected_sheets,
+                        archive: selectedArchive,
                         groups: [...(batch.groups || []), selectedLines],
                       },
                     );
@@ -277,6 +299,7 @@ export default function SpreadsheetImport() {
                           `/spreadsheet-imports/${batch.id}/review`,
                           {
                             sheets: batch.selected_sheets,
+                            archive: selectedArchive,
                             groups: batch.groups.filter((_, i) => i !== index),
                           },
                         );
@@ -291,6 +314,28 @@ export default function SpreadsheetImport() {
                 </div>
               ))}
             </div>
+          )}
+          {batch.reviewed && (
+            <button
+              className="secondary-button"
+              disabled={busy}
+              onClick={() =>
+                run(async () => {
+                  const { data } = await api.get(
+                    `/spreadsheet-imports/${batch.id}/export`,
+                    { responseType: "blob" },
+                  );
+                  const url = URL.createObjectURL(data),
+                    link = document.createElement("a");
+                  link.href = url;
+                  link.download = "ZenControl-revisao-completa.xlsx";
+                  link.click();
+                  setTimeout(() => URL.revokeObjectURL(url), 1000);
+                })
+              }
+            >
+              Exportar revisão completa (XLSX)
+            </button>
           )}
           <nav className="zen-import-filters" aria-label="Resultado da análise">
             {Object.entries(labels).map(([k, l]) => (
@@ -311,11 +356,9 @@ export default function SpreadsheetImport() {
             <table>
               <thead>
                 <tr>
-                  <th>Aba / linha</th>
-                  <th>Associado / veículo</th>
-                  <th>Serviço / situação</th>
-                  <th>Etapa identificada / destino</th>
-                  <th>Conferência</th>
+                  <th>Nome</th>
+                  <th>Placa</th>
+                  <th>IMEI</th>
                 </tr>
               </thead>
               <tbody>
@@ -349,52 +392,19 @@ export default function SpreadsheetImport() {
                             }
                           />
                         )}
-                      {r.sheet} /{" "}
-                      {r.sources?.map((s) => s.row).join(" + ") ||
-                        r.row ||
-                        "aba inteira"}
-                      {r.equipment && (
-                        <p>
-                          {r.equipment
-                            .map(
-                              (e) => `${e.type}: ${e.serial || "a informar"}`,
-                            )
-                            .join(" · ")}
-                        </p>
-                      )}
-                    </td>
-                    <td>
                       {r.data?.customer_name || "—"}
-                      <br />
-                      {r.data?.vehicle}
-                    </td>
-                    <td>
-                      {r.data?.service || "—"}
-                      <br />
-                      {r.data?.legacy_status}
-                    </td>
-                    <td>
-                      <strong>{r.data?.status || "—"}</strong>
-                      <div>
-                        {r.destination}
-                        {r.data?.archive ? ` · ${r.data.archive}` : ""}
-                      </div>
-                      <div>{r.period}</div>
-                      {!!r.additional_orders && (
-                        <p>
-                          {r.additional_orders} OS adicional de equipamento será
-                          criada.
-                        </p>
-                      )}
-                      {r.inference?.map((reason, i) => (
-                        <p key={i}>{reason}</p>
-                      ))}
-                    </td>
-                    <td>
                       {r.reason && <p>{r.reason}</p>}
                       {r.data && (
                         <details>
-                          <summary>Ver dados</summary>
+                          <summary>Revisar conteúdo completo</summary>
+                          <p>
+                            {r.sheet} /{" "}
+                            {r.sources?.map((s) => s.row).join(" + ") || r.row}{" "}
+                            · {r.data?.status} · Base: {r.data?.archive}
+                          </p>
+                          {r.inference?.map((reason, i) => (
+                            <p key={i}>{reason}</p>
+                          ))}
                           <dl>
                             {Object.entries(r.data || {}).map(([k, v]) => (
                               <div key={k}>
@@ -413,6 +423,14 @@ export default function SpreadsheetImport() {
                           </dl>
                         </details>
                       )}
+                    </td>
+                    <td>{r.data?.vehicle || "—"}</td>
+                    <td>
+                      {r.equipment
+                        ?.map((e) => e.serial || "A informar")
+                        .join(" / ") ||
+                        r.data?.imei ||
+                        "—"}
                     </td>
                   </tr>
                 ))}
@@ -495,6 +513,7 @@ export default function SpreadsheetImport() {
                   );
                   setBatch(data);
                   setSelectedSheets(data.selected_sheets);
+                  setSelectedArchive(data.archive || "");
                   setSelectedLines([]);
                   setPage(0);
                   setConfirmation("");
