@@ -112,7 +112,7 @@ function infer({ status, completed, scheduled, month, today = d.today() }) {
     );
   } else reasons.push(`Situação informada: ${status}`);
   stage ||= "PENDENTE";
-  if (stage === "CONCLUÍDO" && !completed) issues.push("Conclusão sem data");
+
   if (completed && stage !== "CONCLUÍDO")
     issues.push("Data de conclusão conflita com a situação informada");
   if (completed && completed > today) issues.push("Conclusão no futuro");

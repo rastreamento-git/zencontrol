@@ -261,6 +261,17 @@ async function preview(bytes, today = d.today(), deduplicate = true) {
           equipment.tracker + equipment.tag - 1,
         );
       }
+      if (inferred.status === "CONCLUÍDO" && completed === "") {
+        out.completion_date_source = "import_date";
+        out.data.completed_at = today;
+        out.data.document_data = {
+          ...out.data.document_data,
+          completion_date_source: "import_date",
+        };
+        out.inference.push(
+          "Data de conclusão não informada: será usada a data da importação, com indicador de origem.",
+        );
+      }
       descriptor.rows++;
       out.key = digest(
         JSON.stringify([
@@ -272,7 +283,7 @@ async function preview(bytes, today = d.today(), deduplicate = true) {
           completed,
         ]),
       );
-      out.match = JSON.stringify([norm(out.data.service), norm(v[2]), vehicle]);
+      out.match = JSON.stringify([norm(v[2]), vehicle]);
       if (issues.length) {
         out.state = "pending";
         out.reason = issues.join("; ");
@@ -332,11 +343,7 @@ async function markExisting(db, rows) {
   const ids = new Set(existing.map((x) => x.id));
   const keys = new Set(
     existing.map((x) =>
-      JSON.stringify([
-        norm(x.service),
-        norm(x.customer_name),
-        d.vehicle(x.vehicle),
-      ]),
+      JSON.stringify([norm(x.customer_name), d.vehicle(x.vehicle)]),
     ),
   );
   for (const r of rows)
@@ -363,7 +370,7 @@ function report(batch) {
     result: batch.result,
     counts,
     review_token: revision(batch.rows),
-    reviewed: batch.plan?.version === 5 && !!batch.plan?.reviewed,
+    reviewed: batch.plan?.version === 6 && !!batch.plan?.reviewed,
     selected_sheets: batch.plan?.selected_sheets || [],
     sheets: batch.plan?.sheets || [],
     groups: batch.plan?.groups || [],
@@ -401,7 +408,7 @@ function configureSpreadsheetImport(app, pool, auth) {
         selected_sheets: [],
         reviewed: false,
         groups: [],
-        version: 5,
+        version: 6,
       };
       const rows = [];
       const id = randomUUID();
@@ -438,7 +445,7 @@ function configureSpreadsheetImport(app, pool, auth) {
   );
   app.get("/api/spreadsheet-imports/capabilities", admin, (req, res) =>
     res.json({
-      version: 5,
+      version: 6,
       sheet_selection: true,
       manual_equipment_grouping: true,
       admin_archive: true,
@@ -457,7 +464,7 @@ function configureSpreadsheetImport(app, pool, auth) {
       if (!b) fail(404, "Importação não encontrada.");
       if (b.approved_at || new Date(b.expires_at) < new Date())
         fail(409, "Lote confirmado ou expirado. Envie novamente.");
-      if (b.plan?.version !== 5)
+      if (b.plan?.version !== 6)
         fail(409, "Gere uma nova prévia para escolher as abas.");
       const selected = req.body?.sheets;
       if (
@@ -514,7 +521,7 @@ function configureSpreadsheetImport(app, pool, auth) {
       [req.params.id],
     );
     if (!batch) fail(404, "Importação não encontrada.");
-    if (!batch.plan?.reviewed || batch.plan.version !== 5)
+    if (!batch.plan?.reviewed || batch.plan.version !== 6)
       fail(409, "Escolha as abas e a base para gerar a revisão completa.");
     await exportReview(batch, res);
   });
@@ -547,7 +554,7 @@ function configureSpreadsheetImport(app, pool, auth) {
         fail(409, "Prévia expirada. Envie a planilha novamente.");
       if (
         !b.plan?.reviewed ||
-        b.plan.version !== 5 ||
+        b.plan.version !== 6 ||
         !["HOT", "WARM", "COLD"].includes(b.plan.archive)
       )
         fail(
@@ -578,6 +585,8 @@ function configureSpreadsheetImport(app, pool, auth) {
       let imported = 0,
         additional = 0;
       for (const r of b.rows.filter((x) => x.state === "ready")) {
+        if (r.completion_date_source === "import_date")
+          r.data.completed_at = d.today();
         const saved = await insert(db, "zc_orders", {
           ...r.data,
           ...(r.data.document_data
@@ -601,14 +610,17 @@ function configureSpreadsheetImport(app, pool, auth) {
             inference: r.inference,
             parser_version: 2,
             source_service: r.source_service,
+            completion_date_source: r.completion_date_source || "original",
           }),
         });
         const counts = r.data.document_data?.equipment_counts;
         if (counts) {
-          const types = [
-            ...Array(counts.tracker).fill("RASTREADOR"),
-            ...Array(counts.tag).fill("TAG"),
-          ].slice(1);
+          const types = (
+            r.equipment?.map((e) => e.type) || [
+              ...Array(counts.tracker).fill("RASTREADOR"),
+              ...Array(counts.tag).fill("TAG"),
+            ]
+          ).slice(1);
           for (const [index, equipmentType] of types.entries()) {
             await insert(db, "zc_orders", {
               ...r.data,
@@ -617,10 +629,27 @@ function configureSpreadsheetImport(app, pool, auth) {
               additional_equipment: equipmentType,
               service: r.data.service + " (Equipamento adicional)",
               imei: r.equipment?.[index + 1]?.serial || "",
+              completed_at:
+                r.data.status === "CONCLUÍDO" &&
+                r.equipment?.[index + 1]?.completion_date_source ===
+                  "import_date"
+                  ? d.today()
+                  : r.data.completed_at,
               legacy_id: saved.legacy_id,
               created_date: "",
               updated_at: d.now(),
               document_data: JSON.stringify({
+                ...(r.data.status === "CONCLUÍDO" &&
+                r.equipment?.[index + 1]?.completion_date_source ===
+                  "import_date"
+                  ? { completion_date_source: "import_date" }
+                  : {}),
+                ...(r.data.document_data?.completion_date_source
+                  ? {
+                      completion_date_source:
+                        r.data.document_data.completion_date_source,
+                    }
+                  : {}),
                 equipment_counts: {
                   tracker: equipmentType === "RASTREADOR" ? 1 : 0,
                   tag: equipmentType === "TAG" ? 1 : 0,
@@ -630,6 +659,11 @@ function configureSpreadsheetImport(app, pool, auth) {
               raw_legacy: JSON.stringify({
                 ...saved.raw_legacy,
                 parent_id: saved.id,
+                completion_date_source:
+                  r.equipment?.[index + 1]?.completion_date_source ===
+                  "import_date"
+                    ? "import_date"
+                    : saved.raw_legacy.completion_date_source,
               }),
             });
             additional++;

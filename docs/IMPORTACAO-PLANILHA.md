@@ -3,7 +3,7 @@
 A prévia mostra apenas **Nome, Placa e IMEI** no resumo. Os demais campos ficam
 disponíveis em **Revisar conteúdo completo** e permanecem na importação.
 
-Em **Configurações → Importar controle de serviços**, um administrador envia o
+No menu **Importação**, um administrador envia o
 XLSX (até 10 MB), escolhe os meses e a base de destino, gera a prévia de revisão e digita `IMPORTAR SERVICOS`. A análise
 não cria OS. Operadores e técnicos não têm acesso aos endpoints de importação.
 
@@ -28,19 +28,26 @@ identificadas e não podem ser selecionadas. A aprovação grava somente as linh
 prontas da seleção salva. Alterar meses ou agrupamento exige nova revisão; o token
 da prévia evita aprovar uma composição antiga em outra janela.
 
-O agrupamento é exclusivamente manual: o responsável marca uma linha de instalação
-(rastreador) e outra de TAG e clica em **Confirmar agrupamento das duas linhas**.
+O agrupamento é exclusivamente manual: o responsável marca dois registros do mesmo
+nome e placa/chassi e clica em **Agrupar registros selecionados**. A primeira linha
+selecionada fornece os dados principais e o IMEI principal. A segunda fornece o
+IMEI adicional. Podem ser dois rastreadores ou rastreador e TAG.
 Não há seleção global que una pares automaticamente. Mesmo um par compatível
 permanece separado até a escolha explícita; situações semelhantes podem ser
 sinalizadas como possíveis duplicidades para conferência.
 
-A API valida o par escolhido: mesma aba, associado, veículo, técnico, situação,
-conclusão, agendamento e turno compatíveis; seriais iguais e uso repetido de uma
-linha em mais de um grupo são recusados. As duas linhas passam a um atendimento
-com plano de dois equipamentos. A OS adicional segue vinculada à principal e a
-listagem apresenta uma única entrada. Seriais e ambas as origens são preservados.
-O botão **Desfazer agrupamento** permite separar o par antes da aprovação, gerando
-nova prévia e invalidando a confirmação anterior. A escolha manual fica no lote.
+A API valida nome e placa/chassi normalizados, seriais distintos e uso único de
+cada linha. A detecção de possíveis duplicidades usa nome e veículo, sem depender
+do serviço, técnico ou data. Diferenças entre as linhas aparecem como alerta;
+serviço, situação, técnico e demais campos principais seguem a primeira linha.
+Ambas as origens ficam preservadas. A OS adicional segue vinculada à principal,
+com tipo e serial correspondentes à segunda linha, mantendo uma única entrada
+na listagem. Atendimentos que já contêm vários equipamentos não são reagrupados
+como se representassem um único equipamento.
+
+**Desfazer agrupamento** separa o par antes da aprovação e invalida a confirmação
+anterior. A escolha manual fica registrada no lote. O campo de busca aceita nome,
+placa/chassi ou IMEI; possíveis duplicidades são ordenadas por nome e veículo.
 
 O resumo permite conferir situação, composição, seriais, destino e dados antes de
 confirmar. Conteúdos incorretos devem ser corrigidos na origem/cadastro e analisados
@@ -57,7 +64,8 @@ novamente; a prévia não libera conflitos automaticamente.
 | Pendente, agendado, em execução ou reagendar | Operação integrada; base escolhida pelo administrador |
 | Concluído ou cancelado | Registro encerrado; base escolhida pelo administrador |
 | Agendamento vencido | Preservar etapa e indicar atraso, sem inventar conclusão/cancelamento |
-| Conclusão sem data, futura ou contraditória | Revisão necessária |
+| Concluído sem data de conclusão | Usar a data efetiva da importação, com indicador persistido de origem |
+| Conclusão futura, inválida ou contraditória | Revisão necessária |
 | Inadimplente, cancelamento pendente, segurado sem rastreador ou outra situação administrativa | Revisão necessária; não presumir cancelamento nem dispensa autorizada |
 | Etapa de conferência/estoque sem dados do fluxo integrado | Revisão necessária, sem inventar evidências ou lançamentos |
 
@@ -88,7 +96,7 @@ no módulo específico. Nenhum acesso de técnico é criado automaticamente.
 
 A aprovação usa transação e verifica novamente duplicidades, inclusive IDs de
 origem. Repetir a confirmação do mesmo lote não duplica registros. A detecção por
-serviço, associado e veículo é conservadora: atendimentos repetidos legítimos
+associado e veículo é conservadora: atendimentos repetidos legítimos
 podem exigir revisão. Nenhuma OS existente é sobrescrita.
 
 Não há pagamento, movimentação de estoque ou envio de mensagens durante a
@@ -115,8 +123,8 @@ A planilha real foi analisada para validar o leitor, mas não importada no banco
 ## Verificação de rota e versão
 
 A interface verifica `GET /api/spreadsheet-imports/capabilities` antes de liberar
-análise (versão 5, seleção de abas, base administrativa e agrupamento manual). `GET /healthz` anuncia
-`spreadsheet_import_version: 5`. Os endpoints de consulta, envio, revisão e aprovação
+análise (versão 6, seleção de abas, base administrativa e agrupamento manual). `GET /healthz` anuncia
+`spreadsheet_import_version: 6`. Os endpoints de consulta, envio, revisão e aprovação
 são autenticados e exclusivos de administrador.
 
 Se aparecer rota inexistente/incompatibilidade, verificar o serviço apontado por
@@ -136,3 +144,16 @@ escrita por streaming e não grava OS nem confirma a importação.
 
 Prévias da versão 4 devem ser refeitas: sua base tinha sido calculada automaticamente.
 A versão 5 exige a escolha explícita do administrador. Não há nova migração de banco.
+
+## Conclusão sem data e navegação
+
+Se a situação for Concluído e a data estiver vazia, a prévia sinaliza que usará a
+data de importação. Na aprovação é usada a data daquele dia em America/Sao_Paulo,
+com `completion_date_source: import_date` no documento e na origem da OS. O indicador
+aparece na revisão e na listagem/detalhe da OS; o valor original vazio é preservado.
+Datas preenchidas inválidas continuam exigindo revisão. O marcador não pode ser
+alterado manualmente por edição comum do documento.
+
+A importação fica no menu próprio, exclusivo de administrador. Configurações mantém
+backup e conexões, com arquivamento avançado e regras de conferência recolhidos.
+API e frontend devem ser publicados juntos na versão 6. Não há nova migração.

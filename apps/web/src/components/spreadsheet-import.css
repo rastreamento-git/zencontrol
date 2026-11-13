@@ -69,3 +69,18 @@
   gap: 8px;
   padding-left: 20px;
 }
+
+.zen-import-note {
+  display: block;
+  margin-top: 6px;
+  color: var(--ep-muted);
+  font-size: 12px;
+}
+.zen-import input[type="checkbox"] {
+  margin-right: 8px;
+}
+.zen-import select {
+  padding: 10px;
+  border-radius: 8px;
+  max-width: 360px;
+}

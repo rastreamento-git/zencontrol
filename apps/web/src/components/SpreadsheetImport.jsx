@@ -45,14 +45,15 @@ export default function SpreadsheetImport() {
     [error, setError] = useState(""),
     [confirmation, setConfirmation] = useState(""),
     [filter, setFilter] = useState("ready"),
-    [page, setPage] = useState(0);
+    [page, setPage] = useState(0),
+    [search, setSearch] = useState("");
   const reload = () =>
     api.get("/spreadsheet-imports").then(({ data }) => setHistory(data.items));
   useEffect(() => {
     api
       .get("/spreadsheet-imports/capabilities")
       .then(({ data }) => {
-        if (data.version !== 5) throw Error("API incompatível");
+        if (data.version !== 6) throw Error("API incompatível");
         setCompatible(true);
         return reload();
       })
@@ -108,10 +109,37 @@ export default function SpreadsheetImport() {
       await reload();
     });
   }
-  const rows = batch?.rows.filter((r) => r.state === filter) || [];
+  const normalize = (value) =>
+    String(value || "")
+      .normalize("NFD")
+      .replace(/\p{Diacritic}/gu, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "");
+  const rows = (batch?.rows || []).filter(
+    (r) =>
+      r.state === filter &&
+      normalize(
+        [
+          r.data?.customer_name,
+          r.data?.vehicle,
+          r.data?.imei,
+          ...(r.equipment || []).map((e) => e.serial),
+        ].join(" "),
+      ).includes(normalize(search)),
+  );
+  if (filter === "duplicate")
+    rows.sort((a, b) =>
+      [a.data?.customer_name, a.data?.vehicle]
+        .join()
+        .localeCompare([b.data?.customer_name, b.data?.vehicle].join()),
+    );
   return (
     <section className="zen-import" aria-label="Importação de planilha">
-      <h2>Importar controle de serviços</h2>
+      <h2>Importação</h2>
+      <p>
+        Traga seu controle de serviços em três etapas: escolha o arquivo, revise
+        os atendimentos e confirme.
+      </p>
       <p>
         Envie o Excel no formato atual. Apenas abas mensais são analisadas.
         Ativos e abas auxiliares ficam fora desta importação.
@@ -237,8 +265,8 @@ export default function SpreadsheetImport() {
             </p>
           ) : (
             <p>
-              Confira as linhas abaixo. Somente as prontas serão gravadas.
-              Prévia válida até{" "}
+              Confira as linhas abaixo. Somente os registros prontos serão
+              gravados. Prévia válida até{" "}
               {new Date(batch.expires_at).toLocaleString("pt-BR")}.
             </p>
           )}
@@ -262,8 +290,10 @@ export default function SpreadsheetImport() {
           {batch.reviewed && !batch.approved_at && (
             <div>
               <p>
-                Para unir rastreador e TAG, marque as duas linhas na tabela e
-                confirme o agrupamento. Nenhuma união é feita automaticamente.
+                Marque os registros do mesmo nome e placa/chassi para
+                agrupá-los. A primeira linha selecionada define o IMEI
+                principal; a segunda, o IMEI adicional. Os dados principais
+                seguem a primeira linha.
               </p>
               <button
                 className="secondary-button"
@@ -286,11 +316,14 @@ export default function SpreadsheetImport() {
                   })
                 }
               >
-                Confirmar agrupamento das duas linhas
+                Agrupar registros selecionados
               </button>
               {(batch.groups || []).map((pair, index) => (
                 <div key={pair.join("|")}>
-                  <span>Grupo manual: {pair.join(" + ")}</span>
+                  <span>
+                    Atendimento agrupado · principal: {pair[0]} · adicional:{" "}
+                    {pair[1]}
+                  </span>
                   <button
                     disabled={busy}
                     onClick={() =>
@@ -352,6 +385,30 @@ export default function SpreadsheetImport() {
               </button>
             ))}
           </nav>
+          {batch.reviewed && (
+            <label>
+              Buscar nome, placa ou IMEI
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setPage(0);
+                }}
+                placeholder="Digite para localizar um atendimento"
+              />
+            </label>
+          )}
+          {selectedLines.length > 0 && (
+            <p>
+              {selectedLines.length} registro(s) selecionado(s). Primeiro:{" "}
+              {selectedLines[0]} (principal)
+              {selectedLines[1]
+                ? ` · Segundo: ${selectedLines[1]} (adicional)`
+                : ""}
+              .
+            </p>
+          )}
           <div className="zen-import-table">
             <table>
               <thead>
@@ -368,13 +425,9 @@ export default function SpreadsheetImport() {
                       {batch.reviewed &&
                         !batch.approved_at &&
                         !r.sources &&
+                        !r.additional_orders &&
                         ["ready", "duplicate"].includes(r.state) &&
-                        ["TAG", "INSTALACAO"].includes(
-                          (r.source_service || "")
-                            .normalize("NFD")
-                            .replace(/\p{Diacritic}/gu, "")
-                            .toUpperCase(),
-                        ) && (
+                        !!r.data?.service && (
                           <input
                             type="checkbox"
                             aria-label={`Selecionar ${r.sheet} linha ${r.row}`}
@@ -393,6 +446,18 @@ export default function SpreadsheetImport() {
                           />
                         )}
                       {r.data?.customer_name || "—"}
+                      {r.group_warning && (
+                        <small className="zen-import-note">
+                          Há diferenças entre as linhas. Revise os dados
+                          principais.
+                        </small>
+                      )}
+                      {r.completion_date_source === "import_date" && (
+                        <small className="zen-import-note">
+                          Conclusão sem data: será usada a data da importação (
+                          {r.data?.completed_at}).
+                        </small>
+                      )}
                       {r.reason && <p>{r.reason}</p>}
                       {r.data && (
                         <details>
@@ -426,11 +491,19 @@ export default function SpreadsheetImport() {
                     </td>
                     <td>{r.data?.vehicle || "—"}</td>
                     <td>
-                      {r.equipment
-                        ?.map((e) => e.serial || "A informar")
-                        .join(" / ") ||
-                        r.data?.imei ||
-                        "—"}
+                      {r.equipment ? (
+                        <>
+                          <span>
+                            Principal: {r.equipment[0]?.serial || "A informar"}
+                          </span>
+                          <small className="zen-import-note">
+                            IMEI adicional:{" "}
+                            {r.equipment[1]?.serial || "A informar"}
+                          </small>
+                        </>
+                      ) : (
+                        r.data?.imei || "—"
+                      )}
                     </td>
                   </tr>
                 ))}
