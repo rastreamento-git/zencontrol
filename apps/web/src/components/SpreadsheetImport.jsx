@@ -38,7 +38,7 @@ export default function SpreadsheetImport() {
     [batch, setBatch] = useState(null),
     [history, setHistory] = useState([]),
     [selectedSheets, setSelectedSheets] = useState([]),
-    [groupEquipment, setGroupEquipment] = useState(true),
+    [selectedLines, setSelectedLines] = useState([]),
     [compatible, setCompatible] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
@@ -51,7 +51,7 @@ export default function SpreadsheetImport() {
     api
       .get("/spreadsheet-imports/capabilities")
       .then(({ data }) => {
-        if (data.version !== 3) throw Error("API incompatível");
+        if (data.version !== 4) throw Error("API incompatível");
         setCompatible(true);
         return reload();
       })
@@ -100,6 +100,7 @@ export default function SpreadsheetImport() {
       );
       setBatch(data);
       setSelectedSheets([]);
+      setSelectedLines([]);
       setConfirmation("");
       setPage(0);
       await reload();
@@ -173,18 +174,6 @@ export default function SpreadsheetImport() {
                     : "Aba auxiliar, fora da importação"}
                 </label>
               ))}
-              <label>
-                <input
-                  type="checkbox"
-                  checked={groupEquipment}
-                  onChange={(e) => {
-                    setGroupEquipment(e.target.checked);
-                    setBatch((b) => ({ ...b, reviewed: false }));
-                    setConfirmation("");
-                  }}
-                />
-                Agrupar linhas compatíveis de rastreador + TAG em um atendimento
-              </label>
               <button
                 className="primary-button"
                 disabled={!selectedSheets.length}
@@ -194,10 +183,17 @@ export default function SpreadsheetImport() {
                       `/spreadsheet-imports/${batch.id}/review`,
                       {
                         sheets: selectedSheets,
-                        group_equipment: groupEquipment,
+                        groups: (batch.groups || []).filter((pair) =>
+                          pair.every((id) =>
+                            selectedSheets.some((name) =>
+                              id.startsWith(name + ":"),
+                            ),
+                          ),
+                        ),
                       },
                     );
                     setBatch(data);
+                    setSelectedLines([]);
                     setConfirmation("");
                     setPage(0);
                   })
@@ -242,6 +238,60 @@ export default function SpreadsheetImport() {
               .join(" · ") || "nenhuma"}
             .
           </p>
+          {batch.reviewed && !batch.approved_at && (
+            <div>
+              <p>
+                Para unir rastreador e TAG, marque as duas linhas na tabela e
+                confirme o agrupamento. Nenhuma união é feita automaticamente.
+              </p>
+              <button
+                className="secondary-button"
+                disabled={busy || selectedLines.length !== 2}
+                onClick={() =>
+                  run(async () => {
+                    const { data } = await api.post(
+                      `/spreadsheet-imports/${batch.id}/review`,
+                      {
+                        sheets: batch.selected_sheets,
+                        groups: [...(batch.groups || []), selectedLines],
+                      },
+                    );
+                    setBatch(data);
+                    setSelectedLines([]);
+                    setConfirmation("");
+                    setFilter("ready");
+                    setPage(0);
+                  })
+                }
+              >
+                Confirmar agrupamento das duas linhas
+              </button>
+              {(batch.groups || []).map((pair, index) => (
+                <div key={pair.join("|")}>
+                  <span>Grupo manual: {pair.join(" + ")}</span>
+                  <button
+                    disabled={busy}
+                    onClick={() =>
+                      run(async () => {
+                        const { data } = await api.post(
+                          `/spreadsheet-imports/${batch.id}/review`,
+                          {
+                            sheets: batch.selected_sheets,
+                            groups: batch.groups.filter((_, i) => i !== index),
+                          },
+                        );
+                        setBatch(data);
+                        setSelectedLines([]);
+                        setConfirmation("");
+                      })
+                    }
+                  >
+                    Desfazer agrupamento {index + 1}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           <nav className="zen-import-filters" aria-label="Resultado da análise">
             {Object.entries(labels).map(([k, l]) => (
               <button
@@ -272,6 +322,33 @@ export default function SpreadsheetImport() {
                 {rows.slice(page * 50, (page + 1) * 50).map((r) => (
                   <tr key={r.sheet + ":" + r.row}>
                     <td>
+                      {batch.reviewed &&
+                        !batch.approved_at &&
+                        !r.sources &&
+                        ["ready", "duplicate"].includes(r.state) &&
+                        ["TAG", "INSTALACAO"].includes(
+                          (r.source_service || "")
+                            .normalize("NFD")
+                            .replace(/\p{Diacritic}/gu, "")
+                            .toUpperCase(),
+                        ) && (
+                          <input
+                            type="checkbox"
+                            aria-label={`Selecionar ${r.sheet} linha ${r.row}`}
+                            checked={selectedLines.includes(
+                              r.sheet + ":" + r.row,
+                            )}
+                            onChange={(e) =>
+                              setSelectedLines((prev) =>
+                                e.target.checked
+                                  ? [...prev, r.sheet + ":" + r.row]
+                                  : prev.filter(
+                                      (id) => id !== r.sheet + ":" + r.row,
+                                    ),
+                              )
+                            }
+                          />
+                        )}
                       {r.sheet} /{" "}
                       {r.sources?.map((s) => s.row).join(" + ") ||
                         r.row ||
@@ -418,7 +495,7 @@ export default function SpreadsheetImport() {
                   );
                   setBatch(data);
                   setSelectedSheets(data.selected_sheets);
-                  setGroupEquipment(data.group_equipment);
+                  setSelectedLines([]);
                   setPage(0);
                   setConfirmation("");
                 })

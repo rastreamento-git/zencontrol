@@ -84,7 +84,7 @@ async function stage(bytes) {
     `/api/spreadsheet-imports/${upload.data.id}/review`,
     {
       sheets: upload.data.sheets.filter((s) => s.eligible).map((s) => s.name),
-      group_equipment: true,
+      groups: [],
     },
   );
   reviewTokens.set(upload.data.id, reviewed.data.review_token);
@@ -513,23 +513,60 @@ test("seleciona somente os meses revisados e une rastreador + TAG com dois seria
     (
       await call(`/api/spreadsheet-imports/${id}/review`, {
         sheets: ["Ativos"],
-        group_equipment: true,
+        groups: [],
       })
     ).status,
     400,
   );
-  const review = await call(`/api/spreadsheet-imports/${id}/review`, {
+  const separate = await call(`/api/spreadsheet-imports/${id}/review`, {
+    sheets: ["NOVEMBRO 2026"],
+    groups: [],
+  });
+  assert.equal(separate.data.rows.length, 2);
+  assert.equal(separate.data.counts.duplicate, 2);
+  const pairs = [["NOVEMBRO 2026:2", "NOVEMBRO 2026:3"]];
+  const bad = await call(`/api/spreadsheet-imports/${id}/review`, {
     sheets: ["NOVEMBRO 2026"],
     group_equipment: true,
+  });
+  assert.equal(bad.status, 400);
+  assert.equal(
+    (
+      await call(`/api/spreadsheet-imports/${id}/review`, {
+        sheets: ["NOVEMBRO 2026"],
+        groups: [["NOVEMBRO 2026:2", "NOVEMBRO 2026:2"]],
+      })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await call(`/api/spreadsheet-imports/${id}/review`, {
+        sheets: ["NOVEMBRO 2026"],
+        groups: [["NOVEMBRO 2026:2", "JUNHO 2026:2"]],
+      })
+    ).status,
+    400,
+  );
+
+  const review = await call(`/api/spreadsheet-imports/${id}/review`, {
+    sheets: ["NOVEMBRO 2026"],
+    groups: pairs,
   });
   assert.equal(review.status, 200);
   assert.equal(review.data.counts.ready, 1);
   assert.equal(review.data.rows[0].sources.length, 2);
   assert.equal(review.data.rows[0].equipment[1].serial, tag[4]);
   assert.deepEqual(review.data.selected_sheets, ["NOVEMBRO 2026"]);
+  const undone = await call(`/api/spreadsheet-imports/${id}/review`, {
+    sheets: ["NOVEMBRO 2026"],
+    groups: [],
+  });
+  assert.equal(undone.data.rows.length, 2);
+  assert.equal(undone.data.groups.length, 0);
   const changed = await call(`/api/spreadsheet-imports/${id}/review`, {
     sheets: ["JUNHO 2026"],
-    group_equipment: true,
+    groups: [],
   });
   assert.equal(
     (
@@ -542,7 +579,7 @@ test("seleciona somente os meses revisados e une rastreador + TAG com dois seria
   );
   const final = await call(`/api/spreadsheet-imports/${id}/review`, {
     sheets: ["NOVEMBRO 2026"],
-    group_equipment: true,
+    groups: pairs,
   });
   const result = await call(`/api/spreadsheet-imports/${id}/approve`, {
     confirmation: "IMPORTAR SERVICOS",
