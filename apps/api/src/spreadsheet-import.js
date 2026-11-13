@@ -392,10 +392,29 @@ function configureSpreadsheetImport(app, pool, auth, sgaClient) {
       fail(403, "Somente um administrador pode importar planilhas.");
     next();
   };
+  function deferUnverifiedSchedule(r) {
+    if (
+      sgaClient.cfg.SGA_SCHEDULING_GUARD &&
+      r.data.workflow_mode === "controlled" &&
+      ["AGENDADO", "EM EXECUÇÃO"].includes(r.data.status)
+    ) {
+      try {
+        require("./sga-eligibility").assertEligible(r.data.sga_check, r.data);
+      } catch {
+        r.data.proposed_scheduled_at = r.data.scheduled_at;
+        r.data.scheduled_at = "";
+        r.data.status = "PENDENTE";
+        r.inference.push(
+          "Agendamento da origem preservado como proposta; exige consulta SGA e regularidade antes de agendar.",
+        );
+      }
+    }
+  }
   async function rebuild(db, source, selected, archive) {
     const rows = groupRows(source.filter((r) => selected.includes(r.sheet)));
     for (const row of rows)
       if (row.data) {
+        deferUnverifiedSchedule(row);
         row.data.archive = archive;
         row.inference.push("Base escolhida pelo administrador: " + archive);
       }
@@ -478,6 +497,7 @@ function configureSpreadsheetImport(app, pool, auth, sgaClient) {
       admin_archive: true,
       full_export: true,
       daily_hex_numbering: true,
+      sga_cancellation: true,
     }),
   );
   app.post("/api/spreadsheet-imports/:id/review", admin, async (req, res) => {
@@ -509,7 +529,7 @@ function configureSpreadsheetImport(app, pool, auth, sgaClient) {
         fail(400, "Escolha a base de destino: HOT, WARM ou COLD.");
 
       const sgaMode = req.body.sga_mode || "fill_missing";
-      if (!["fill_missing", "prefer_sga"].includes(sgaMode))
+      if (!["fill_missing", "prefer_sga", "skip"].includes(sgaMode))
         fail(400, "Modo de preenchimento SGA inválido.");
       const rows = await rebuild(db, b.plan.source, selected, archive);
       b.rows = rows;
@@ -532,6 +552,37 @@ function configureSpreadsheetImport(app, pool, auth, sgaClient) {
     result.enrichment = await enrichment.start(result.id, req.user.login);
     res.json(result);
   });
+  app.post(
+    "/api/spreadsheet-imports/:id/enrichment/stop",
+    admin,
+    async (req, res) => {
+      if (!/^[a-f0-9-]{36}$/.test(req.params.id))
+        fail(400, "Importação inválida.");
+      const result = await transaction(pool, async (db) => {
+        const batch = await d.one(
+          db,
+          "SELECT * FROM zc_spreadsheet_imports WHERE id=$1 FOR UPDATE",
+          [req.params.id],
+        );
+        if (!batch) fail(404, "Importação não encontrada.");
+        if (batch.approved_at) fail(409, "A importação já foi confirmada.");
+        if (!batch.plan?.reviewed)
+          fail(409, "Gere uma revisão antes de continuar.");
+        const task = await enrichment.status(batch.id, db);
+        if (
+          ["queued", "running"].includes(task.state) &&
+          req.body?.review_token !== revision(batch.rows)
+        )
+          fail(409, "A prévia mudou. Atualize antes de continuar.");
+        return {
+          ...report(batch),
+          enrichment: await enrichment.stop(db, batch.id, req.user.login),
+        };
+      });
+      enrichment.cancelLocal(result.enrichment.run_id);
+      res.json(result);
+    },
+  );
   app.get("/api/spreadsheet-imports/:id/export", admin, async (req, res) => {
     if (!/^[a-f0-9-]{36}$/.test(req.params.id))
       fail(400, "Importação inválida.");
@@ -610,10 +661,14 @@ function configureSpreadsheetImport(app, pool, auth, sgaClient) {
       const importedOn = d.today();
       for (const r of b.rows.filter((x) => x.state === "ready")) {
         r.numbering = importNumbering(r.data.term, importedOn);
+        deferUnverifiedSchedule(r);
         if (r.completion_date_source === "import_date")
           r.data.completed_at = importedOn;
         const saved = await insert(db, "zc_orders", {
           ...r.data,
+          ...(r.data.sga_check
+            ? { sga_check: JSON.stringify(r.data.sga_check) }
+            : {}),
           ...(r.data.document_data
             ? { document_data: JSON.stringify(r.data.document_data) }
             : {}),
@@ -624,6 +679,9 @@ function configureSpreadsheetImport(app, pool, auth, sgaClient) {
 
           raw_legacy: JSON.stringify({
             source: "spreadsheet",
+            sga_deferred:
+              b.plan.sga_mode === "skip" || r.sga?.status !== "found",
+            sga_import_mode: b.plan.sga_mode,
             numbering: r.numbering,
             batch: b.id,
             sheet: r.sheet,
@@ -655,6 +713,7 @@ function configureSpreadsheetImport(app, pool, auth, sgaClient) {
             const numbering = importNumbering(term, importedOn);
             const additionalOrder = await insert(db, "zc_orders", {
               ...r.data,
+              sga_check: JSON.stringify(r.data.sga_check || {}),
               id: await nextOrderId(db, numbering.date),
               term,
               parent_order_id: saved.id,

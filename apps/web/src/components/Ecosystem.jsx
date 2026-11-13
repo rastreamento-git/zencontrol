@@ -880,6 +880,21 @@ export function Stock() {
           </article>
         ))}
       </div>
+      {!!load.data?.consumables?.length && (
+        <div className="eco-grid">
+          {load.data.consumables.map((c) => (
+            <article
+              className="dashboard-panel eco-card"
+              key={c.sga_product_code}
+            >
+              <h2>{c.quantity}</h2>
+              <p>
+                {c.name} · produto SGA {c.sga_product_code}
+              </p>
+            </article>
+          ))}
+        </div>
+      )}
       <NewRequest kind="stock" onSaved={() => setRevision((x) => x + 1)} />
       <div className="eco-table-wrap">
         <table>

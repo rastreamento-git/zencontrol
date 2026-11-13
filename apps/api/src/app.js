@@ -115,6 +115,8 @@ function createApp(pool, env = process.env) {
         chat_photo_version: chatPhotoVersion,
         spreadsheet_import_version: 9,
         order_numbering_version: 1,
+        sga_import_control_version: 1,
+        sga_eligibility_version: 1,
       });
     } catch {
       res.status(503).json({ status: "unavailable" });
@@ -158,6 +160,7 @@ function createApp(pool, env = process.env) {
   });
   app.get("/api/meta", (req, res) =>
     res.json({
+      sga_scheduling_required: cfg.SGA_SCHEDULING_GUARD,
       statuses: d.statuses,
       services: d.services,
       today: d.today(),
@@ -235,7 +238,7 @@ function createApp(pool, env = process.env) {
   app.post("/api/orders", async (req, res) =>
     res
       .status(201)
-      .json(d.publicOrder(await o.create(pool, req.body, actor(req)))),
+      .json(d.publicOrder(await o.create(pool, req.body, actor(req), cfg))),
   );
   app.get("/api/orders/:id", async (req, res) => {
     const [order] = await presentOrders(pool, [
@@ -261,7 +264,9 @@ function createApp(pool, env = process.env) {
   });
   app.patch("/api/orders/:id", async (req, res) =>
     res.json(
-      d.publicOrder(await o.edit(pool, req.params.id, req.body, actor(req))),
+      d.publicOrder(
+        await o.edit(pool, req.params.id, req.body, actor(req), cfg),
+      ),
     ),
   );
   app.post("/api/orders/:id/complete", async (req, res) => {
@@ -1229,15 +1234,20 @@ function createApp(pool, env = process.env) {
       ),
     }),
   );
-  app.post("/api/sga/lookup", async (req, res) =>
-    res.json(
-      await sgaClient.lookup({
-        term: req.body.term,
-        sga_id: req.body.sga_id,
-        chassis: req.body.chassis,
-      }),
-    ),
-  );
+  app.post("/api/sga/lookup", async (req, res) => {
+    const data = await sgaClient.lookup({
+      term: req.body.term,
+      sga_id: req.body.sga_id,
+      chassis: req.body.chassis,
+    });
+    const eligibility = require("./sga-eligibility");
+    data.sga_check = eligibility.snapshot(data);
+    data.sga_verification = eligibility.sign(
+      data.sga_check,
+      cfg.SESSION_SECRET,
+    );
+    res.json(data);
+  });
   app.post("/api/archive-month", admin, async (req, res) => {
     const month = req.body.month;
     if (

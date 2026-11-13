@@ -127,7 +127,11 @@ async function audit(db, actor, action, type, id, detail = {}) {
 }
 function publicOrder(o) {
   const { raw_legacy, term, ...rest } = o;
-  return rest;
+  return {
+    ...rest,
+    sga_review_required:
+      raw_legacy?.sga_deferred === true && !o.sga_check?.verified_at,
+  };
 }
 module.exports = {
   statuses,

@@ -311,6 +311,7 @@ export function OrderEditor({
     }),
     [techs, setTechs] = useState([]),
     [busy, setBusy] = useState(false),
+    [lookupBusy, setLookupBusy] = useState(false),
     [error, setError] = useState(""),
     [action, setAction] = useState(null);
   const admin = ["admin", "operador"].includes(user.papel);
@@ -341,6 +342,10 @@ export function OrderEditor({
   const change = (e) =>
     setValues((v) => ({
       ...v,
+      ...(["vehicle", "customer_name", "chassis"].includes(e.target.name) &&
+      e.target.value !== v[e.target.name]
+        ? { sga_check: null, sga_verification: "", sga_review_required: true }
+        : {}),
       [e.target.name]:
         e.target.name === "contact"
           ? formatPhone(e.target.value)
@@ -438,6 +443,7 @@ export function OrderEditor({
       "document_data",
       "tracker_waiver_authorized",
       "travel_fee_cents",
+      "sticker_discount_opt_in",
     ].some(
       (k) => JSON.stringify(values[k] ?? "") !== JSON.stringify(order[k] ?? ""),
     );
@@ -475,6 +481,8 @@ export function OrderEditor({
         "travel_fee_cents",
         "sga_classification",
         "sga_status",
+        "sga_verification",
+        "sticker_discount_opt_in",
       ];
       const data = Object.fromEntries(
         fields
@@ -518,13 +526,18 @@ export function OrderEditor({
     }
   }
   async function lookup() {
+    setLookupBusy(true);
     setBusy(true);
     try {
-      const { data } = await api.post("/sga/lookup", {
-        term: values.vehicle,
-        sga_id: values.sga_id,
-        chassis: values.chassis,
-      });
+      const { data } = await api.post(
+        "/sga/lookup",
+        {
+          term: values.vehicle,
+          sga_id: values.sga_id,
+          chassis: values.chassis,
+        },
+        { timeout: 180000 },
+      );
       setValues((v) => ({
         ...v,
         ...data,
@@ -536,6 +549,7 @@ export function OrderEditor({
       setError(errorMessage(e));
     } finally {
       setBusy(false);
+      setLookupBusy(false);
     }
   }
   const field = (label, name, opts = {}) => (
@@ -699,6 +713,66 @@ export function OrderEditor({
           )}
         <fieldset className="zc-fieldset">
           <legend>01 · Veículo e associado</legend>
+          {((values.sga_review_required && !values.sga_check?.verified_at) ||
+            (!values.sga_check?.verified_at &&
+              meta.sga_scheduling_required)) && (
+            <p className="zc-notice amber">
+              Cadastro SGA pendente. Complete e valide os dados antes de
+              agendar.
+            </p>
+          )}
+          {values.proposed_scheduled_at && (
+            <p className="zc-notice amber">
+              Data proposta na planilha:{" "}
+              {format(values.proposed_scheduled_at, true)}. Agendamento
+              aguardando validação SGA.
+            </p>
+          )}
+          {values.sga_check?.assessment && (
+            <div
+              role="status"
+              className={
+                values.sga_check.assessment.eligible
+                  ? "zc-notice"
+                  : "zc-notice amber"
+              }
+            >
+              <strong>
+                {values.sga_check.assessment.eligible
+                  ? "SGA: cadastro liberado para agendamento"
+                  : "SGA: agendamento bloqueado"}
+              </strong>
+              <p>
+                Veículo:{" "}
+                {values.sga_check.assessment.vehicle_classification ||
+                  "Classificação não informada"}{" "}
+                ·{" "}
+                {values.sga_check.assessment.vehicle_status ||
+                  "Situação não confirmada"}
+              </p>
+              <p>
+                Associado:{" "}
+                {values.sga_check.assessment.customer_classification ||
+                  "Classificação não informada"}{" "}
+                ·{" "}
+                {values.sga_check.assessment.customer_status ||
+                  "Situação não confirmada"}
+              </p>
+              <p>
+                Financeiro:{" "}
+                {values.sga_check.assessment.financial_status ||
+                  "Não confirmado"}
+              </p>
+              {!!values.sga_check.assessment.reasons?.length && (
+                <p>{values.sga_check.assessment.reasons.join("; ")}</p>
+              )}
+              <small>
+                Consulta: {format(values.sga_check.verified_at, true)}. A
+                validação para um novo agendamento vale por 15 minutos.
+              </small>
+            </div>
+          )}
+
           <div className="zc-form-grid">
             {field("Placa ou chassi", "vehicle", { required: true })}
             <div className="zc-lookup">
@@ -706,12 +780,42 @@ export function OrderEditor({
               <button
                 type="button"
                 className="secondary-button"
-                disabled={busy}
+                disabled={lookupBusy}
                 onClick={lookup}
               >
-                <Search size={15} />
-                Consultar SGA
+                {lookupBusy ? (
+                  <RefreshCw size={15} className="animate-spin" />
+                ) : (
+                  <Search size={15} />
+                )}
+                {lookupBusy
+                  ? "Consultando SGA…"
+                  : "Consultar cadastro e situação SGA"}
               </button>
+            </div>
+            <div className="zc-full zc-document-equipment">
+              <label className="zc-checkbox">
+                <input
+                  type="checkbox"
+                  checked={!!values.sticker_discount_opt_in}
+                  disabled={!!order?.parent_order_id}
+                  onChange={(e) =>
+                    setValues((v) => ({
+                      ...v,
+                      sticker_discount_opt_in: e.target.checked,
+                    }))
+                  }
+                />
+                Cliente optou pelo desconto do adesivo Perfurado (produto SGA
+                2371)
+              </label>
+              {values.sticker_discount_opt_in && (
+                <p className="zc-notice">
+                  O técnico responsável deverá aplicar 1 adesivo Perfurado. A
+                  opção será exibida no ZenField e na OS; o desconto não terá
+                  valor calculado pelo sistema.
+                </p>
+              )}
             </div>
             {field("Associado", "customer_name", { required: true })}
             {field("Contato", "contact", {
@@ -1342,6 +1446,8 @@ export const jobLabel = (k) =>
   ({
     dispatch: "Envio ao técnico",
     sga_classification: "Classificação SGA",
+    sticker_discount_opt_in: "Desconto do adesivo Perfurado (2371)",
+    sga_check: "Validação SGA",
     download_evidence: "Download de fotos",
     stock_installation: "Confirmar instalação no Estoque Pro",
     upload_evidence: "Fotos para o SGA",

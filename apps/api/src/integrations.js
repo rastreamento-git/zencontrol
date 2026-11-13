@@ -1,3 +1,4 @@
+const { abortable } = require("./abortable");
 class IntegrationError extends Error {
   constructor(message, uncertain = false) {
     super(message);
@@ -5,13 +6,22 @@ class IntegrationError extends Error {
     this.uncertain = uncertain;
   }
 }
-async function http(url, payload, headers = {}, mutation = false, raw = false) {
+async function http(
+  url,
+  payload,
+  headers = {},
+  mutation = false,
+  raw = false,
+  signal,
+) {
   try {
     const response = await fetch(url, {
       method: payload === undefined ? "GET" : "POST",
       headers: { "Content-Type": "application/json", ...headers },
       body: payload === undefined ? undefined : JSON.stringify(payload),
-      signal: AbortSignal.timeout(40000),
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(40000)])
+        : AbortSignal.timeout(40000),
     });
     if (!response.ok) {
       const error = new IntegrationError(
@@ -186,14 +196,18 @@ class SGAClient {
     this.cachedToken = { value: p.token_usuario, expires: Date.now() + 240000 };
     return p.token_usuario;
   }
-  async request(endpoint, payload, mutation = false, token) {
+  async request(endpoint, payload, mutation = false, token, signal) {
     if (mutation && !this.cfg.INTEGRATIONS_ENABLED)
       throw new IntegrationError("Alterações no SGA estão desativadas.");
+    const authToken = token || (await this.token());
+    signal?.throwIfAborted();
     const p = await http(
       this.cfg.HINOVA_API_URL + endpoint,
       payload,
-      { Authorization: "Bearer " + (token || (await this.token())) },
+      { Authorization: "Bearer " + authToken },
       mutation,
+      false,
+      signal,
     );
     if (
       p?.erro ||
@@ -204,7 +218,8 @@ class SGAClient {
       throw new IntegrationError("O SGA recusou a operação.", mutation);
     return p;
   }
-  async lookup(input) {
+  async lookup(input, { signal } = {}) {
+    signal?.throwIfAborted();
     const query = typeof input === "string" ? { term: input } : input || {};
     const d = require("./domain"),
       { mapSgaVehicle } = require("./order-document");
@@ -240,7 +255,8 @@ class SGAClient {
     }
     if (!routes.length)
       throw new IntegrationError("Informe código SGA, placa ou chassi.");
-    const token = await this.token();
+    const token = await abortable(this.token(), signal);
+    signal?.throwIfAborted();
     const nonempty = (value) =>
       Object.fromEntries(
         Object.entries(value).filter(
@@ -277,7 +293,7 @@ class SGAClient {
     for (const route of new Set(routes)) {
       try {
         vehicle = record(
-          await this.request(route, undefined, false, token),
+          await this.request(route, undefined, false, token, signal),
           route,
         );
         if (vehicle) {
@@ -285,6 +301,7 @@ class SGAClient {
           break;
         }
       } catch (error) {
+        signal?.throwIfAborted();
         if (
           !(error instanceof IntegrationError) ||
           error.message.startsWith("Mais de um")
@@ -305,11 +322,13 @@ class SGAClient {
             undefined,
             false,
             token,
+            signal,
           ),
           "/veiculo/buscar/" + code + "/id",
         );
         if (full) vehicle = { ...vehicle, ...full };
       } catch (error) {
+        signal?.throwIfAborted();
         if (!(error instanceof IntegrationError)) throw error;
       }
     }
@@ -339,6 +358,7 @@ class SGAClient {
             undefined,
             false,
             token,
+            signal,
           ),
         );
         const full =
@@ -347,10 +367,11 @@ class SGAClient {
             : found.find((v) => String(v.codigo_voluntario) === volunteer);
         if (full?.nome) vehicle.voluntario_real = full.nome;
       } catch (error) {
+        signal?.throwIfAborted();
         if (!(error instanceof IntegrationError)) throw error;
       }
     }
-    const catalogs = await this.catalogs();
+    const catalogs = await abortable(this.catalogs(), signal);
     const label = (kind, code) =>
       catalogs.items[kind]?.find((r) => r.code === String(code))?.label;
     vehicle.classificacao_real =
@@ -365,7 +386,70 @@ class SGAClient {
     vehicle.cor = vehicle.cor || label("colors", vehicle.codigo_cor);
     vehicle.tipo =
       vehicle.tipo || label("vehicle_types", vehicle.codigo_tipo_veiculo);
-    return mapSgaVehicle(vehicle);
+    const mapped = mapSgaVehicle(vehicle);
+    if (this.cfg.SGA_SCHEDULING_GUARD) {
+      const { records } = require("./sga-reference");
+      const cpf = String(
+        vehicle.cpf || vehicle.cnpj || vehicle.cpf_cnpj || "",
+      ).replace(/\D/g, "");
+      const associate = String(vehicle.codigo_associado || "");
+      const optional = async (path) => {
+        try {
+          return records(
+            await this.request(path, undefined, false, token, signal),
+          );
+        } catch (error) {
+          signal?.throwIfAborted();
+          return [];
+        }
+      };
+      const [finance, customer, customerSituation] = await Promise.all([
+        optional(
+          "/buscar/situacao-financeira-veiculo/" +
+            encodeURIComponent(code || mapped.vehicle),
+        ),
+        /^\d+$/.test(associate)
+          ? optional("/associado/buscar/" + associate + "/codigo")
+          : Promise.resolve([]),
+        [11, 14].includes(cpf.length)
+          ? optional("/buscar/situacao-associado/" + cpf)
+          : Promise.resolve([]),
+      ]);
+      const financial =
+        finance.find(
+          (v) =>
+            String(v.codigo_veiculo) === code &&
+            (!v.placa ||
+              !vehicle.placa ||
+              d.vehicle(v.placa) === d.vehicle(vehicle.placa)),
+        ) || {};
+      const owner =
+        customer.find(
+          (v) =>
+            String(v.codigo_associado) === associate &&
+            (!cpf || !v.cpf || String(v.cpf).replace(/\D/g, "") === cpf),
+        ) || {};
+      const ownerState =
+        customerSituation.find(
+          (v) => String(v.codigo_associado) === associate,
+        ) || {};
+      mapped.sga_assessment = require("./sga-eligibility").evaluate({
+        checked_at: d.now(),
+        vehicle_status: mapped.sga_status,
+        vehicle_classification: mapped.sga_classification,
+        customer_status: String(
+          ownerState.descricao || owner.descricao_situacao || "",
+        ),
+        customer_classification:
+          owner.descricao_classificacao ||
+          label("customer_classifications", owner.codigo_classificacao) ||
+          (owner.codigo_classificacao
+            ? "Cód: " + owner.codigo_classificacao
+            : ""),
+        financial_status: String(financial.situacao_financeira || ""),
+      });
+    }
+    return mapped;
   }
   async classification(id, code) {
     if (!this.cfg.INTEGRATIONS_ENABLED)

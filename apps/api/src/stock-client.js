@@ -97,7 +97,9 @@ class StockClient {
       r.status !== "INSTALADO" ||
       (payload.reuse === true && r.reused !== true) ||
       typeof r.receipt_id !== "string" ||
-      JSON.stringify(r.serials) !== JSON.stringify(payload.serials)
+      JSON.stringify(r.serials) !== JSON.stringify(payload.serials) ||
+      (payload.consumables &&
+        JSON.stringify(r.consumables) !== JSON.stringify(payload.consumables))
     )
       throw new StockError(
         "O recibo da instalação não corresponde ao serviço. A confirmação permanece pendente.",

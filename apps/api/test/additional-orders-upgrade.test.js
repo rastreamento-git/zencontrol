@@ -52,9 +52,15 @@ test("existing additional OS gain a parent link without changing completed servi
         parent_order_id,
         additional_equipment,
         travel_fee_cents,
+        sga_check,
+        proposed_scheduled_at,
+        sticker_discount_opt_in,
         ...original
       } = row;
       assert.equal(travel_fee_cents, 0);
+      assert.deepEqual(sga_check, {});
+      assert.equal(proposed_scheduled_at, "");
+      assert.equal(sticker_discount_opt_in, false);
       assert.deepEqual(original, before[i]);
     }
     assert.equal(after[1].parent_order_id, "OS-LEGACY");

@@ -86,6 +86,7 @@ const snapshot = (order) => ({
   chassis: order.chassis,
   service: order.service,
   tracker_waiver_authorized: order.tracker_waiver_authorized,
+  sticker_discount_opt_in: order.sticker_discount_opt_in,
   technician_id: order.technician_id,
   customer_name: order.customer_name,
   scheduled_at: order.scheduled_at,
@@ -115,6 +116,7 @@ const publicOrder = (order) =>
       "parent_order_id",
       "additional_equipment",
       "tracker_waiver_authorized",
+      "sticker_discount_opt_in",
       "executed_on",
       "execution_finished_at",
       "conference_started_at",
@@ -511,7 +513,7 @@ async function approve(pool, cfg, id, input, actor) {
       [b.technician_id],
     );
     if (!tech) fail(409, "Técnico inativo.");
-    if (r.stock_action === "install") {
+    if (r.stock_action === "install" || order.sticker_discount_opt_in) {
       if (reused(order) && input.reuse_confirmed !== true)
         fail(
           400,
@@ -532,6 +534,9 @@ async function approve(pool, cfg, id, input, actor) {
         serials: codes,
         operator: actor,
         ...(reused(order) ? { reuse: true } : {}),
+        ...(order.sticker_discount_opt_in
+          ? { consumables: [{ sga_product_code: "2371", quantity: 1 }] }
+          : {}),
       };
       if (bundled(order) && !order.parent_order_id)
         await require("./bundled-service").recordApproval(

@@ -190,6 +190,11 @@ function orderDocument(order, masked = true, { portalUrl = "" } = {}) {
         .filter((k) => (data.equipment || []).includes(k))
         .map((k) => equipmentLabels[k]);
   const instructions = [];
+  if (order.sticker_discount_opt_in)
+    instructions.push(
+      "ADESIVO PERFURADO — PRODUTO SGA 2371: cliente optou pelo desconto do adesivo. O técnico responsável deverá aplicar 1 unidade. Opção registrada sem cálculo de valor financeiro.",
+      "",
+    );
   if (data.vehicle_electric === true)
     instructions.push(
       "VEÍCULO ELÉTRICO: confirme com o cliente a autorização para instalar o rastreador. A indicação de veículo elétrico não autoriza dispensa do equipamento.",
