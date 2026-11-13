@@ -2,6 +2,13 @@ import { useEffect, useState } from "react";
 import { api, errorMessage } from "@zen/ui/lib/api";
 import "./spreadsheet-import.css";
 const fieldLabels = {
+  document_data: "Equipamentos previstos",
+  period: "Competência",
+  archive: "Base",
+  workflow_mode: "Fluxo",
+  scheduled_at: "Agendamento",
+  shift: "Turno",
+  technician_id: "Técnico vinculado",
   service: "Serviço",
   customer_name: "Associado",
   vehicle: "Placa / chassi",
@@ -9,7 +16,7 @@ const fieldLabels = {
   imei: "IMEI / TAG",
   term: "Envio do termo",
   completed_at: "Conclusão",
-  technician_name: "Técnico (histórico)",
+  technician_name: "Técnico de origem",
   location: "Região",
   volunteer: "Voluntário",
   fipe_value: "Valor FIPE original",
@@ -18,7 +25,7 @@ const fieldLabels = {
   closed_by: "Concluiu (origem)",
   status: "Situação no sistema",
   legacy_status: "Situação original",
-  notes: "Conteúdo original P a T",
+  notes: "Observações de origem",
 };
 const labels = {
   ready: "Prontas",
@@ -88,10 +95,11 @@ export default function SpreadsheetImport() {
         Ativos e abas auxiliares ficam fora desta importação.
       </p>
       <p>
-        <strong>Importação de histórico:</strong> registros aprovados ficam em
-        Ordens de serviço, na base COLD, sem envio de mensagens, pagamento ou
-        baixa no estoque. Técnicos são preservados pelo nome, sem criar acessos
-        ou vínculos financeiros.
+        <strong>Importação por etapa:</strong> o sistema identifica os
+        cabeçalhos, o mês/ano da aba e os sinais de cada atendimento. Serviços
+        em aberto entram na operação; encerrados seguem a retenção por período.
+        Confira a etapa proposta e o motivo antes de confirmar. A importação não
+        lança pagamentos, movimenta estoque ou envia mensagens.
       </p>
       <label>
         Planilha XLSX (até 10 MB)
@@ -133,6 +141,23 @@ export default function SpreadsheetImport() {
               {new Date(batch.expires_at).toLocaleString("pt-BR")}.
             </p>
           )}
+          <p>
+            Etapas prontas para importar:{" "}
+            {Object.entries(
+              batch.rows
+                .filter((r) => r.state === "ready" && r.data)
+                .reduce(
+                  (totals, r) => ({
+                    ...totals,
+                    [r.data.status]: (totals[r.data.status] || 0) + 1,
+                  }),
+                  {},
+                ),
+            )
+              .map(([stage, count]) => `${stage}: ${count}`)
+              .join(" · ") || "nenhuma"}
+            .
+          </p>
           <nav className="zen-import-filters" aria-label="Resultado da análise">
             {Object.entries(labels).map(([k, l]) => (
               <button
@@ -155,6 +180,7 @@ export default function SpreadsheetImport() {
                   <th>Aba / linha</th>
                   <th>Associado / veículo</th>
                   <th>Serviço / situação</th>
+                  <th>Etapa identificada / destino</th>
                   <th>Conferência</th>
                 </tr>
               </thead>
@@ -175,14 +201,40 @@ export default function SpreadsheetImport() {
                       {r.data?.legacy_status}
                     </td>
                     <td>
-                      {r.reason || (
+                      <strong>{r.data?.status || "—"}</strong>
+                      <div>
+                        {r.destination}
+                        {r.data?.archive ? ` · ${r.data.archive}` : ""}
+                      </div>
+                      <div>{r.period}</div>
+                      {!!r.additional_orders && (
+                        <p>
+                          {r.additional_orders} OS adicional de equipamento será
+                          criada.
+                        </p>
+                      )}
+                      {r.inference?.map((reason, i) => (
+                        <p key={i}>{reason}</p>
+                      ))}
+                    </td>
+                    <td>
+                      {r.reason && <p>{r.reason}</p>}
+                      {r.data && (
                         <details>
                           <summary>Ver dados</summary>
                           <dl>
                             {Object.entries(r.data || {}).map(([k, v]) => (
                               <div key={k}>
                                 <dt>{fieldLabels[k] || k}</dt>
-                                <dd>{v || "—"}</dd>
+                                <dd>
+                                  {k === "document_data"
+                                    ? `${v.equipment_counts?.tracker || 0} rastreador(es), ${v.equipment_counts?.tag || 0} TAG(s)`
+                                    : k === "workflow_mode"
+                                      ? v === "controlled"
+                                        ? "Operação integrada"
+                                        : "Registro encerrado de origem"
+                                      : v || "—"}
+                                </dd>
                               </div>
                             ))}
                           </dl>
@@ -223,7 +275,7 @@ export default function SpreadsheetImport() {
                 existentes serão verificados novamente na confirmação.
               </p>
               <label>
-                Digite IMPORTAR HISTORICO
+                Digite IMPORTAR SERVICOS
                 <input
                   value={confirmation}
                   onChange={(e) => setConfirmation(e.target.value)}
@@ -233,7 +285,7 @@ export default function SpreadsheetImport() {
               <button
                 className="primary-button"
                 disabled={
-                  confirmation !== "IMPORTAR HISTORICO" || !batch.counts.ready
+                  confirmation !== "IMPORTAR SERVICOS" || !batch.counts.ready
                 }
                 onClick={() =>
                   run(async () => {

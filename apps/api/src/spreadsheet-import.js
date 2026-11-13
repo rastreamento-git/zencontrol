@@ -2,6 +2,7 @@ const ExcelJS = require("exceljs");
 const unzipper = require("unzipper");
 const { createHash, randomUUID } = require("node:crypto");
 const express = require("express");
+const layout = require("./spreadsheet-structure");
 const { fail } = require("./errors");
 const d = require("./domain");
 const { transaction } = require("./database");
@@ -9,8 +10,6 @@ const { insert } = require("./orders");
 const type = "application/vnd.zencontrol.spreadsheet+json";
 const digest = (x) => createHash("sha256").update(x).digest("hex");
 const norm = (x) => d.normalized(String(x ?? "")).replace(/\s+/g, " ");
-const months =
-  /^(JANEIRO|FEVEREIRO|MARCO|ABRIL|MAIO|JUNHO|JULHO|AGOSTO|SETEMBRO|OUTUBRO|NOVEMBRO|DEZEMBRO) 20\d{2}$/;
 function value(cell) {
   let v = cell.value;
   if (v && typeof v === "object" && !(v instanceof Date)) {
@@ -25,17 +24,7 @@ function value(cell) {
       : v.toISOString().slice(0, 10);
   return String(v ?? "").trim();
 }
-function date(v) {
-  if (!v || v === "-") return "";
-  let s = v;
-  if (/^\d{2}\/\d{2}\/\d{4}$/.test(v)) s = v.split("/").reverse().join("-");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
-  const dt = new Date(s + "T00:00:00Z");
-  return !Number.isNaN(dt.getTime()) && dt.toISOString().slice(0, 10) === s
-    ? s
-    : null;
-}
-async function preview(bytes) {
+async function preview(bytes, today = d.today()) {
   if (bytes.length > 10 * 1024 * 1024)
     fail(413, "Escolha uma planilha de até 10 MB.");
   let zip;
@@ -60,7 +49,8 @@ async function preview(bytes) {
   const rows = [];
   let total = 0;
   for (const sheet of book.worksheets) {
-    if (!months.test(norm(sheet.name))) {
+    const month = layout.period(sheet.name);
+    if (!month) {
       rows.push({
         sheet: sheet.name,
         row: 0,
@@ -69,34 +59,40 @@ async function preview(bytes) {
       });
       continue;
     }
-    const header = sheet.getRow(1);
-    if (
-      norm(value(header.getCell(3))) !== "NOME DO ASSOCIADO" ||
-      !["PLACA / CHASSI", "PLACA/CHASSI"].includes(
-        norm(value(header.getCell(4))),
-      )
-    ) {
+    const schema = layout.structure(sheet, value);
+    if (!schema) {
       rows.push({
         sheet: sheet.name,
-        row: 1,
+        row: 0,
         state: "pending",
-        reason: "Cabeçalho incompatível com o controle mensal.",
+        reason:
+          "Não foi possível identificar cabeçalhos de serviço, associado e placa/chassi nas primeiras 30 linhas.",
       });
       continue;
     }
     if (sheet.rowCount > 20000) fail(413, "Aba com mais de 20 mil linhas.");
-    for (let n = 2; n <= sheet.rowCount; n++) {
+    for (let n = schema.headerRow + 1; n <= sheet.rowCount; n++) {
       const r = sheet.getRow(n);
       if (!r.hasValues) continue;
       if (++total > 30000)
         fail(413, "Limite de 30 mil linhas preenchidas por arquivo.");
-      const v = Array.from({ length: 20 }, (_, i) => value(r.getCell(i + 1)));
+      const raw = Array.from(
+        { length: Math.min(sheet.columnCount, 64) },
+        (_, i) => value(r.getCell(i + 1)),
+      );
+      const v = schema.columns.map((c) => (c ? value(r.getCell(c)) : ""));
+      v.push(...schema.notes.map((c) => value(r.getCell(c))));
+      // Repeated header rows are separators, not appointments.
+      if (norm(v[2]) === "NOME DO ASSOCIADO" && norm(v[1]).startsWith("SERVIC"))
+        continue;
       const out = {
         sheet: sheet.name,
         row: n,
         state: "ready",
         reason: "",
-        raw: v,
+        raw,
+        period: month,
+        parser_version: 2,
       };
       rows.push(out);
       const control = /^(VERIFICADO ATE AQUI|FECHAMENTO|TOTAL|SUBTOTAL)(\b|:)/;
@@ -132,27 +128,62 @@ async function preview(bytes) {
         "INSTALACAO + BLOQUEIO": "Instalação + Bloqueio",
         BLOQUEIO: "Bloqueio",
       };
-      const service = services[norm(v[1])];
+      let service = services[norm(v[1])];
       if (!service) issues.push("Serviço não reconhecido");
-      const states = {
-        CONCLUIDO: "CONCLUÍDO",
-        PENDENTE: "PENDENTE",
-        AGENDADO: "AGENDADO",
-        CANCELADO: "CANCELADO",
-        REAGENDAR: "REAGENDAR",
-      };
-      const status = states[norm(v[14])];
-      if (!status) issues.push("Situação exige classificação manual");
-      const term = date(v[5]),
-        completed = date(v[6]);
+      const term = layout.parseDate(v[5], month),
+        completed = layout.parseDate(v[6], month);
       if (term === null || completed === null) issues.push("Data inválida");
-      if (status === "CONCLUÍDO" && !completed)
-        issues.push("Conclusão sem data");
+      let scheduled = schema.scheduled
+        ? layout.parseDate(value(r.getCell(schema.scheduled)), month)
+        : "";
+      let shift = schema.shift ? value(r.getCell(schema.shift)) : "";
+      // The supplied monthly layout uses P/Q as date + shift. A lone observation date is not enough.
+      if (
+        !schema.scheduled &&
+        schema.original &&
+        /^(MANHA|TARDE|NOITE|INTEGRAL|COMERCIAL)$/.test(
+          norm(value(r.getCell(17))),
+        )
+      ) {
+        scheduled = layout.parseDate(value(r.getCell(16)), month);
+        shift = value(r.getCell(17));
+      }
+      if (scheduled === null) issues.push("Data de agendamento inválida");
+      const inferred = layout.infer({
+        status: v[14],
+        completed,
+        scheduled,
+        month,
+        today,
+      });
+      issues.push(...inferred.issues);
+      out.inference = inferred.reasons;
+      out.destination = inferred.terminal ? "Encerrados" : "Operação";
+      let equipment = null;
+      if (!inferred.terminal) {
+        equipment =
+          {
+            TAG: { tracker: 0, tag: 1 },
+            "Duas TAGs": { tracker: 0, tag: 2 },
+            "Instalação + TAG": { tracker: 1, tag: 1 },
+          }[service] || null;
+        if (equipment) {
+          service = "Instalação";
+          out.inference.push(
+            `Serviço de origem ${v[1]}: ${equipment.tracker} rastreador(es) e ${equipment.tag} TAG(s)`,
+          );
+        } else if (["Instalação", "Reinstalação"].includes(service))
+          equipment = { tracker: 1, tag: 0 };
+        if (service && !d.services.includes(service))
+          issues.push(
+            "Serviço de bloqueio exige revisão no módulo de bloqueios",
+          );
+      }
       if (v[4] && !/^[0-9]{8,20}$/.test(v[4]))
         issues.push("IMEI/TAG deve conter apenas dígitos");
       if (v.some((x) => x.length > 6000))
         issues.push("Conteúdo de célula excede 6000 caracteres");
-      // Ambiguous P:T values are preserved with their source columns, never guessed as scheduling or SGA state.
+      // Preserve observation values even when a date/shift pair also informs scheduling.
       out.data = {
         service: service || v[1],
         customer_name: v[2],
@@ -168,14 +199,33 @@ async function preview(bytes) {
         fipe_risk: v[11],
         created_by: v[12],
         closed_by: v[13],
-        status: status || "PENDENTE",
+        status: inferred.status,
+        archive: inferred.archive,
+        workflow_mode: inferred.workflow_mode,
+        scheduled_at: scheduled || "",
+        shift,
+        technician_id: null,
         legacy_status: v[14],
         notes: v
           .slice(15)
-          .map((x, i) => (x ? `${String.fromCharCode(80 + i)}: ${x}` : ""))
+          .map((x, i) =>
+            x
+              ? `${r.getCell(schema.notes[i]).address.replace(/\d+$/, "")}: ${x}`
+              : "",
+          )
           .filter(Boolean)
           .join("\n"),
       };
+      if (equipment) {
+        out.data.document_data = {
+          equipment_counts: equipment,
+          equipment: [equipment.tracker ? "tracker" : "tag"],
+        };
+        out.additional_orders = Math.max(
+          0,
+          equipment.tracker + equipment.tag - 1,
+        );
+      }
       out.key = digest(
         JSON.stringify([
           norm(v[1]),
@@ -206,10 +256,35 @@ async function preview(bytes) {
   }
   return rows;
 }
+async function resolveTechnicians(db, rows) {
+  const technicians = (
+    await db.query("SELECT id,name FROM zc_technicians WHERE active=true")
+  ).rows;
+  for (const r of rows) {
+    if (r.state !== "ready" || r.data.workflow_mode !== "controlled") continue;
+    const matches = technicians.filter(
+      (t) => norm(t.name) === norm(r.data.technician_name),
+    );
+    r.data.technician_id = matches.length === 1 ? matches[0].id : null;
+    if (matches.length === 1)
+      r.inference.push(
+        "Técnico vinculado por nome exato e único no cadastro ativo",
+      );
+    else if (["AGENDADO", "EM EXECUÇÃO"].includes(r.data.status)) {
+      r.state = "pending";
+      r.reason =
+        "Agendamento exige técnico ativo identificado sem ambiguidade; revise o cadastro e gere nova prévia";
+    } else
+      r.inference.push(
+        "Sem vínculo automático de técnico; a operação deverá atribuir o responsável",
+      );
+  }
+}
 async function markExisting(db, rows) {
   const { rows: existing } = await db.query(
-    "SELECT service,customer_name,vehicle FROM zc_orders",
+    "SELECT id,service,customer_name,vehicle FROM zc_orders",
   );
+  const ids = new Set(existing.map((x) => x.id));
   const keys = new Set(
     existing.map((x) =>
       JSON.stringify([
@@ -220,7 +295,10 @@ async function markExisting(db, rows) {
     ),
   );
   for (const r of rows)
-    if (r.state === "ready" && keys.has(r.match)) {
+    if (
+      r.state === "ready" &&
+      (ids.has("XLSX-" + r.key) || keys.has(r.match))
+    ) {
       r.state = "duplicate";
       r.reason =
         "Atendimento semelhante já existe no ZenControl; nenhuma atualização automática.";
@@ -251,7 +329,7 @@ function configureSpreadsheetImport(app, pool, auth) {
     admin,
     express.json({ type, limit: "15mb" }),
     async (req, res) => {
-      const { filename, content } = req.body;
+      const { filename, content } = req.body || {};
       if (
         typeof filename !== "string" ||
         filename.length > 200 ||
@@ -263,6 +341,7 @@ function configureSpreadsheetImport(app, pool, auth) {
         fail(400, "Selecione uma planilha XLSX de até 10 MB.");
       const bytes = Buffer.from(content, "base64");
       const rows = await preview(bytes);
+      await resolveTechnicians(pool, rows);
       await markExisting(pool, rows);
       const id = randomUUID();
       const { rows: created } = await pool.query(
@@ -302,10 +381,10 @@ function configureSpreadsheetImport(app, pool, auth) {
   });
   app.post("/api/spreadsheet-imports/:id/approve", admin, async (req, res) => {
     if (
-      req.body.confirmation !== "IMPORTAR HISTORICO" ||
+      req.body?.confirmation !== "IMPORTAR SERVICOS" ||
       !/^[a-f0-9-]{36}$/.test(req.params.id)
     )
-      fail(400, "Confirme a importação do histórico.");
+      fail(400, "Confirme a importação dos serviços.");
     const result = await transaction(pool, async (db) => {
       const b = await d.one(
         db,
@@ -317,29 +396,87 @@ function configureSpreadsheetImport(app, pool, auth) {
       if (new Date(b.expires_at) < new Date())
         fail(409, "Prévia expirada. Envie a planilha novamente.");
       await db.query("LOCK TABLE zc_orders IN SHARE ROW EXCLUSIVE MODE");
+      if (b.rows.some((r) => r.data && r.parser_version !== 2))
+        fail(
+          409,
+          "Prévia de versão anterior. Envie o arquivo novamente para identificar as etapas.",
+        );
+      const before = JSON.stringify(
+        b.rows.map((r) => [r.state, r.data?.technician_id]),
+      );
+      await resolveTechnicians(db, b.rows);
+      if (
+        before !==
+        JSON.stringify(b.rows.map((r) => [r.state, r.data?.technician_id]))
+      )
+        fail(
+          409,
+          "Cadastro de técnicos mudou. Gere nova prévia antes de confirmar.",
+        );
       await markExisting(db, b.rows);
-      let imported = 0;
+      let imported = 0,
+        additional = 0;
       for (const r of b.rows.filter((x) => x.state === "ready")) {
-        await insert(db, "zc_orders", {
+        const saved = await insert(db, "zc_orders", {
           ...r.data,
+          ...(r.data.document_data
+            ? { document_data: JSON.stringify(r.data.document_data) }
+            : {}),
           id: "XLSX-" + r.key,
           legacy_id: r.sheet + ":" + r.row,
           created_date: "",
           updated_at: d.now(),
-          archive: "COLD",
-          workflow_mode: "legacy",
-          technician_id: null,
+
           raw_legacy: JSON.stringify({
             source: "spreadsheet",
             batch: b.id,
             sheet: r.sheet,
             row: r.row,
             values: r.raw,
+            period: r.period,
+            inference: r.inference,
+            parser_version: 2,
           }),
         });
+        const counts = r.data.document_data?.equipment_counts;
+        if (counts) {
+          const types = [
+            ...Array(counts.tracker).fill("RASTREADOR"),
+            ...Array(counts.tag).fill("TAG"),
+          ].slice(1);
+          for (const [index, equipmentType] of types.entries()) {
+            await insert(db, "zc_orders", {
+              ...r.data,
+              id: saved.id + "_EXTRA_" + (index + 1),
+              parent_order_id: saved.id,
+              additional_equipment: equipmentType,
+              service: r.data.service + " (Equipamento adicional)",
+              imei: "",
+              legacy_id: saved.legacy_id,
+              created_date: "",
+              updated_at: d.now(),
+              document_data: JSON.stringify({
+                equipment_counts: {
+                  tracker: equipmentType === "RASTREADOR" ? 1 : 0,
+                  tag: equipmentType === "TAG" ? 1 : 0,
+                },
+                equipment: [equipmentType === "TAG" ? "tag" : "tracker"],
+              }),
+              raw_legacy: JSON.stringify({
+                ...saved.raw_legacy,
+                parent_id: saved.id,
+              }),
+            });
+            additional++;
+          }
+        }
         imported++;
       }
-      const result = { imported, counts: report(b).counts };
+      const result = {
+        imported,
+        additional_orders: additional,
+        counts: report(b).counts,
+      };
       await db.query(
         "UPDATE zc_spreadsheet_imports SET approved_by=$2,approved_at=now(),result=$3,rows=$4 WHERE id=$1",
         [b.id, req.user.id, JSON.stringify(result), JSON.stringify(b.rows)],
