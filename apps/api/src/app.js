@@ -114,6 +114,7 @@ function createApp(pool, env = process.env) {
         chat_directory_version: chatDirectoryVersion,
         chat_photo_version: chatPhotoVersion,
         spreadsheet_import_version: 9,
+        order_numbering_version: 1,
       });
     } catch {
       res.status(503).json({ status: "unavailable" });

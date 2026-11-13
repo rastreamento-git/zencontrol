@@ -1,4 +1,5 @@
 const ExcelJS = require("exceljs");
+const { importNumbering } = require("./order-numbering");
 async function exportReview(batch, res) {
   res
     .attachment("ZenControl-revisao-completa.xlsx")
@@ -33,10 +34,17 @@ async function exportReview(batch, res) {
       "Agrupamento automático",
       "IMEI adicional",
       "Origem da data de conclusão",
+      "Número da OS",
+      "OS adicionais",
+      "Data da numeração",
+      "Origem da data de numeração",
       ...fields,
     ])
     .commit();
-  for (const row of batch.rows)
+  for (const row of batch.rows) {
+    const numbering = row.data
+      ? row.numbering || importNumbering(row.data.term)
+      : null;
     mapped
       .addRow([
         row.sheet,
@@ -54,6 +62,14 @@ async function exportReview(batch, res) {
         row.completion_date_source === "import_date"
           ? "Data da importação"
           : "Original",
+        row.order_id || "Número reservado na confirmação",
+        (row.additional_order_ids || []).join(" / "),
+        numbering?.date || "",
+        numbering?.source === "term"
+          ? "Envio do termo"
+          : row.data
+            ? "Data da importação (termo sem data)"
+            : "",
         ...fields.map((key) => {
           const val = row.data?.[key];
           return val == null
@@ -64,6 +80,7 @@ async function exportReview(batch, res) {
         }),
       ])
       .commit();
+  }
   mapped.commit();
   for (const name of batch.plan.selected_sheets) {
     // Original worksheet names are unique and valid; prefixes prevent collisions with summary sheets.

@@ -24,6 +24,7 @@ function devices(row) {
     type,
     serial: i === 0 ? row.data.imei : "",
     completion_date_source: row.completion_date_source,
+    term: row.data.term,
     source_key: row.key,
     position: i,
   }));
@@ -70,6 +71,7 @@ function groupRows(input) {
         if (emptySlot) {
           emptySlot.serial = device.serial;
           emptySlot.completion_date_source = device.completion_date_source;
+          emptySlot.term = device.term;
           continue;
         }
         equipment.push(device);

@@ -211,6 +211,12 @@ export default function SpreadsheetImport() {
         administrador. Confira a etapa proposta e o motivo antes de confirmar. A
         importação não lança pagamentos, movimenta estoque ou envia mensagens.
       </p>
+      <p>
+        Numeração das OS: data + sequência hexadecimal (001 a FFF, até 4095 por
+        dia). Na planilha, vale a data de envio do termo; quando ausente, usamos
+        a data da importação com indicador de origem. O número é reservado
+        somente ao confirmar.
+      </p>
       <details>
         <summary>
           Integração SGA ·{" "}
@@ -522,6 +528,18 @@ export default function SpreadsheetImport() {
                   <tr key={r.sheet + ":" + r.row}>
                     <td>
                       {r.data?.customer_name || "—"}
+                      {r.numbering && (
+                        <small className="zen-import-note">
+                          {r.order_id ? `OS: ${r.order_id} · ` : "Numeração: "}
+                          {r.numbering.date
+                            .split("-")
+                            .reverse()
+                            .join("/")} ·{" "}
+                          {r.numbering.source === "term"
+                            ? "Envio do termo"
+                            : "Data da importação (termo sem data)"}
+                        </small>
+                      )}
                       {r.sga && (
                         <small className="zen-import-note">
                           SGA:{" "}
@@ -551,6 +569,11 @@ export default function SpreadsheetImport() {
                       {r.data && (
                         <details>
                           <summary>Revisar conteúdo completo</summary>
+                          {!!r.additional_order_ids?.length && (
+                            <p>
+                              OS adicionais: {r.additional_order_ids.join(", ")}
+                            </p>
+                          )}
                           {r.sga?.conflicts?.map((conflict, i) => (
                             <p key={i}>
                               Divergência (

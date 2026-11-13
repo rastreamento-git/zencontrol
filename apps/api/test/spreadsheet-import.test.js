@@ -193,7 +193,12 @@ test("exige administrador, confirmação e prévia persistida; repetições não
   assert.equal(saved.length, 1);
   assert.equal(saved[0].archive, "HOT");
   assert.equal(saved[0].technician_id, null);
-  assert.equal(saved[0].created_date, "");
+  assert.equal(saved[0].created_date, saved[0].term);
+  assert.match(
+    saved[0].id,
+    new RegExp("^" + saved[0].term.replaceAll("-", "") + "[0-9A-F]{3}$"),
+  );
+  assert.equal(saved[0].raw_legacy.numbering.source, "term");
   assert.equal(saved[0].raw_legacy.row, 2);
   for (const table of [
     "zc_jobs",
@@ -275,6 +280,29 @@ test("backup restaura lotes e origem das OS sem exigir contas da instalação or
     assert.equal(orders.length, 2);
     assert.equal(orders[0].raw_legacy.source, "spreadsheet");
     assert.equal(orders[0].archive, "HOT");
+    const counters = (
+      await target.pool.query("SELECT * FROM zc_order_counters ORDER BY day")
+    ).rows;
+    assert.deepEqual(
+      counters,
+      (await db.pool.query("SELECT * FROM zc_order_counters ORDER BY day"))
+        .rows,
+    );
+    const day = orders[0].created_date;
+    const last = Math.max(
+      ...orders
+        .filter((o) => o.created_date === day)
+        .map((o) => parseInt(o.id.slice(-3), 16)),
+    );
+    const next = await require("../src/database").transaction(
+      target.pool,
+      (tx) => require("../src/order-numbering").nextOrderId(tx, day),
+    );
+    assert.equal(
+      next,
+      day.replaceAll("-", "") +
+        (last + 1).toString(16).toUpperCase().padStart(3, "0"),
+    );
   } finally {
     await backup?.cleanup();
     await target.close();
@@ -763,4 +791,88 @@ test("agrupa várias linhas automaticamente e conta IMEI repetido uma única vez
   assert.equal(combined[0].equipment[1].serial, tag[4]);
 
   assert.equal(new Set(saved.map((r) => r.imei)).size, 3);
+});
+
+test("numera pela data do termo de cada equipamento agrupado e identifica a data presumida", async () => {
+  const a = row("HEX1A23"),
+    b = row("HEX1A23"),
+    missing = row("HEX2B34");
+  a[5] = "30/10/2026";
+  a[4] = "123456789012345";
+  b[5] = "31/10/2026";
+  b[4] = "123456789012346";
+  missing[5] = "";
+  const p = await stage(await workbook([a, b, missing]));
+  assert.equal(p.data.counts.ready, 2);
+  assert.equal(
+    p.data.rows.find((r) => r.data?.vehicle === "HEX1A23").numbering.date,
+    "2026-10-30",
+  );
+  assert.equal(
+    p.data.rows.find((r) => r.data?.vehicle === "HEX2B34").numbering.source,
+    "import_date",
+  );
+  const endpoint = `/api/spreadsheet-imports/${p.data.id}/approve`;
+  const approved = await call(endpoint, { confirmed: true });
+  assert.equal(approved.status, 200, JSON.stringify(approved.data));
+  const saved = (
+    await db.pool.query(
+      "SELECT * FROM zc_orders WHERE vehicle IN ('HEX1A23','HEX2B34') ORDER BY id",
+    )
+  ).rows;
+  const main = saved.find((r) => r.vehicle === "HEX1A23" && !r.parent_order_id);
+  const extra = saved.find((r) => r.parent_order_id === main.id);
+  const fallback = saved.find((r) => r.vehicle === "HEX2B34");
+  assert.match(main.id, /^20261030[0-9A-F]{3}$/);
+  assert.match(extra.id, /^20261031[0-9A-F]{3}$/);
+  assert.equal(extra.term, "2026-10-31");
+  assert.equal(main.completed_at, "2026-11-02");
+  assert.equal(extra.raw_legacy.numbering.source, "term");
+  const today = require("../src/domain").today();
+  assert.match(
+    fallback.id,
+    new RegExp("^" + today.replaceAll("-", "") + "[0-9A-F]{3}$"),
+  );
+  assert.equal(fallback.raw_legacy.numbering.source, "import_date");
+  assert.equal(fallback.term, "");
+  const counters = (
+    await db.pool.query("SELECT * FROM zc_order_counters ORDER BY day")
+  ).rows;
+  assert.equal((await call(endpoint, { confirmed: true })).status, 200);
+  assert.deepEqual(
+    (await db.pool.query("SELECT * FROM zc_order_counters ORDER BY day")).rows,
+    counters,
+  );
+});
+
+test("limite diário interrompe o lote inteiro sem importar uma parte ou consumir números", async () => {
+  const a = row("LIM1A23"),
+    b = row("LIM2B34");
+  a[5] = b[5] = "30/09/2026";
+  const p = await stage(await workbook([a, b]));
+  await db.pool.query(
+    "INSERT INTO zc_order_counters(day,last_value) VALUES('2026-09-30',4094)",
+  );
+  const result = await call(`/api/spreadsheet-imports/${p.data.id}/approve`, {
+    confirmed: true,
+  });
+  assert.equal(result.status, 409, JSON.stringify(result.data));
+  assert.equal(
+    (
+      await db.pool.query(
+        "SELECT id FROM zc_orders WHERE vehicle IN ('LIM1A23','LIM2B34')",
+      )
+    ).rows.length,
+    0,
+  );
+  assert.equal(
+    (
+      await db.pool.query(
+        "SELECT last_value FROM zc_order_counters WHERE day='2026-09-30'",
+      )
+    ).rows[0].last_value,
+    4094,
+  );
+  const batch = (await call(`/api/spreadsheet-imports/${p.data.id}`)).data;
+  assert.equal(batch.approved_at, null);
 });
