@@ -901,6 +901,10 @@ async function main() {
     "",
     "PENDENTE",
   ]);
+  const tagPair = oldMonth.getRow(2).values.slice();
+  tagPair[2] = "TAG";
+  tagPair[5] = "000007260510341";
+  oldMonth.addRow(tagPair);
   await importPanel.getByLabel("Planilha XLSX (até 10 MB)").setInputFiles({
     name: "controle-teste.xlsx",
     mimeType:
@@ -909,6 +913,17 @@ async function main() {
   });
   await importPanel
     .getByRole("button", { name: "Analisar planilha", exact: true })
+    .click();
+  await importPanel.getByLabel(/NOVEMBRO 2026 —/).check();
+  await importPanel
+    .getByRole("button", { name: "Revisar abas selecionadas", exact: true })
+    .click();
+  await importPanel
+    .getByRole("button", { name: "Prontas (1)", exact: true })
+    .waitFor();
+  await importPanel.getByLabel(/JUNHO 2026 —/).check();
+  await importPanel
+    .getByRole("button", { name: "Revisar abas selecionadas", exact: true })
     .click();
   await importPanel
     .getByRole("button", { name: "Prontas (2)", exact: true })

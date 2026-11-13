@@ -2,6 +2,7 @@ const ExcelJS = require("exceljs");
 const unzipper = require("unzipper");
 const { createHash, randomUUID } = require("node:crypto");
 const express = require("express");
+const { groupRows } = require("./spreadsheet-grouping");
 const layout = require("./spreadsheet-structure");
 const { fail } = require("./errors");
 const d = require("./domain");
@@ -9,6 +10,17 @@ const { transaction } = require("./database");
 const { insert } = require("./orders");
 const type = "application/vnd.zencontrol.spreadsheet+json";
 const digest = (x) => createHash("sha256").update(x).digest("hex");
+const stable = (value) =>
+  Array.isArray(value)
+    ? value.map(stable)
+    : value && typeof value === "object"
+      ? Object.fromEntries(
+          Object.keys(value)
+            .sort()
+            .map((k) => [k, stable(value[k])]),
+        )
+      : value;
+const revision = (rows) => digest(JSON.stringify(stable(rows)));
 const norm = (x) => d.normalized(String(x ?? "")).replace(/\s+/g, " ");
 function value(cell) {
   let v = cell.value;
@@ -24,7 +36,7 @@ function value(cell) {
       : v.toISOString().slice(0, 10);
   return String(v ?? "").trim();
 }
-async function preview(bytes, today = d.today()) {
+async function preview(bytes, today = d.today(), deduplicate = true) {
   if (bytes.length > 10 * 1024 * 1024)
     fail(413, "Escolha uma planilha de até 10 MB.");
   let zip;
@@ -93,6 +105,7 @@ async function preview(bytes, today = d.today()) {
         raw,
         period: month,
         parser_version: 2,
+        source_service: v[1],
       };
       rows.push(out);
       const control = /^(VERIFICADO ATE AQUI|FECHAMENTO|TOTAL|SUBTOTAL)(\b|:)/;
@@ -243,6 +256,7 @@ async function preview(bytes, today = d.today()) {
       }
     }
   }
+  if (!deduplicate) return rows;
   const seen = new Map();
   for (const r of rows.filter((r) => r.state === "ready")) {
     const previous = seen.get(r.match);
@@ -297,7 +311,9 @@ async function markExisting(db, rows) {
   for (const r of rows)
     if (
       r.state === "ready" &&
-      (ids.has("XLSX-" + r.key) || keys.has(r.match))
+      (ids.has("XLSX-" + r.key) ||
+        r.sources?.some((s) => ids.has("XLSX-" + s.key)) ||
+        keys.has(r.match))
     ) {
       r.state = "duplicate";
       r.reason =
@@ -315,6 +331,11 @@ function report(batch) {
     approved_at: batch.approved_at,
     result: batch.result,
     counts,
+    review_token: revision(batch.rows),
+    reviewed: !!batch.plan?.reviewed,
+    selected_sheets: batch.plan?.selected_sheets || [],
+    sheets: batch.plan?.sheets || [],
+    group_equipment: batch.plan?.group_equipment !== false,
     rows: batch.rows.map(({ raw, key, match, ...r }) => r),
   };
 }
@@ -340,13 +361,35 @@ function configureSpreadsheetImport(app, pool, auth) {
       )
         fail(400, "Selecione uma planilha XLSX de até 10 MB.");
       const bytes = Buffer.from(content, "base64");
-      const rows = await preview(bytes);
-      await resolveTechnicians(pool, rows);
-      await markExisting(pool, rows);
+      const source = await preview(bytes, d.today(), false);
+      const book = new ExcelJS.Workbook();
+      await book.xlsx.load(bytes);
+      const sheets = book.worksheets.map((sh) => ({
+        name: sh.name,
+        period: layout.period(sh.name),
+        rows: source.filter((r) => r.sheet === sh.name && r.data).length,
+        eligible: !!layout.period(sh.name),
+      }));
+      const plan = {
+        source,
+        sheets,
+        selected_sheets: [],
+        reviewed: false,
+        group_equipment: true,
+        version: 3,
+      };
+      const rows = [];
       const id = randomUUID();
       const { rows: created } = await pool.query(
-        "INSERT INTO zc_spreadsheet_imports(id,filename,fingerprint,created_by,rows) VALUES($1,$2,$3,$4,$5) RETURNING *",
-        [id, filename, digest(bytes), req.user.id, JSON.stringify(rows)],
+        "INSERT INTO zc_spreadsheet_imports(id,filename,fingerprint,created_by,rows,plan) VALUES($1,$2,$3,$4,$5,$6) RETURNING *",
+        [
+          id,
+          filename,
+          digest(bytes),
+          req.user.id,
+          JSON.stringify(rows),
+          JSON.stringify(plan),
+        ],
       );
       await d.audit(
         pool,
@@ -368,6 +411,56 @@ function configureSpreadsheetImport(app, pool, auth) {
       ).rows,
     }),
   );
+  app.get("/api/spreadsheet-imports/capabilities", admin, (req, res) =>
+    res.json({ version: 3, sheet_selection: true, equipment_grouping: true }),
+  );
+  app.post("/api/spreadsheet-imports/:id/review", admin, async (req, res) => {
+    if (!/^[a-f0-9-]{36}$/.test(req.params.id))
+      fail(400, "Importação inválida.");
+    const result = await transaction(pool, async (db) => {
+      const b = await d.one(
+        db,
+        "SELECT * FROM zc_spreadsheet_imports WHERE id=$1 FOR UPDATE",
+        [req.params.id],
+      );
+      if (!b) fail(404, "Importação não encontrada.");
+      if (b.approved_at || new Date(b.expires_at) < new Date())
+        fail(409, "Lote confirmado ou expirado. Envie novamente.");
+      if (b.plan?.version !== 3)
+        fail(409, "Gere uma nova prévia para escolher as abas.");
+      const selected = req.body?.sheets;
+      if (
+        !Array.isArray(selected) ||
+        !selected.length ||
+        new Set(selected).size !== selected.length ||
+        selected.some(
+          (name) => !b.plan.sheets.some((s) => s.name === name && s.eligible),
+        )
+      )
+        fail(400, "Escolha uma ou mais abas mensais válidas.");
+      if (typeof req.body.group_equipment !== "boolean")
+        fail(400, "Confirme a regra de agrupamento.");
+      const rows = groupRows(
+        b.plan.source.filter((r) => selected.includes(r.sheet)),
+        req.body.group_equipment,
+      );
+      await resolveTechnicians(db, rows);
+      await markExisting(db, rows);
+      b.rows = rows;
+      b.plan = {
+        ...b.plan,
+        selected_sheets: selected,
+        reviewed: true,
+        group_equipment: req.body.group_equipment,
+      };
+      await db.query(
+        "UPDATE zc_spreadsheet_imports SET rows=$2,plan=$3 WHERE id=$1",
+        [b.id, JSON.stringify(rows), JSON.stringify(b.plan)],
+      );
+      return report(b);
+    });
+    res.json(result);
+  });
   app.get("/api/spreadsheet-imports/:id", admin, async (req, res) => {
     if (!/^[a-f0-9-]{36}$/.test(req.params.id))
       fail(400, "Importação inválida.");
@@ -395,6 +488,13 @@ function configureSpreadsheetImport(app, pool, auth) {
       if (b.approved_at) return b.result;
       if (new Date(b.expires_at) < new Date())
         fail(409, "Prévia expirada. Envie a planilha novamente.");
+      if (!b.plan?.reviewed || b.plan.version !== 3)
+        fail(
+          409,
+          "Escolha as abas e gere a prévia de revisão antes de importar.",
+        );
+      if (req.body.review_token !== revision(b.rows))
+        fail(409, "A prévia mudou. Atualize e revise antes de confirmar.");
       await db.query("LOCK TABLE zc_orders IN SHARE ROW EXCLUSIVE MODE");
       if (b.rows.some((r) => r.data && r.parser_version !== 2))
         fail(
@@ -433,9 +533,13 @@ function configureSpreadsheetImport(app, pool, auth) {
             sheet: r.sheet,
             row: r.row,
             values: r.raw,
+            sources: r.sources || [
+              { sheet: r.sheet, row: r.row, key: r.key, values: r.raw },
+            ],
             period: r.period,
             inference: r.inference,
             parser_version: 2,
+            source_service: r.source_service,
           }),
         });
         const counts = r.data.document_data?.equipment_counts;
@@ -451,7 +555,7 @@ function configureSpreadsheetImport(app, pool, auth) {
               parent_order_id: saved.id,
               additional_equipment: equipmentType,
               service: r.data.service + " (Equipamento adicional)",
-              imei: "",
+              imei: r.equipment?.[index + 1]?.serial || "",
               legacy_id: saved.legacy_id,
               created_date: "",
               updated_at: d.now(),

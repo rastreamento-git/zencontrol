@@ -1,7 +1,7 @@
 # Importação do controle geral por etapa
 
 Em **Configurações → Importar controle de serviços**, um administrador envia o
-XLSX (até 10 MB), confere a classificação e digita `IMPORTAR SERVICOS`. A análise
+XLSX (até 10 MB), escolhe os meses, gera a prévia de revisão e digita `IMPORTAR SERVICOS`. A análise
 não cria OS. Operadores e técnicos não têm acesso aos endpoints de importação.
 
 ## Leitura da estrutura
@@ -16,6 +16,26 @@ A competência vem do nome da aba; não vira uma data de criação fictícia. Da
 explícitas prevalecem. Uma data `dd/mm` recebe o ano da aba. Agendamento vem de
 coluna identificada por cabeçalho ou, no layout original, do par P/Q com data e
 turno reconhecido. Uma data isolada nas observações não basta para agendar.
+
+## Seleção e revisão obrigatórias
+
+Nenhuma aba vem autorizada automaticamente. Após a leitura, o administrador marca
+os meses desejados e clica em **Revisar abas selecionadas**. Abas auxiliares aparecem
+identificadas e não podem ser selecionadas. A aprovação grava somente as linhas
+prontas da seleção salva. Alterar meses ou agrupamento exige nova revisão; o token
+da prévia evita aprovar uma composição antiga em outra janela.
+
+A opção de agrupar equipamentos combina apenas um par inequívoco de Instalação
+(rastreador) + TAG na mesma aba, com associado, veículo, técnico, situação, conclusão,
+agendamento e turno compatíveis. As duas linhas passam a um atendimento com plano
+de dois equipamentos. A OS adicional é vinculada à principal conforme o modelo
+existente; a listagem apresenta uma única entrada. Seriais e ambas as origens
+são preservados. Grupos maiores, conflitos ou repetição de serial não são unidos
+automaticamente e permanecem para conferência. A opção pode ser desmarcada.
+
+O resumo permite conferir situação, composição, seriais, destino e dados antes de
+confirmar. Conteúdos incorretos devem ser corrigidos na origem/cadastro e analisados
+novamente; a prévia não libera conflitos automaticamente.
 
 ## Etapa proposta na prévia
 
@@ -77,6 +97,19 @@ as referências de usuários do lote são removidas, preservando a auditoria tex
 ## Publicação
 
 Atualizar API e frontend juntos, instalar dependências e executar `npm run migrate`
-para aplicar `016_spreadsheet_imports.sql`. Não exige novas variáveis de ambiente.
+para aplicar `016_spreadsheet_imports.sql` e `017_spreadsheet_review.sql`. Não exige novas variáveis de ambiente.
 Testes: `npm test`, `npm run build` e `scripts/portal-engagement-ui.cjs`.
 A planilha real foi analisada para validar o leitor, mas não importada no banco.
+
+## Verificação de rota e versão
+
+A interface verifica `GET /api/spreadsheet-imports/capabilities` antes de liberar
+análise (versão 3, seleção de abas e agrupamento). `GET /healthz` anuncia
+`spreadsheet_import_version: 3`. Os endpoints de consulta, envio, revisão e aprovação
+são autenticados e exclusivos de administrador.
+
+Se aparecer rota inexistente/incompatibilidade, verificar o serviço apontado por
+`VITE_API_URL` e publicar a API da mesma revisão do frontend, incluindo a migration
+017. Publicar somente o site não adiciona endpoints ao backend. O Blueprint usa
+`npm run migrate && npm start` e deploy automático desligado. A compatibilidade
+é validada pela tela sem substituir uma falha de rota por uma lista vazia.

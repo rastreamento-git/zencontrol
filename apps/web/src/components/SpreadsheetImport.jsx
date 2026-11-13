@@ -37,6 +37,9 @@ export default function SpreadsheetImport() {
   const [file, setFile] = useState(null),
     [batch, setBatch] = useState(null),
     [history, setHistory] = useState([]),
+    [selectedSheets, setSelectedSheets] = useState([]),
+    [groupEquipment, setGroupEquipment] = useState(true),
+    [compatible, setCompatible] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [confirmation, setConfirmation] = useState(""),
@@ -45,7 +48,18 @@ export default function SpreadsheetImport() {
   const reload = () =>
     api.get("/spreadsheet-imports").then(({ data }) => setHistory(data.items));
   useEffect(() => {
-    reload().catch((e) => setError(errorMessage(e)));
+    api
+      .get("/spreadsheet-imports/capabilities")
+      .then(({ data }) => {
+        if (data.version !== 3) throw Error("API incompatível");
+        setCompatible(true);
+        return reload();
+      })
+      .catch(() =>
+        setError(
+          "A API configurada não disponibiliza esta versão da importação. Publique a API e a interface juntas e confira o endereço da API configurado no site.",
+        ),
+      );
   }, []);
   async function run(action) {
     setBusy(true);
@@ -53,7 +67,11 @@ export default function SpreadsheetImport() {
     try {
       await action();
     } catch (e) {
-      setError(errorMessage(e));
+      setError(
+        e.response?.status === 404
+          ? "A rota de importação não existe na API configurada. Confira a publicação da API e o endereço configurado no site."
+          : errorMessage(e),
+      );
     } finally {
       setBusy(false);
     }
@@ -81,6 +99,7 @@ export default function SpreadsheetImport() {
         },
       );
       setBatch(data);
+      setSelectedSheets([]);
       setConfirmation("");
       setPage(0);
       await reload();
@@ -116,7 +135,7 @@ export default function SpreadsheetImport() {
       </label>
       <button
         className="primary-button"
-        disabled={!file || busy}
+        disabled={!file || busy || !compatible}
         onClick={analyze}
       >
         {busy ? "Processando…" : "Analisar planilha"}
@@ -129,6 +148,71 @@ export default function SpreadsheetImport() {
       {batch && (
         <>
           <h3>{batch.filename}</h3>
+          {!batch.approved_at && (
+            <fieldset disabled={busy}>
+              <legend>1. Escolha os meses para importar</legend>
+              {batch.sheets.map((sheet) => (
+                <label key={sheet.name} style={{ display: "block" }}>
+                  <input
+                    type="checkbox"
+                    disabled={!sheet.eligible}
+                    checked={selectedSheets.includes(sheet.name)}
+                    onChange={(e) => {
+                      setSelectedSheets((prev) =>
+                        e.target.checked
+                          ? [...prev, sheet.name]
+                          : prev.filter((n) => n !== sheet.name),
+                      );
+                      setBatch((b) => ({ ...b, reviewed: false }));
+                      setConfirmation("");
+                    }}
+                  />
+                  {sheet.name} —{" "}
+                  {sheet.eligible
+                    ? `${sheet.rows} linhas de atendimento`
+                    : "Aba auxiliar, fora da importação"}
+                </label>
+              ))}
+              <label>
+                <input
+                  type="checkbox"
+                  checked={groupEquipment}
+                  onChange={(e) => {
+                    setGroupEquipment(e.target.checked);
+                    setBatch((b) => ({ ...b, reviewed: false }));
+                    setConfirmation("");
+                  }}
+                />
+                Agrupar linhas compatíveis de rastreador + TAG em um atendimento
+              </label>
+              <button
+                className="primary-button"
+                disabled={!selectedSheets.length}
+                onClick={() =>
+                  run(async () => {
+                    const { data } = await api.post(
+                      `/spreadsheet-imports/${batch.id}/review`,
+                      {
+                        sheets: selectedSheets,
+                        group_equipment: groupEquipment,
+                      },
+                    );
+                    setBatch(data);
+                    setConfirmation("");
+                    setPage(0);
+                  })
+                }
+              >
+                Revisar abas selecionadas
+              </button>
+            </fieldset>
+          )}
+          {batch.reviewed && (
+            <p>
+              Meses da prévia: {batch.selected_sheets.join(", ")}. Confira
+              composição, situação e destino antes de importar.
+            </p>
+          )}
           {batch.approved_at ? (
             <p role="status">
               Importação confirmada: {batch.result?.imported} registros
@@ -188,7 +272,19 @@ export default function SpreadsheetImport() {
                 {rows.slice(page * 50, (page + 1) * 50).map((r) => (
                   <tr key={r.sheet + ":" + r.row}>
                     <td>
-                      {r.sheet} / {r.row || "aba inteira"}
+                      {r.sheet} /{" "}
+                      {r.sources?.map((s) => s.row).join(" + ") ||
+                        r.row ||
+                        "aba inteira"}
+                      {r.equipment && (
+                        <p>
+                          {r.equipment
+                            .map(
+                              (e) => `${e.type}: ${e.serial || "a informar"}`,
+                            )
+                            .join(" · ")}
+                        </p>
+                      )}
                     </td>
                     <td>
                       {r.data?.customer_name || "—"}
@@ -266,7 +362,7 @@ export default function SpreadsheetImport() {
               Próxima
             </button>
           </div>
-          {!batch.approved_at && (
+          {!batch.approved_at && batch.reviewed && (
             <fieldset disabled={busy}>
               <legend>Confirmação do administrador</legend>
               <p>
@@ -291,7 +387,7 @@ export default function SpreadsheetImport() {
                   run(async () => {
                     await api.post(
                       "/spreadsheet-imports/" + batch.id + "/approve",
-                      { confirmation },
+                      { confirmation, review_token: batch.review_token },
                     );
                     const { data } = await api.get(
                       "/spreadsheet-imports/" + batch.id,
@@ -321,6 +417,8 @@ export default function SpreadsheetImport() {
                     "/spreadsheet-imports/" + b.id,
                   );
                   setBatch(data);
+                  setSelectedSheets(data.selected_sheets);
+                  setGroupEquipment(data.group_equipment);
                   setPage(0);
                   setConfirmation("");
                 })
