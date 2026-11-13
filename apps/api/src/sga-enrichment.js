@@ -2,6 +2,7 @@ const { randomUUID } = require("node:crypto");
 const d = require("./domain");
 const { fail } = require("./errors");
 const { transaction } = require("./database");
+const { abortable } = require("./abortable");
 const { documentFields } = require("./order-document");
 const allowed = [
   "sga_id",
@@ -35,6 +36,8 @@ function completeRow(row, result, mode = "fill_missing") {
     copy.validation_issues = row.sga.original_issues;
   }
 
+  // A failed or conflicting new lookup must not keep a previous eligibility proof.
+  delete copy.data.sga_check;
   copy.sga = {
     status: result.status,
     checked_at: d.now(),
@@ -92,6 +95,7 @@ function completeRow(row, result, mode = "fill_missing") {
     }
   }
   merge(copy.data, remote, allowed);
+  copy.data.sga_check = require("./sga-eligibility").snapshot(remote);
   copy.data.document_data ||= {};
   merge(
     copy.data.document_data,
@@ -117,13 +121,13 @@ function completeRow(row, result, mode = "fill_missing") {
 }
 function createEnrichment({ app, pool, client, admin, rebuild, revision }) {
   let queue = Promise.resolve();
-  const active = new Set();
+  const active = new Map();
   const heartbeat = setInterval(() => {
     if (active.size)
       pool
         .query(
           "UPDATE zc_sga_import_tasks SET updated_at=now() WHERE run_id=ANY($1::uuid[]) AND state IN ('queued','running')",
-          [[...active]],
+          [[...active.keys()]],
         )
         .catch(() => {});
   }, 30000);
@@ -144,6 +148,8 @@ function createEnrichment({ app, pool, client, admin, rebuild, revision }) {
         [id, task.run_id],
       );
       task.state = "interrupted";
+      task.message =
+        "Consulta interrompida. Gere uma nova revisão para tentar novamente.";
     }
     return (
       task || {
@@ -155,9 +161,33 @@ function createEnrichment({ app, pool, client, admin, rebuild, revision }) {
     );
   };
   async function work(batch, task, actor) {
+    const controller = active.get(task.run_id),
+      signal = controller.signal;
+    let checking = false;
+    const watcher = setInterval(async () => {
+      if (checking || signal.aborted) return;
+      checking = true;
+      try {
+        const current = await status(batch.id);
+        if (
+          current.run_id !== task.run_id ||
+          !["queued", "running"].includes(current.state)
+        )
+          controller.abort(new Error("Consulta interrompida"));
+      } catch {
+        /* Retry on the next tick; a transient DB read must not cancel work. */
+      } finally {
+        checking = false;
+      }
+    }, 2000);
+    watcher.unref?.();
     try {
       const current = await status(batch.id);
-      if (current.run_id !== task.run_id) return;
+      if (
+        current.run_id !== task.run_id ||
+        !["queued", "running"].includes(current.state)
+      )
+        return;
       const source = batch.plan.source;
       const selected = source.filter(
         (r) =>
@@ -167,25 +197,32 @@ function createEnrichment({ app, pool, client, admin, rebuild, revision }) {
       );
       const keys = [...new Set(selected.map((r) => d.vehicle(r.data.vehicle)))],
         results = new Map();
-      await pool.query(
-        "UPDATE zc_sga_import_tasks SET state='running',total=$3,updated_at=now() WHERE batch_id=$1 AND run_id=$2",
+      const started = await d.one(
+        pool,
+        "UPDATE zc_sga_import_tasks SET state='running',total=$3,updated_at=now() WHERE batch_id=$1 AND run_id=$2 AND state='queued' RETURNING run_id",
         [batch.id, task.run_id, keys.length],
       );
+      if (!started) return;
       // Fail once on invalid credentials instead of attempting a login per row.
-      if (keys.length) await client.token();
+      if (keys.length) await abortable(client.token(), signal);
       for (const [index, key] of keys.entries()) {
         const check = await d.one(
           pool,
-          "SELECT run_id FROM zc_sga_import_tasks WHERE batch_id=$1",
+          "SELECT run_id,state FROM zc_sga_import_tasks WHERE batch_id=$1",
           [batch.id],
         );
-        if (check?.run_id !== task.run_id) return;
+        if (check?.run_id !== task.run_id || check.state !== "running") return;
+        signal.throwIfAborted();
         try {
           results.set(key, {
             status: "found",
-            data: await client.lookup({ term: key }),
+            data: await abortable(
+              client.lookup({ term: key }, { signal }),
+              signal,
+            ),
           });
         } catch (error) {
+          signal.throwIfAborted();
           results.set(key, {
             status: "unavailable",
             message:
@@ -195,7 +232,7 @@ function createEnrichment({ app, pool, client, admin, rebuild, revision }) {
           });
         }
         await pool.query(
-          "UPDATE zc_sga_import_tasks SET processed=$3,updated_at=now() WHERE batch_id=$1 AND run_id=$2",
+          "UPDATE zc_sga_import_tasks SET processed=$3,updated_at=now() WHERE batch_id=$1 AND run_id=$2 AND state='running'",
           [batch.id, task.run_id, index + 1],
         );
       }
@@ -210,7 +247,8 @@ function createEnrichment({ app, pool, client, admin, rebuild, revision }) {
           "SELECT * FROM zc_sga_import_tasks WHERE batch_id=$1 FOR UPDATE",
           [batch.id],
         );
-        if (active?.run_id !== task.run_id) return;
+        if (active?.run_id !== task.run_id || active.state !== "running")
+          return;
         if (
           !fresh ||
           fresh.approved_at ||
@@ -270,16 +308,24 @@ function createEnrichment({ app, pool, client, admin, rebuild, revision }) {
     } catch {
       await pool
         .query(
-          "UPDATE zc_sga_import_tasks SET state='failed',message='Não foi possível concluir a consulta. Gere uma nova revisão.',updated_at=now() WHERE batch_id=$1 AND run_id=$2",
+          "UPDATE zc_sga_import_tasks SET state='failed',message='Não foi possível concluir a consulta. Gere uma nova revisão.',updated_at=now() WHERE batch_id=$1 AND run_id=$2 AND state IN ('queued','running')",
           [batch.id, task.run_id],
         )
         .catch(() => {});
     } finally {
+      clearInterval(watcher);
       active.delete(task.run_id);
     }
   }
   async function start(id, actor) {
-    if (!client.ready()) return status(id);
+    if (!client.ready()) {
+      const b = await d.one(
+        pool,
+        "SELECT plan FROM zc_spreadsheet_imports WHERE id=$1",
+        [id],
+      );
+      if (b?.plan?.sga_mode !== "skip") return status(id);
+    }
     const task = await transaction(pool, async (db) => {
       const batch = await d.one(
         db,
@@ -294,6 +340,22 @@ function createEnrichment({ app, pool, client, admin, rebuild, revision }) {
           [id],
         ),
         token = revision({ rows: batch.rows, mode: batch.plan.sga_mode });
+      if (batch.plan.sga_mode === "skip") {
+        const skipped = await d.one(
+          db,
+          "INSERT INTO zc_sga_import_tasks(batch_id,run_id,review_token,state,message) VALUES($1,$2,$3,'skipped','Consulta SGA adiada. Complete o cadastro nas ordens de serviço antes de agendar.') ON CONFLICT(batch_id) DO UPDATE SET run_id=$2,review_token=$3,state='skipped',processed=0,total=0,filled=0,conflicts=0,message=EXCLUDED.message,updated_at=now() RETURNING *",
+          [id, randomUUID(), token],
+        );
+        await d.audit(
+          db,
+          actor,
+          "sga_enrichment_deferred",
+          "spreadsheet_import",
+          id,
+          {},
+        );
+        return { existing: skipped, stopRun: old?.run_id };
+      }
       if (
         old &&
         old.review_token === token &&
@@ -310,8 +372,11 @@ function createEnrichment({ app, pool, client, admin, rebuild, revision }) {
       );
       return { batch, task };
     });
-    if (task.existing) return task.existing;
-    active.add(task.task.run_id);
+    if (task.existing) {
+      if (task.stopRun) cancelLocal(task.stopRun);
+      return task.existing;
+    }
+    active.set(task.task.run_id, new AbortController());
     queue = queue
       .then(() => work(task.batch, task.task, actor))
       .catch(() => {});
@@ -365,6 +430,26 @@ function createEnrichment({ app, pool, client, admin, rebuild, revision }) {
       res.json(await status(req.params.id));
     },
   );
-  return { start, status };
+  async function stop(db, id, actor) {
+    const task = await d.one(
+      db,
+      "UPDATE zc_sga_import_tasks SET state='cancelled',message='Consulta SGA interrompida pelo administrador. A prévia atual foi mantida; os dados da consulta em andamento não foram aplicados.',updated_at=now() WHERE batch_id=$1 AND state IN ('queued','running') RETURNING *",
+      [id],
+    );
+    if (task)
+      await d.audit(
+        db,
+        actor,
+        "sga_enrichment_cancelled",
+        "spreadsheet_import",
+        id,
+        { processed: task.processed, total: task.total },
+      );
+    return task || status(id, db);
+  }
+  function cancelLocal(run) {
+    active.get(run)?.abort(new Error("Consulta interrompida"));
+  }
+  return { start, status, stop, cancelLocal };
 }
 module.exports = { createEnrichment, completeRow };

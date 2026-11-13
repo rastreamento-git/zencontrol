@@ -222,6 +222,36 @@ async function main() {
   summary.googleCentral = "passed (provider mocked)";
   if (process.env.ZEN_PORTAL_CHAT_ONLY !== "1") {
     await staff.getByRole("button", { name: "Abrir Estoque Pro" }).click();
+    await staff
+      .getByRole("button", { name: "Adesivos Perfurados", exact: true })
+      .click();
+    const adhesive = staff.getByRole("region", { name: "Adesivos Perfurados" });
+    await adhesive
+      .getByRole("heading", { name: /Saldo na matriz: 0/ })
+      .waitFor();
+    await adhesive.getByLabel("Quantidade", { exact: true }).fill("10");
+    await adhesive
+      .getByRole("button", { name: "Registrar movimentação", exact: true })
+      .click();
+    await adhesive
+      .getByRole("heading", { name: /Saldo na matriz: 10/ })
+      .waitFor();
+    await adhesive
+      .getByLabel("Movimentação", { exact: true })
+      .selectOption("TRANSFERENCIA");
+    await adhesive.getByLabel("Técnico", { exact: true }).selectOption("1");
+    await adhesive.getByLabel("Quantidade", { exact: true }).fill("2");
+    await adhesive
+      .getByRole("button", { name: "Registrar movimentação", exact: true })
+      .click();
+    await adhesive
+      .getByRole("heading", { name: /Saldo na matriz: 8/ })
+      .waitFor();
+    await staff.screenshot({
+      path: path.join(directory, "estoque-adesivos.png"),
+      fullPage: true,
+    });
+    summary.adhesiveQuantityAndTechnicianLoad = "passed";
     await staff.getByRole("link", { name: "Meu perfil ZenTracking" }).click();
     const shared = staff.getByRole("dialog", { name: "Meu perfil" });
     await shared.getByLabel("Nome de exibição").waitFor();
@@ -845,6 +875,78 @@ async function main() {
     await staff.getByRole("region", { name: "Importação de planilha" }).count(),
     0,
   );
+  let simulatedSgaRun = 0,
+    simulatedSgaWaiting = true,
+    previewFailures = 1,
+    previewRefreshes = 0;
+  await staff.route("**/api/spreadsheet-imports/*/review", async (route) => {
+    const response = await route.fetch();
+    const data = await response.json();
+    simulatedSgaRun++;
+    data.enrichment = {
+      run_id: "browser-sga-" + simulatedSgaRun,
+      state: "running",
+      processed: 0,
+      total: 2,
+    };
+    await route.fulfill({ response, json: data });
+  });
+  await staff.route(
+    "**/api/spreadsheet-imports/*/enrichment",
+    async (route) => {
+      if (!simulatedSgaWaiting) return route.continue();
+      await route.fulfill({
+        json: {
+          run_id: "browser-sga-" + simulatedSgaRun,
+          state: simulatedSgaRun === 1 ? "completed" : "running",
+          processed: 0,
+          total: 2,
+          filled: 0,
+          conflicts: 0,
+        },
+      });
+    },
+  );
+  await staff.route(
+    /\/api\/spreadsheet-imports\/[a-f0-9-]+$/,
+    async (route) => {
+      if (route.request().method() === "GET" && simulatedSgaRun === 1) {
+        previewRefreshes++;
+        if (previewFailures-- > 0)
+          return route.fulfill({
+            status: 503,
+            json: { error: "Falha transitória simulada" },
+          });
+      }
+      if (route.request().method() === "GET" && simulatedSgaRun === 1) {
+        const response = await route.fetch(),
+          data = await response.json();
+        const row = data.rows.find((r) => r.data);
+        if (row)
+          row.data.sga_check = {
+            verified_at: new Date().toISOString(),
+            assessment: {
+              vehicle_status: "ATIVO",
+              vehicle_classification: "Instalação pendente",
+              customer_status: "ATIVO",
+              customer_classification: "Associado",
+              financial_status: "ADIMPLENTE",
+              eligible: true,
+              reasons: [],
+            },
+          };
+        return route.fulfill({ response, json: data });
+      }
+      await route.continue();
+    },
+  );
+  await staff.route(
+    "**/api/spreadsheet-imports/*/enrichment/stop",
+    async (route) => {
+      simulatedSgaWaiting = false;
+      await route.continue();
+    },
+  );
   await staff.getByRole("button", { name: "Importação", exact: true }).click();
   const importPanel = staff.getByRole("region", {
     name: "Importação de planilha",
@@ -929,6 +1031,18 @@ async function main() {
   await importPanel
     .getByRole("button", { name: "Prontas (1)", exact: true })
     .waitFor();
+  await importPanel
+    .getByText(/Não foi possível atualizar a consulta SGA/)
+    .waitFor();
+  await importPanel
+    .getByText("SGA: 0 registro(s) preenchido(s), 0 divergência(s).", {
+      exact: true,
+    })
+    .waitFor();
+  assert.ok(
+    previewRefreshes >= 2,
+    "A prévia é buscada novamente após falha transitória",
+  );
   await importPanel.getByLabel(/JUNHO 2026 —/).check();
   await importPanel
     .getByRole("button", { name: "Revisar abas selecionadas", exact: true })
@@ -957,6 +1071,18 @@ async function main() {
   await (
     await exportDownload
   ).saveAs(path.join(directory, "revisao-completa.xlsx"));
+  assert.ok(
+    await importPanel
+      .getByRole("button", { name: "Aguardando consulta SGA", exact: true })
+      .isDisabled(),
+  );
+  await importPanel
+    .getByRole("button", {
+      name: "Parar consulta SGA e revisar agora",
+      exact: true,
+    })
+    .click();
+  summary.sgaWaitingAndPreviewRetry = "passed (upstream progress simulated)";
   const approveImport = importPanel.getByRole("button", {
     name: "Importar 2 atendimentos",
     exact: true,
@@ -977,6 +1103,61 @@ async function main() {
     .getByText("Importação confirmada: 2 registros gravados.", { exact: true })
     .waitFor();
   summary.administratorSpreadsheetImport = "passed";
+  await staff
+    .getByRole("button", { name: "Ordens de serviço", exact: true })
+    .click();
+  await staff
+    .getByRole("button", { name: "Nova ordem de serviço", exact: true })
+    .click();
+  const editor = staff.getByRole("dialog", { name: "Nova ordem de serviço" });
+  await staff.route("**/api/sga/lookup", (route) =>
+    route.fulfill({
+      json: {
+        vehicle: "SGA1A23",
+        customer_name: "Associado fictício",
+        document_data: {},
+        sga_check: {
+          verified_at: new Date().toISOString(),
+          assessment: {
+            vehicle_status: "ATIVO",
+            vehicle_classification: "Instalação pendente",
+            customer_status: "ATIVO",
+            customer_classification: "Associado",
+            financial_status: "INADIMPLENTE",
+            eligible: false,
+            reasons: ["Regularidade financeira não confirmada"],
+          },
+        },
+      },
+    }),
+  );
+  await editor.getByLabel("Placa ou chassi", { exact: true }).fill("SGA1A23");
+  await editor
+    .getByRole("button", {
+      name: "Consultar cadastro e situação SGA",
+      exact: true,
+    })
+    .click();
+  await editor
+    .getByText("SGA: agendamento bloqueado", { exact: true })
+    .waitFor();
+  await editor.getByLabel(/Cliente optou pelo desconto do adesivo/).check();
+  await editor
+    .getByText(/O técnico responsável deverá aplicar 1 adesivo/)
+    .waitFor();
+  await editor
+    .getByText("SGA: agendamento bloqueado", { exact: true })
+    .scrollIntoViewIfNeeded();
+  await staff.screenshot({
+    path: path.join(directory, "os-sga-adesivo.png"),
+    fullPage: true,
+  });
+  await editor
+    .getByRole("button", { name: "Fechar diálogo", exact: true })
+    .click();
+  await staff.unroute("**/api/sga/lookup");
+  summary.eligibilityAndStickerOrderUI = "passed (SGA mocked)";
+
   summary.firstAccessRecoveryAndProactiveChat = "passed";
   summary.mobile320And390 = "passed";
   summary.historyAndDarkMode = "passed";

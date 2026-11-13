@@ -68,6 +68,10 @@ function configuration(env = process.env) {
       env.SGA_READ_ENABLED === undefined
         ? yes(env.INTEGRATIONS_ENABLED)
         : yes(env.SGA_READ_ENABLED),
+    SGA_SCHEDULING_GUARD:
+      env.SGA_SCHEDULING_GUARD === undefined
+        ? yes(env.SGA_READ_ENABLED)
+        : yes(env.SGA_SCHEDULING_GUARD),
     RUN_WORKER: yes(env.ZEN_RUN_WORKER),
     STOCK_ENABLED: yes(env.STOCK_ENABLED),
     STOCK_API_URL: env.STOCK_API_URL || "",

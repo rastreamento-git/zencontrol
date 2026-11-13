@@ -1,4 +1,9 @@
 const definitions = {
+  customer_classifications: {
+    path: "/listar/classificacao-associado/todos",
+    codes: ["codigo_classificacao", "codigo"],
+    labels: ["descricao_classificacao", "descricao"],
+  },
   classifications: {
     path: "/listar/classificacao-veiculo/todos",
     codes: ["codigo", "codigo_classificacao", "codigo_classificacao_veiculo"],

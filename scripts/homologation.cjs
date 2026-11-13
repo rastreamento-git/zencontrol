@@ -150,6 +150,7 @@ async function main() {
     SSO_STOCK_URL: online ? onlineConfig.stockOrigin : "http://127.0.0.1:4321",
     GOOGLE_CLIENT_ID: online ? "" : process.env.GOOGLE_CLIENT_ID,
     SGA_READ_ENABLED: process.env.SGA_READ_ENABLED,
+    SGA_SCHEDULING_GUARD: process.env.SGA_SCHEDULING_GUARD,
     HINOVA_API_URL: process.env.HINOVA_API_URL,
     HINOVA_TOKEN_ASSOC: process.env.HINOVA_TOKEN_ASSOC,
     HINOVA_USER: process.env.HINOVA_USER,

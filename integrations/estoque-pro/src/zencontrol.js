@@ -44,6 +44,20 @@ function configureZenControl(app, pool, env) {
     )
       fail(404, "Técnico ativo não encontrado.");
     res.json({
+      consumables: [
+        {
+          sga_product_code: "2371",
+          name: "Adesivo Perfurado",
+          quantity: Number(
+            (
+              await pool.query(
+                "SELECT quantidade FROM adesivo_saldos WHERE tecnico_id=$1",
+                [tid],
+              )
+            ).rows[0]?.quantidade || 0,
+          ),
+        },
+      ],
       items: (
         await pool.query(
           "SELECT e.codigo_serial,e.produto_id,e.tecnico_id,e.status,e.data_atualizacao,p.nome produto,p.categoria FROM equipamentos_seriais e JOIN produtos p ON p.id=e.produto_id WHERE e.tecnico_id=$1 AND e.status='TECNICO' AND NOT e.arquivado ORDER BY p.nome,e.codigo_serial",
@@ -92,10 +106,28 @@ function configureZenControl(app, pool, env) {
       order_id: text(body.order_id, "OS", 100),
       submission_id: text(body.submission_id, "Envio", 100),
       technician_id: integer(body.technician_id, "Técnico"),
-      serials: serials(body.serials).sort(),
+      serials:
+        Array.isArray(body.serials) &&
+        body.serials.length === 0 &&
+        body.consumables?.length
+          ? []
+          : serials(body.serials).sort(),
       operator: text(body.operator, "Operador", 200),
       ...(body.reuse === true ? { reuse: true } : {}),
     };
+    if (body.consumables !== undefined) {
+      if (
+        !Array.isArray(body.consumables) ||
+        body.consumables.length !== 1 ||
+        String(body.consumables[0]?.sga_product_code) !== "2371" ||
+        body.consumables[0]?.quantity !== 1
+      )
+        fail(
+          400,
+          "Material de aplicação inválido. Informe uma unidade do adesivo Perfurado 2371.",
+        );
+      payload.consumables = [{ sga_product_code: "2371", quantity: 1 }];
+    }
     if (payload.serials.length > 20)
       fail(400, "Limite de 20 equipamentos por serviço.");
     const fingerprint = hash(JSON.stringify(payload)).toString("hex");
@@ -201,6 +233,19 @@ function configureZenControl(app, pool, env) {
               [payload.source_system, payload.order_id, payload.serials],
             );
           }
+          if (payload.consumables?.length)
+            await require("./adesivos").movement(
+              client,
+              {
+                type: "APLICACAO",
+                quantity: 1,
+                technician_id: payload.technician_id,
+                order_id: payload.order_id,
+                source_system: payload.source_system,
+              },
+              key + ":adesivo",
+              "ZenControl: " + payload.operator,
+            );
           const result = {
             success: true,
             receipt_id: receiptId,
@@ -211,6 +256,9 @@ function configureZenControl(app, pool, env) {
             technician_id: payload.technician_id,
             serials: payload.serials,
             status: "INSTALADO",
+            ...(payload.consumables
+              ? { consumables: payload.consumables }
+              : {}),
             confirmed_at: new Date().toISOString(),
             ...(payload.reuse
               ? { reused: true, operator: payload.operator }

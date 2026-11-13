@@ -71,7 +71,13 @@ function proxy(port, strip = "") {
         response.pipe(res);
       },
     );
-    upstream.setTimeout(90000, () => upstream.destroy());
+    upstream.setTimeout(
+      req.originalUrl.startsWith("/api/sga/lookup") ||
+        req.originalUrl.startsWith("/api/sga/catalogs/")
+        ? 200000
+        : 90000,
+      () => upstream.destroy(),
+    );
     upstream.on("error", () => {
       if (res.headersSent) return res.destroy();
       res.status(503).json({

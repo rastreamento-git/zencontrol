@@ -1,6 +1,6 @@
 # Integração SGA Hinova
 
-A importação de planilhas pode completar os cadastros consultando o SGA v2. A consulta ocorre em segundo plano após o administrador escolher abas, base e gerar a revisão. A aprovação fica bloqueada enquanto essa consulta estiver em andamento; o administrador confere a prévia final e confirma uma vez.
+A importação de planilhas pode completar os cadastros consultando o SGA v2. A consulta pode ocorrer em segundo plano após o administrador escolher abas, base e gerar a revisão. A opção **Consultar depois, nas ordens de serviço** importa sem chamar o SGA, sinalizando o cadastro pendente para completar na OS. Enquanto consulta, o botão de confirmação informa que aguarda o SGA. O administrador pode aguardar o preenchimento ou usar **Parar consulta SGA e revisar agora** para interromper a tarefa e continuar com os dados já visíveis na prévia. Os resultados da consulta interrompida não são aplicados; a origem da planilha permanece preservada. A importação exige a confirmação posterior do administrador.
 
 ## Configuração no servidor
 
@@ -31,7 +31,7 @@ O ambiente de homologação encaminha essas variáveis à API, mantendo `INTEGRA
 
 ## Códigos atuais
 
-Os PDFs são referências históricas. A aplicação consulta classificações, situações, marcas, cores, tipos de veículo e tipos de foto pela API, com cache de 15 minutos e atualização manual. Falha parcial de catálogo é sinalizada; não assume o significado antigo de um código sem descrição atual.
+Os PDFs são referências históricas. A aplicação consulta classificações de veículos e associados, situações, marcas, cores, tipos de veículo e tipos de foto pela API, com cache de 15 minutos e atualização manual. Falha parcial de catálogo é sinalizada; não assume o significado antigo de um código sem descrição atual.
 
 O arquivo chamado “lista produtos” fornecido contém tipos de veículo. Produtos comerciais exigem filtros próprios de regional, cooperativa, tipo, FIPE e cilindrada; não são tratados como o catálogo de tipos de veículo.
 
@@ -39,4 +39,14 @@ Alterações externas existentes continuam exigindo `INTEGRATIONS_ENABLED=true` 
 
 ## Verificação
 
-A suíte cobre preenchimento assíncrono com API SGA simulada, aprovação bloqueada durante consulta, origem preservada, códigos dinâmicos, divergência de associado, troca de modo, correspondência ambígua e bloqueio de escrita externa em modo consulta. A validação contra a associação real depende das credenciais configuradas no servidor.
+A suíte cobre preenchimento assíncrono com API SGA simulada, aprovação bloqueada durante consulta, interrupção pelo administrador com confirmação imediata da prévia, cancelamento da requisição em voo e ausência de alterações posteriores do worker, origem preservada, códigos dinâmicos, divergência de associado, troca de modo, correspondência ambígua e bloqueio de escrita externa em modo consulta. No navegador, cobre também progresso lento, atualização automática da prévia após falha transitória e desbloqueio pela interrupção explícita. A validação contra a associação real depende das credenciais configuradas no servidor.
+
+## Situação e bloqueio de agendamento
+
+Com `SGA_SCHEDULING_GUARD=true`, é obrigatória uma consulta correspondente ao veículo e associado, realizada nos últimos 15 minutos, para criar ou alterar um agendamento e para distribuir a OS. O padrão acompanha a ativação explícita de `SGA_READ_ENABLED`; a homologação com consulta ativa exige validação. A opção de adiar a consulta na importação não libera o agendamento.
+
+A API consulta a situação financeira do veículo, a situação do associado por CPF/CNPJ e seu cadastro pelo código, conferindo os identificadores retornados. As classificações usam catálogos atuais. Estados reconhecidos como ativos/regular e financeiro adimplente/regular/em dia permitem o agendamento; inadimplência, inatividade, cancelamento, suspensão, bloqueio ou exclusão impedem a liberação. Resposta ausente, desconhecida ou indisponível mantém a OS pendente, sem presumir regularidade. A conferência dessas informações no navegador não substitui a validação no servidor.
+
+A consulta emite uma comprovação assinada pelo servidor, vinculada ao nome, placa/chassi e horário. A OS guarda o resumo consultado. Informações editadas no navegador não comprovam situação. Trocar nome/veículo invalida a consulta anterior. Novas consultas e reagendamentos reavaliam as restrições. O rascunho pode ser salvo mesmo com restrição, para regularização.
+
+OS abertas importadas com agendamento não validado são gravadas como pendentes. A data original fica em `proposed_scheduled_at`, visível como proposta; o conteúdo original continua preservado. Concluídos históricos mantêm sua etapa. API e telas apresentam classificação/situação do veículo, classificação/situação do associado e regularidade financeira.

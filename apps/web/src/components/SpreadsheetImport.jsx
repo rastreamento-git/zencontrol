@@ -3,6 +3,8 @@ import { api, errorMessage } from "@zen/ui/lib/api";
 import "./spreadsheet-import.css";
 const fieldLabels = {
   document_data: "Dados complementares",
+  sga_check: "Situação e classificação no SGA",
+  proposed_scheduled_at: "Agendamento proposto na origem (aguarda validação)",
   sga_id: "Código no SGA",
   sga_classification: "Classificação SGA",
   sga_status: "Situação SGA",
@@ -54,6 +56,7 @@ export default function SpreadsheetImport() {
     [sgaStatus, setSgaStatus] = useState(null),
     [sgaMode, setSgaMode] = useState("fill_missing"),
     [sgaTask, setSgaTask] = useState(null),
+    [sgaPollError, setSgaPollError] = useState(""),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [filter, setFilter] = useState("ready"),
@@ -90,37 +93,39 @@ export default function SpreadsheetImport() {
           `/spreadsheet-imports/${batch.id}/enrichment`,
         );
         if (cancelled) return;
-        setSgaTask(data);
-        if (!["running", "queued"].includes(data.state)) clearInterval(timer);
         if (
           data.state === "completed" &&
           completedRun.current !== data.run_id
         ) {
-          completedRun.current = data.run_id;
           const updated = await api.get(`/spreadsheet-imports/${batch.id}`);
-          if (!cancelled) setBatch(updated.data);
+          if (cancelled) return;
+          completedRun.current = data.run_id;
+          setBatch(updated.data);
         }
+        setSgaTask(data);
+        setSgaPollError("");
+        if (["running", "queued"].includes(data.state))
+          timer = setTimeout(poll, 2000);
       } catch {
         if (!cancelled) {
-          setSgaTask({
-            state: "failed",
-            message: "Não foi possível consultar o progresso do SGA.",
-          });
-          clearInterval(timer);
+          setSgaPollError(
+            "Não foi possível atualizar a consulta SGA. Tentando novamente; a prévia permanece preservada.",
+          );
+          timer = setTimeout(poll, 3000);
         }
       }
     }
-    timer = setInterval(poll, 2000);
     poll();
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      clearTimeout(timer);
     };
   }, [
     batch?.id,
     batch?.reviewed,
     batch?.approved_at,
     batch?.enrichment?.run_id,
+    batch?.enrichment?.state,
   ]);
   async function run(action) {
     setBusy(true);
@@ -161,6 +166,7 @@ export default function SpreadsheetImport() {
       );
       setBatch(data);
       setSgaTask(null);
+      setSgaPollError("");
       setSgaMode("fill_missing");
       setSelectedSheets([]);
       setSelectedArchive("");
@@ -239,7 +245,11 @@ export default function SpreadsheetImport() {
           disabled={busy || !sgaStatus?.configured}
           onClick={() =>
             run(async () => {
-              const { data } = await api.post("/sga/catalogs/refresh");
+              const { data } = await api.post(
+                "/sga/catalogs/refresh",
+                undefined,
+                { timeout: 180000 },
+              );
               setSgaStatus((s) => ({
                 ...s,
                 catalogs: {
@@ -333,11 +343,20 @@ export default function SpreadsheetImport() {
                     <option value="fill_missing">
                       Completar campos vazios e sinalizar divergências
                     </option>
+                    <option value="skip">
+                      Consultar depois, nas ordens de serviço
+                    </option>
                     <option value="prefer_sga">
                       Usar os dados cadastrais atuais do SGA
                     </option>
                   </select>
                 </label>
+              )}
+              {sgaMode === "skip" && (
+                <p role="status">
+                  A importação usará os dados da planilha. O cadastro SGA ficará
+                  pendente nas OS e deverá ser validado antes do agendamento.
+                </p>
               )}
               <div className="zen-import-filters">
                 <button
@@ -410,6 +429,17 @@ export default function SpreadsheetImport() {
               >
                 Revisar abas selecionadas
               </button>
+              {(!selectedSheets.length || !selectedArchive) && (
+                <p role="status">
+                  Para liberar a revisão, escolha{" "}
+                  {!selectedSheets.length && !selectedArchive
+                    ? "ao menos um mês e a base de destino"
+                    : !selectedSheets.length
+                      ? "ao menos um mês"
+                      : "a base de destino"}
+                  .
+                </p>
+              )}
             </fieldset>
           )}
           {batch.reviewed && (
@@ -450,12 +480,40 @@ export default function SpreadsheetImport() {
           {sgaTask && (
             <div role="status">
               {["running", "queued"].includes(sgaTask.state)
-                ? `Consultando SGA: ${sgaTask.processed || 0} de ${sgaTask.total || 0} veículos. Aguarde antes de importar.`
+                ? `Consultando SGA: ${sgaTask.processed || 0} de ${sgaTask.total || 0} veículos. Você pode aguardar o preenchimento ou parar a consulta e revisar a prévia atual.`
                 : sgaTask.state === "completed"
                   ? `SGA: ${sgaTask.filled} registro(s) preenchido(s), ${sgaTask.conflicts} divergência(s).`
                   : sgaTask.message}
             </div>
           )}
+          {sgaPollError && <p role="status">{sgaPollError}</p>}
+          {batch.reviewed &&
+            !batch.approved_at &&
+            ["running", "queued"].includes(sgaTask?.state) && (
+              <div>
+                <p>
+                  Ao parar, os dados desta consulta em andamento não serão
+                  aplicados. A prévia atual será mantida para sua confirmação.
+                </p>
+                <button
+                  className="secondary-button"
+                  disabled={busy}
+                  onClick={() =>
+                    run(async () => {
+                      const { data } = await api.post(
+                        `/spreadsheet-imports/${batch.id}/enrichment/stop`,
+                        { review_token: batch.review_token },
+                      );
+                      setBatch(data);
+                      setSgaTask(data.enrichment);
+                      setSgaPollError("");
+                    })
+                  }
+                >
+                  Parar consulta SGA e revisar agora
+                </button>
+              </div>
+            )}
           {batch.reviewed && (
             <p role="status">
               {batch.rows.filter((r) => r.sources).length} atendimento(s)
@@ -540,6 +598,19 @@ export default function SpreadsheetImport() {
                             : "Data da importação (termo sem data)"}
                         </small>
                       )}
+                      {r.data?.sga_check?.assessment && (
+                        <small className="zen-import-note">
+                          SGA · Financeiro:{" "}
+                          {r.data.sga_check.assessment.financial_status ||
+                            "não confirmado"}{" "}
+                          · Associado:{" "}
+                          {r.data.sga_check.assessment.customer_status ||
+                            "não confirmado"}{" "}
+                          · Veículo:{" "}
+                          {r.data.sga_check.assessment.vehicle_status ||
+                            "não confirmado"}
+                        </small>
+                      )}
                       {r.sga && (
                         <small className="zen-import-note">
                           SGA:{" "}
@@ -595,7 +666,36 @@ export default function SpreadsheetImport() {
                               <div key={k}>
                                 <dt>{fieldLabels[k] || k}</dt>
                                 <dd>
-                                  {k === "document_data" ? (
+                                  {k === "sga_check" ? (
+                                    <div>
+                                      <p>
+                                        Veículo:{" "}
+                                        {v?.assessment
+                                          ?.vehicle_classification ||
+                                          "Classificação não informada"}{" "}
+                                        ·{" "}
+                                        {v?.assessment?.vehicle_status ||
+                                          "Situação não confirmada"}
+                                      </p>
+                                      <p>
+                                        Associado:{" "}
+                                        {v?.assessment
+                                          ?.customer_classification ||
+                                          "Classificação não informada"}{" "}
+                                        ·{" "}
+                                        {v?.assessment?.customer_status ||
+                                          "Situação não confirmada"}
+                                      </p>
+                                      <p>
+                                        Financeiro:{" "}
+                                        {v?.assessment?.financial_status ||
+                                          "Não confirmado"}
+                                      </p>
+                                      {!!v?.assessment?.reasons?.length && (
+                                        <p>{v.assessment.reasons.join("; ")}</p>
+                                      )}
+                                    </div>
+                                  ) : k === "document_data" ? (
                                     <dl>
                                       {Object.entries(v).map(
                                         ([field, value]) => (
@@ -682,6 +782,14 @@ export default function SpreadsheetImport() {
                 Corrija o arquivo e gere uma nova prévia. Registros já
                 existentes serão verificados novamente na confirmação.
               </p>
+              {!batch.counts.ready && (
+                <p role="status">
+                  Não há atendimentos prontos para importar.{" "}
+                  {batch.counts.pending} pendente(s) e {batch.counts.duplicate}{" "}
+                  possível(is) duplicidade(s). Confira essas categorias e os
+                  motivos apresentados em cada linha.
+                </p>
+              )}
               <button
                 className="primary-button"
                 disabled={
@@ -703,7 +811,11 @@ export default function SpreadsheetImport() {
                   })
                 }
               >
-                Importar {batch.counts.ready} atendimentos
+                {busy
+                  ? "Processando…"
+                  : ["running", "queued"].includes(sgaTask?.state)
+                    ? "Aguardando consulta SGA"
+                    : `Importar ${batch.counts.ready} atendimentos`}
               </button>
             </fieldset>
           )}

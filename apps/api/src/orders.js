@@ -87,8 +87,24 @@ async function guard(db, id, options = {}) {
       "Uma integração está em execução. Aguarde a confirmação antes de alterar.",
     );
 }
-async function validate(db, input, old = null) {
+async function validate(db, input, old = null, cfg = {}) {
   const out = {};
+  if (input.sticker_discount_opt_in !== undefined) {
+    out.sticker_discount_opt_in = d.boolean(
+      input.sticker_discount_opt_in,
+      "Desconto do adesivo",
+    );
+    if (old?.parent_order_id && out.sticker_discount_opt_in)
+      fail(400, "O adesivo pertence à OS principal do atendimento.");
+  }
+  let verified = old?.sga_check;
+  if (input.sga_verification) {
+    verified = require("./sga-eligibility").read(
+      input.sga_verification,
+      cfg.SESSION_SECRET,
+    );
+    out.sga_check = JSON.stringify(verified);
+  }
   if (input.travel_fee_cents !== undefined) {
     const amount = input.travel_fee_cents;
     if (!Number.isSafeInteger(amount) || amount < 0 || amount > 100000000)
@@ -239,6 +255,16 @@ async function validate(db, input, old = null) {
       ? document.customer_address || ""
       : formatAddress(document, "service");
   if (out.document_data) out.document_data = JSON.stringify(document);
+  if (
+    old &&
+    !input.sga_verification &&
+    ((out.vehicle !== undefined && out.vehicle !== old.vehicle) ||
+      (out.customer_name !== undefined &&
+        out.customer_name !== old.customer_name))
+  ) {
+    verified = null;
+    out.sga_check = "{}";
+  }
   const merged = { ...old, ...out };
   const fipeChanged =
     !old ||
@@ -266,6 +292,21 @@ async function validate(db, input, old = null) {
     (!merged.technician_id || !merged.scheduled_at)
   )
     fail(400, "Defina técnico e agendamento.");
+  if (
+    cfg.SGA_SCHEDULING_GUARD &&
+    (out.scheduled_at || ["AGENDADO", "EM EXECUÇÃO"].includes(out.status)) &&
+    (!old ||
+      (out.scheduled_at !== undefined &&
+        out.scheduled_at !== old.scheduled_at) ||
+      (out.status !== undefined && out.status !== old.status) ||
+      (out.vehicle !== undefined && out.vehicle !== old.vehicle) ||
+      (out.customer_name !== undefined &&
+        out.customer_name !== old.customer_name) ||
+      input.sga_verification)
+  ) {
+    require("./sga-eligibility").assertEligible(verified, { ...old, ...out });
+    if (out.scheduled_at) out.proposed_scheduled_at = "";
+  }
   return out;
 }
 const additionalSummary = (row) => ({
@@ -304,6 +345,7 @@ async function ensureAdditionalOrders(db, parent, types, actor) {
           existing.id,
           {
             vehicle: parent.vehicle,
+            sga_check: JSON.stringify(parent.sga_check || {}),
             chassis: parent.chassis,
             customer_name: parent.customer_name,
             contact: parent.contact,
@@ -349,6 +391,7 @@ async function ensureAdditionalOrders(db, parent, types, actor) {
       id,
       workflow_mode: "controlled",
       parent_order_id: parent.id,
+      sga_check: JSON.stringify(parent.sga_check || {}),
       additional_equipment: type,
       service: baseService + " (Equipamento adicional)",
       technician_id: parent.technician_id,
@@ -423,9 +466,9 @@ async function ensureAdditionalOrders(db, parent, types, actor) {
     }
   return result;
 }
-async function create(pool, input, actor) {
+async function create(pool, input, actor, cfg = {}) {
   return transaction(pool, async (db) => {
-    const data = await validate(db, input);
+    const data = await validate(db, input, null, cfg);
     const additional = prepareEquipment(data, input);
     const generatedOn = d.today();
     const o = await insert(db, "zc_orders", {
@@ -447,7 +490,7 @@ async function create(pool, input, actor) {
     return { ...o, additional_orders: additionalOrders };
   });
 }
-async function edit(pool, id, input, actor) {
+async function edit(pool, id, input, actor, cfg = {}) {
   return transaction(pool, async (db) => {
     const old = await get(db, id);
     if (old.parent_order_id && bundled(old))
@@ -472,7 +515,7 @@ async function edit(pool, id, input, actor) {
       input.status !== old.status
     )
       fail(409, "Uma OS concluída exige reabertura pela administração.");
-    const data = await validate(db, input, old);
+    const data = await validate(db, input, old, cfg);
     const additional = prepareEquipment(data, input, old);
     if (
       bundled(old) &&
@@ -604,8 +647,8 @@ async function complete(
       [key],
     );
     if (
-      !o.tracker_waiver_authorized &&
-      r?.stock_action === "install" &&
+      ((!o.tracker_waiver_authorized && r?.stock_action === "install") ||
+        o.sticker_discount_opt_in) &&
       (!options.stockReceipt ||
         o.stock_sync_state !== "confirmed" ||
         !o.stock_receipt)
@@ -653,6 +696,8 @@ async function complete(
 }
 async function dispatch(pool, id, input, actor, cfg) {
   const current = await get(pool, id);
+  if (cfg.SGA_SCHEDULING_GUARD)
+    require("./sga-eligibility").assertEligible(current.sga_check, current);
   if (current.workflow_mode === "controlled") {
     if (!current.technician_id) fail(400, "Atribua um técnico ao serviço.");
     return transaction(pool, async (db) => {
