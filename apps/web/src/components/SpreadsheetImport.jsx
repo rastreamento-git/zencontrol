@@ -1,8 +1,3 @@
-import {
-  canSelect,
-  lineId,
-  planGroups,
-} from "@zen/domain/import-selection.mjs";
 import { useEffect, useState } from "react";
 import { api, errorMessage } from "@zen/ui/lib/api";
 import "./spreadsheet-import.css";
@@ -43,7 +38,6 @@ export default function SpreadsheetImport() {
     [batch, setBatch] = useState(null),
     [history, setHistory] = useState([]),
     [selectedSheets, setSelectedSheets] = useState([]),
-    [selectedLines, setSelectedLines] = useState([]),
     [selectedArchive, setSelectedArchive] = useState(""),
     [compatible, setCompatible] = useState(false),
     [busy, setBusy] = useState(false),
@@ -57,7 +51,7 @@ export default function SpreadsheetImport() {
     api
       .get("/spreadsheet-imports/capabilities")
       .then(({ data }) => {
-        if (data.version !== 7) throw Error("API incompatível");
+        if (data.version !== 8) throw Error("API incompatível");
         setCompatible(true);
         return reload();
       })
@@ -107,7 +101,6 @@ export default function SpreadsheetImport() {
       setBatch(data);
       setSelectedSheets([]);
       setSelectedArchive("");
-      setSelectedLines([]);
 
       setPage(0);
       await reload();
@@ -137,13 +130,6 @@ export default function SpreadsheetImport() {
         .join()
         .localeCompare([b.data?.customer_name, b.data?.vehicle].join()),
     );
-  const eligible = rows.filter(canSelect);
-  const selectionPlan = planGroups(batch?.rows || [], selectedLines);
-  function selectRows(list) {
-    setSelectedLines((previous) => [
-      ...new Set([...previous, ...list.map(lineId)]),
-    ]);
-  }
   return (
     <section className="zen-import" aria-label="Importação de planilha">
       <h2>Importação</h2>
@@ -272,7 +258,6 @@ export default function SpreadsheetImport() {
                       },
                     );
                     setBatch(data);
-                    setSelectedLines([]);
 
                     setPage(0);
                   })
@@ -317,113 +302,12 @@ export default function SpreadsheetImport() {
               .join(" · ") || "nenhuma"}
             .
           </p>
-          {batch.reviewed && !batch.approved_at && (
-            <div>
-              <p>
-                Marque os registros do mesmo nome e placa/chassi para
-                agrupá-los. A primeira linha selecionada define o IMEI
-                principal; a segunda, o IMEI adicional. Os dados principais
-                seguem a primeira linha.
-              </p>
-              <p>
-                Todos os registros prontos serão importados. A seleção abaixo
-                serve apenas para agrupar os equipamentos.
-              </p>
-              <div className="zen-import-filters">
-                <button
-                  className="secondary-button"
-                  disabled={busy || !batch.rows.some(canSelect)}
-                  onClick={() => selectRows(batch.rows.filter(canSelect))}
-                >
-                  Selecionar todos os registros
-                </button>
-                <button
-                  className="secondary-button"
-                  disabled={busy || !eligible.length}
-                  onClick={() => selectRows(eligible)}
-                >
-                  Selecionar todos os resultados ({eligible.length})
-                </button>
-                <button
-                  className="secondary-button"
-                  disabled={busy || !eligible.length}
-                  onClick={() =>
-                    selectRows(
-                      rows.slice(page * 50, (page + 1) * 50).filter(canSelect),
-                    )
-                  }
-                >
-                  Selecionar esta página
-                </button>
-                <button
-                  className="secondary-button"
-                  disabled={busy || !selectedLines.length}
-                  onClick={() => setSelectedLines([])}
-                >
-                  Limpar seleção
-                </button>
-              </div>
-              <p>
-                {selectionPlan.pairs.length} par(es) pronto(s) para agrupar.{" "}
-                {selectionPlan.ambiguous > 0 &&
-                  `${selectionPlan.ambiguous} grupo(s) com mais de duas linhas ou IMEI repetido precisam de revisão.`}{" "}
-                {selectionPlan.singles > 0 &&
-                  `${selectionPlan.singles} registro(s) sem par continuam separados.`}
-              </p>
-              <button
-                className="secondary-button"
-                disabled={busy || !selectionPlan.pairs.length}
-                onClick={() =>
-                  run(async () => {
-                    const { data } = await api.post(
-                      `/spreadsheet-imports/${batch.id}/review`,
-                      {
-                        sheets: batch.selected_sheets,
-                        archive: selectedArchive,
-                        groups: [
-                          ...(batch.groups || []),
-                          ...selectionPlan.pairs,
-                        ],
-                      },
-                    );
-                    setBatch(data);
-                    setSelectedLines([]);
-
-                    setFilter("ready");
-                    setPage(0);
-                  })
-                }
-              >
-                Agrupar pares selecionados
-              </button>
-              {(batch.groups || []).map((pair, index) => (
-                <div key={pair.join("|")}>
-                  <span>
-                    Atendimento agrupado · principal: {pair[0]} · adicional:{" "}
-                    {pair[1]}
-                  </span>
-                  <button
-                    disabled={busy}
-                    onClick={() =>
-                      run(async () => {
-                        const { data } = await api.post(
-                          `/spreadsheet-imports/${batch.id}/review`,
-                          {
-                            sheets: batch.selected_sheets,
-                            archive: selectedArchive,
-                            groups: batch.groups.filter((_, i) => i !== index),
-                          },
-                        );
-                        setBatch(data);
-                        setSelectedLines([]);
-                      })
-                    }
-                  >
-                    Desfazer agrupamento {index + 1}
-                  </button>
-                </div>
-              ))}
-            </div>
+          {batch.reviewed && (
+            <p role="status">
+              {batch.rows.filter((r) => r.sources).length} atendimento(s)
+              agrupado(s) automaticamente por nome e placa/chassi. Nenhuma
+              seleção ou confirmação de agrupamento é necessária.
+            </p>
           )}
           {batch.reviewed && (
             <button
@@ -476,16 +360,6 @@ export default function SpreadsheetImport() {
               />
             </label>
           )}
-          {selectedLines.length > 0 && (
-            <p>
-              {selectedLines.length} registro(s) selecionado(s). Primeiro:{" "}
-              {selectedLines[0]} (principal)
-              {selectedLines[1]
-                ? ` · Segundo: ${selectedLines[1]} (adicional)`
-                : ""}
-              .
-            </p>
-          )}
           <div className="zen-import-table">
             <table>
               <thead>
@@ -499,29 +373,6 @@ export default function SpreadsheetImport() {
                 {rows.slice(page * 50, (page + 1) * 50).map((r) => (
                   <tr key={r.sheet + ":" + r.row}>
                     <td>
-                      {batch.reviewed &&
-                        !batch.approved_at &&
-                        !r.sources &&
-                        !r.additional_orders &&
-                        ["ready", "duplicate"].includes(r.state) &&
-                        !!r.data?.service && (
-                          <input
-                            type="checkbox"
-                            aria-label={`Selecionar ${r.sheet} linha ${r.row}`}
-                            checked={selectedLines.includes(
-                              r.sheet + ":" + r.row,
-                            )}
-                            onChange={(e) =>
-                              setSelectedLines((prev) =>
-                                e.target.checked
-                                  ? [...prev, r.sheet + ":" + r.row]
-                                  : prev.filter(
-                                      (id) => id !== r.sheet + ":" + r.row,
-                                    ),
-                              )
-                            }
-                          />
-                        )}
                       {r.data?.customer_name || "—"}
                       {r.group_warning && (
                         <small className="zen-import-note">
@@ -575,7 +426,10 @@ export default function SpreadsheetImport() {
                           </span>
                           <small className="zen-import-note">
                             IMEI adicional:{" "}
-                            {r.equipment[1]?.serial || "A informar"}
+                            {r.equipment
+                              .slice(1)
+                              .map((e) => e.serial || "A informar")
+                              .join(" / ")}
                           </small>
                         </>
                       ) : (
@@ -654,7 +508,7 @@ export default function SpreadsheetImport() {
                   setBatch(data);
                   setSelectedSheets(data.selected_sheets);
                   setSelectedArchive(data.archive || "");
-                  setSelectedLines([]);
+
                   setPage(0);
                 })
               }

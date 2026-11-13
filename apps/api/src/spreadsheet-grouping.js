@@ -1,50 +1,80 @@
 const { createHash } = require("node:crypto");
 const d = require("./domain");
 const norm = (v) => d.normalized(v || "").replace(/\s+/g, " ");
-function kind(r) {
-  if (r.additional_orders) return null;
-  const s = norm(r.source_service);
-  return /TAG/.test(s) && !/INSTALACAO/.test(s)
-    ? "tag"
-    : r.data?.service
-      ? "tracker"
-      : null;
-}
-const { fail } = require("./errors");
 const lineId = (r) => r.sheet + ":" + r.row;
-function groupRows(input, groups = []) {
-  if (!Array.isArray(groups) || groups.length > 15000)
-    fail(400, "Selecione os pares de linhas manualmente.");
+function devices(row) {
+  const source = norm(row.source_service),
+    doc = row.data.document_data || {};
+  const counts =
+    doc.equipment_counts ||
+    (source.includes("DUAS TAG")
+      ? { tracker: 0, tag: 2 }
+      : source.includes("TAG")
+        ? { tracker: source.includes("INSTALACAO") ? 1 : 0, tag: 1 }
+        : { tracker: 1, tag: 0 });
+  const types = [
+    ...Array(counts.tracker).fill("RASTREADOR"),
+    ...Array(counts.tag).fill("TAG"),
+  ];
+  if (doc.equipment?.[0] === "tag") {
+    const i = types.indexOf("TAG");
+    if (i > 0) types.unshift(...types.splice(i, 1));
+  }
+  return types.map((type, i) => ({
+    type,
+    serial: i === 0 ? row.data.imei : "",
+    completion_date_source: row.completion_date_source,
+    source_key: row.key,
+    position: i,
+  }));
+}
+function groupRows(input) {
   const rows = structuredClone(input),
-    removed = new Set(),
-    used = new Set();
-  const byId = new Map(rows.map((row) => [lineId(row), row]));
-  for (const pair of groups) {
-    if (
-      !Array.isArray(pair) ||
-      pair.length !== 2 ||
-      pair.some((id) => typeof id !== "string" || used.has(id)) ||
-      pair[0] === pair[1]
-    )
-      fail(400, "Cada linha pode pertencer a um único agrupamento.");
-    const list = pair.map((id) => byId.get(id));
-    if (list.some((r) => !r || r.state !== "ready" || !kind(r)))
-      fail(
-        400,
-        "Selecione duas linhas sem pendências para definir o IMEI principal e o adicional.",
-      );
-    const signature = (r) =>
-      JSON.stringify([norm(r.data.customer_name), d.vehicle(r.data.vehicle)]);
-    if (signature(list[0]) !== signature(list[1]))
-      fail(400, "Agrupe somente linhas do mesmo nome e placa/chassi.");
-    pair.forEach((id) => used.add(id));
-    const [tracker, tag] = list;
-    if (tracker.data.imei && tracker.data.imei === tag.data.imei)
-      fail(
-        400,
-        "Os equipamentos selecionados possuem o mesmo número de série.",
-      );
-    tracker.sources = list.map((r) => ({
+    buckets = new Map(),
+    removed = new Set();
+  for (const r of rows) {
+    if (!r.data || !r.data.customer_name || !r.data.vehicle) continue;
+    const key = JSON.stringify([
+      norm(r.data.customer_name),
+      d.vehicle(r.data.vehicle),
+    ]);
+    const list = buckets.get(key) || [];
+    list.push(r);
+    buckets.set(key, list);
+  }
+  for (const list of buckets.values()) {
+    if (list.length < 2) continue;
+    const primary = list[0],
+      equipment = [],
+      serials = new Set(),
+      emptySources = new Set();
+    let repeated = false;
+    for (const row of list)
+      for (const device of devices(row)) {
+        const identity = device.source_key + ":" + device.position;
+        if (
+          device.serial
+            ? serials.has(device.serial)
+            : emptySources.has(identity)
+        ) {
+          repeated = true;
+          continue;
+        }
+        if (device.serial) serials.add(device.serial);
+        else emptySources.add(identity);
+        const emptySlot =
+          device.serial &&
+          equipment.find(
+            (e) => e.type === device.type && !e.serial && e.position > 0,
+          );
+        if (emptySlot) {
+          emptySlot.serial = device.serial;
+          emptySlot.completion_date_source = device.completion_date_source;
+          continue;
+        }
+        equipment.push(device);
+      }
+    primary.sources = list.map((r) => ({
       sheet: r.sheet,
       row: r.row,
       key: r.key,
@@ -52,69 +82,66 @@ function groupRows(input, groups = []) {
       service: r.data.service,
       imei: r.data.imei,
     }));
-    tracker.equipment = [
-      {
-        type: kind(tracker) === "tag" ? "TAG" : "RASTREADOR",
-        serial: tracker.data.imei,
-        completion_date_source: tracker.completion_date_source,
-      },
-      {
-        type: kind(tag) === "tag" ? "TAG" : "RASTREADOR",
-        serial: tag.data.imei,
-        completion_date_source: tag.completion_date_source,
-      },
-    ];
-    tracker.key = createHash("sha256")
-      .update(
-        list
-          .map((r) => r.key)
-          .sort()
-          .join(":"),
-      )
+    primary.equipment = equipment;
+    primary.additional_imei = equipment[1]?.serial || "";
+    primary.additional_orders = Math.max(0, equipment.length - 1);
+    primary.key = createHash("sha256")
+      .update([...new Set(list.map((r) => r.key))].sort().join(":"))
       .digest("hex");
-    tracker.additional_imei = tag.data.imei;
-    tracker.match = JSON.stringify([
-      norm(tracker.data.customer_name),
-      tracker.data.vehicle,
+    primary.match = JSON.stringify([
+      norm(primary.data.customer_name),
+      d.vehicle(primary.data.vehicle),
     ]);
-    tracker.data.document_data = {
-      ...tracker.data.document_data,
+    primary.data.document_data = {
+      ...primary.data.document_data,
       equipment_counts: {
-        tracker: list.filter((r) => kind(r) === "tracker").length,
-        tag: list.filter((r) => kind(r) === "tag").length,
+        tracker: equipment.filter((e) => e.type === "RASTREADOR").length,
+        tag: equipment.filter((e) => e.type === "TAG").length,
       },
-      equipment: [kind(tracker)],
+      equipment: [equipment[0]?.type === "TAG" ? "tag" : "tracker"],
     };
-    tracker.additional_orders = 1;
-    tracker.inference.push(
-      "Agrupamento manual: primeira linha = IMEI principal; segunda linha = IMEI adicional. Serviço, situação e técnico seguem a primeira linha; as duas origens são preservadas.",
-    );
-    if (
-      [
-        "service",
-        "status",
-        "technician_name",
-        "completed_at",
-        "scheduled_at",
-      ].some((key) => tracker.data[key] !== tag.data[key])
-    ) {
-      tracker.group_warning = true;
-      tracker.inference.push(
-        "Existem diferenças entre as linhas agrupadas. Confira os dados da primeira linha antes de confirmar.",
-      );
+    const pending = list.filter((r) => r.state === "pending");
+    if (pending.length) {
+      primary.state = "pending";
+      primary.reason = [...new Set(pending.map((r) => r.reason))].join("; ");
     }
-    removed.add(tag);
+    primary.inference.push(
+      `${list.length} linhas agrupadas automaticamente por nome e placa/chassi; IMEIs distintos mantidos como equipamentos adicionais.`,
+    );
+    const differences = list
+      .slice(1)
+      .some((r) =>
+        [
+          "service",
+          "status",
+          "technician_name",
+          "completed_at",
+          "scheduled_at",
+          "shift",
+          "location",
+          "notes",
+          "term",
+          "fipe_value",
+          "fipe_risk",
+          "volunteer",
+        ].some((k) => r.data[k] !== primary.data[k]),
+      );
+    primary.group_warning = differences || repeated;
+    if (differences)
+      primary.inference.push(
+        "Alerta: há diferenças entre as origens. Os dados principais seguem a primeira linha; todo o conteúdo de origem foi preservado.",
+      );
+    if (repeated)
+      primary.inference.push(
+        "Alerta: IMEI/linha repetido foi contado uma única vez, mantendo todas as origens.",
+      );
+    if (equipment.length > 20) {
+      primary.state = "pending";
+      primary.reason =
+        "Atendimento com mais de 20 equipamentos; revise conforme o limite do sistema.";
+    }
+    for (const row of list.slice(1)) removed.add(row);
   }
-  const result = rows.filter((r) => !removed.has(r)),
-    seen = new Map();
-  for (const r of result.filter((r) => r.state === "ready")) {
-    const other = seen.get(r.match);
-    if (other) {
-      r.state = other.state = "duplicate";
-      r.reason = other.reason =
-        "Atendimentos semelhantes: revisar repetição ou composição antes de importar.";
-    } else seen.set(r.match, r);
-  }
-  return result;
+  return rows.filter((r) => !removed.has(r));
 }
 module.exports = { groupRows, lineId };

@@ -454,7 +454,7 @@ test("converte duas TAGs em instalação com OS adicional sem movimentações au
   );
 });
 
-test("seleciona somente os meses revisados e une rastreador + TAG com dois seriais", async () => {
+test("abas selecionadas agrupam rastreador e TAG automaticamente, preservando os seriais", async () => {
   const w = new ExcelJS.Workbook();
   const header = [
     "",
@@ -501,94 +501,32 @@ test("seleciona somente os meses revisados e une rastreador + TAG com dois seria
   assert.equal(upload.status, 201);
   assert.equal(upload.data.reviewed, false);
   assert.equal(upload.data.rows.length, 0);
-  const id = upload.data.id;
-  assert.equal(
-    (
-      await call(`/api/spreadsheet-imports/${id}/approve`, {
-        confirmed: true,
-      })
-    ).status,
-    409,
-  );
-  assert.equal(
-    (
-      await call(`/api/spreadsheet-imports/${id}/review`, {
-        sheets: ["Ativos"],
-        groups: [],
-        archive: "HOT",
-      })
-    ).status,
-    400,
-  );
-  const separate = await call(`/api/spreadsheet-imports/${id}/review`, {
+  const id = upload.data.id,
+    endpoint = `/api/spreadsheet-imports/${id}`;
+  const review = await call(endpoint + "/review", {
     sheets: ["NOVEMBRO 2026"],
-    groups: [],
-    archive: "HOT",
-  });
-  assert.equal(separate.data.rows.length, 2);
-  assert.equal(separate.data.counts.duplicate, 2);
-  const pairs = [["NOVEMBRO 2026:2", "NOVEMBRO 2026:3"]];
-  const bad = await call(`/api/spreadsheet-imports/${id}/review`, {
-    sheets: ["NOVEMBRO 2026"],
-    group_equipment: true,
-  });
-  assert.equal(bad.status, 400);
-  assert.equal(
-    (
-      await call(`/api/spreadsheet-imports/${id}/review`, {
-        sheets: ["NOVEMBRO 2026"],
-        groups: [["NOVEMBRO 2026:2", "NOVEMBRO 2026:2"]],
-      })
-    ).status,
-    400,
-  );
-  assert.equal(
-    (
-      await call(`/api/spreadsheet-imports/${id}/review`, {
-        sheets: ["NOVEMBRO 2026"],
-        groups: [["NOVEMBRO 2026:2", "JUNHO 2026:2"]],
-      })
-    ).status,
-    400,
-  );
-
-  const review = await call(`/api/spreadsheet-imports/${id}/review`, {
-    sheets: ["NOVEMBRO 2026"],
-    groups: pairs,
     archive: "HOT",
   });
   assert.equal(review.status, 200);
   assert.equal(review.data.counts.ready, 1);
+  assert.equal(review.data.counts.duplicate, 0);
   assert.equal(review.data.rows[0].sources.length, 2);
   assert.equal(review.data.rows[0].equipment[1].serial, tag[4]);
-  assert.deepEqual(review.data.selected_sheets, ["NOVEMBRO 2026"]);
-  const undone = await call(`/api/spreadsheet-imports/${id}/review`, {
-    sheets: ["NOVEMBRO 2026"],
-    groups: [],
-    archive: "HOT",
-  });
-  assert.equal(undone.data.rows.length, 2);
-  assert.equal(undone.data.groups.length, 0);
-  const changed = await call(`/api/spreadsheet-imports/${id}/review`, {
-    sheets: ["JUNHO 2026"],
-    groups: [],
-    archive: "HOT",
-  });
+  await call(endpoint + "/review", { sheets: ["JUNHO 2026"], archive: "HOT" });
   assert.equal(
     (
-      await call(`/api/spreadsheet-imports/${id}/approve`, {
+      await call(endpoint + "/approve", {
         confirmed: true,
         review_token: review.data.review_token,
       })
     ).status,
     409,
   );
-  const final = await call(`/api/spreadsheet-imports/${id}/review`, {
+  const final = await call(endpoint + "/review", {
     sheets: ["NOVEMBRO 2026"],
-    groups: pairs,
     archive: "HOT",
   });
-  const result = await call(`/api/spreadsheet-imports/${id}/approve`, {
+  const result = await call(endpoint + "/approve", {
     confirmed: true,
     review_token: final.data.review_token,
   });
@@ -600,8 +538,8 @@ test("seleciona somente os meses revisados e une rastreador + TAG com dois seria
     )
   ).rows;
   assert.equal(saved.length, 2);
-  assert.equal(saved[1].parent_order_id, saved[0].id);
   assert.equal(saved[1].imei, tag[4]);
+  assert.equal(saved[1].parent_order_id, saved[0].id);
   assert.equal(saved[0].raw_legacy.sources.length, 2);
   assert.equal(
     (
@@ -611,8 +549,7 @@ test("seleciona somente os meses revisados e une rastreador + TAG com dois seria
     ).rows.length,
     0,
   );
-  const page = await call("/api/orders?q=HIJ9K01");
-  assert.equal(page.data.items.length, 1); // groupedPage presents a single service with equipment children.
+  assert.equal((await call("/api/orders?q=HIJ9K01")).data.items.length, 1);
 });
 
 test("leitura de aba auxiliar extensa cabe em heap de 128 MB", async () => {
@@ -718,7 +655,8 @@ test("duplicidade usa nome e veículo, agrupa dois rastreadores e sinaliza concl
   second[1] = "Manutenção";
   second[4] = "000007260510342";
   const staged = await stage(await workbook([first, second]));
-  assert.equal(staged.data.counts.duplicate, 2);
+  assert.equal(staged.data.counts.ready, 1);
+  assert.equal(staged.data.counts.duplicate, 0);
   const endpoint = `/api/spreadsheet-imports/${staged.data.id}`;
   const review = await call(endpoint + "/review", {
     sheets: ["NOVEMBRO 2026"],
@@ -778,40 +716,51 @@ test("duplicidade usa nome e veículo, agrupa dois rastreadores e sinaliza concl
   assert.equal(existing.data.counts.duplicate, 1);
 });
 
-test("seleção em lote alcança todas as páginas e mantém grupos ambíguos para revisão", () => {
-  const {
-    planGroups,
-  } = require("../../../packages/domain/import-selection.mjs");
-  const rows = [];
-  for (let group = 0; group < 75; group++)
-    for (let i = 0; i < 2; i++)
-      rows.push({
-        sheet: "NOVEMBRO 2026",
-        row: rows.length + 2,
-        state: "duplicate",
-        data: {
-          service: "Instalação",
-          customer_name: "Cliente " + group,
-          vehicle: "ABC" + group,
-          imei: "000" + group + i,
-        },
-      });
-  const all = planGroups(
-    rows,
-    rows.map((r) => r.sheet + ":" + r.row),
+test("agrupa várias linhas automaticamente e conta IMEI repetido uma única vez", async () => {
+  const { groupRows } = require("../src/spreadsheet-grouping");
+  const a = row("ZAB6C78"),
+    b = row("ZAB6C78"),
+    c = row("ZAB6C78");
+  b[4] = "000007260510343";
+  c[1] = "TAG";
+  c[4] = "000007260510344";
+  const source = await preview(await workbook([a, b, c, a]), undefined, false);
+  const rows = groupRows(source);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].state, "ready");
+  assert.equal(rows[0].sources.length, 4);
+  assert.equal(rows[0].equipment.length, 3);
+  assert.equal(rows[0].additional_orders, 2);
+  assert.equal(rows[0].group_warning, true);
+  assert.match(rows[0].inference.join(" "), /contado uma única vez/);
+  assert.deepEqual(rows[0].data.document_data.equipment_counts, {
+    tracker: 2,
+    tag: 1,
+  });
+  const staged = await stage(await workbook([a, b, c, a]));
+  assert.equal(staged.data.counts.ready, 1);
+  const result = await call(
+    `/api/spreadsheet-imports/${staged.data.id}/approve`,
+    { confirmed: true },
   );
-  assert.equal(all.pairs.length, 75);
-  assert.equal(all.ambiguous, 0);
-  const odd = [
-    ...rows.slice(0, 2),
-    { ...rows[0], row: 999 },
-    { ...rows[2], row: 1000 },
-  ];
-  const review = planGroups(
-    odd,
-    odd.map((r) => r.sheet + ":" + r.row),
+  assert.equal(result.data.imported, 1);
+  assert.equal(result.data.additional_orders, 2);
+  const saved = (
+    await db.pool.query("SELECT * FROM zc_orders WHERE vehicle='ZAB6C78'")
+  ).rows;
+  assert.equal(saved.length, 3);
+  const composite = row("BCD7E89"),
+    tag = row("BCD7E89");
+  composite[1] = "Instalação + TAG";
+  composite[14] = tag[14] = "PENDENTE";
+  composite[6] = tag[6] = "";
+  tag[1] = "TAG";
+  tag[4] = "000007260510345";
+  const combined = groupRows(
+    await preview(await workbook([composite, tag]), undefined, false),
   );
-  assert.equal(review.pairs.length, 0);
-  assert.equal(review.ambiguous, 1);
-  assert.equal(review.singles, 1);
+  assert.equal(combined[0].equipment.length, 2);
+  assert.equal(combined[0].equipment[1].serial, tag[4]);
+
+  assert.equal(new Set(saved.map((r) => r.imei)).size, 3);
 });
