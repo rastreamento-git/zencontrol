@@ -4,7 +4,7 @@ A prévia mostra apenas **Nome, Placa e IMEI** no resumo. Os demais campos ficam
 disponíveis em **Revisar conteúdo completo** e permanecem na importação.
 
 No menu **Importação**, um administrador envia o
-XLSX (até 10 MB), escolhe os meses e a base de destino, gera a prévia de revisão e digita `IMPORTAR SERVICOS`. A análise
+XLSX (até 10 MB), escolhe os meses e a base de destino, gera a prévia de revisão e clica em **Importar N atendimentos**. A análise
 não cria OS. Operadores e técnicos não têm acesso aos endpoints de importação.
 
 ## Leitura da estrutura
@@ -29,7 +29,7 @@ prontas da seleção salva. Alterar meses ou agrupamento exige nova revisão; o 
 da prévia evita aprovar uma composição antiga em outra janela.
 
 O agrupamento é exclusivamente manual: o responsável marca dois registros do mesmo
-nome e placa/chassi e clica em **Agrupar registros selecionados**. A primeira linha
+nome e placa/chassi e clica em **Agrupar pares selecionados**. A primeira linha
 selecionada fornece os dados principais e o IMEI principal. A segunda fornece o
 IMEI adicional. Podem ser dois rastreadores ou rastreador e TAG.
 Não há seleção global que una pares automaticamente. Mesmo um par compatível
@@ -123,8 +123,8 @@ A planilha real foi analisada para validar o leitor, mas não importada no banco
 ## Verificação de rota e versão
 
 A interface verifica `GET /api/spreadsheet-imports/capabilities` antes de liberar
-análise (versão 6, seleção de abas, base administrativa e agrupamento manual). `GET /healthz` anuncia
-`spreadsheet_import_version: 6`. Os endpoints de consulta, envio, revisão e aprovação
+análise (versão 7, seleção de abas, base administrativa e agrupamento manual). `GET /healthz` anuncia
+`spreadsheet_import_version: 7`. Os endpoints de consulta, envio, revisão e aprovação
 são autenticados e exclusivos de administrador.
 
 Se aparecer rota inexistente/incompatibilidade, verificar o serviço apontado por
@@ -156,4 +156,20 @@ alterado manualmente por edição comum do documento.
 
 A importação fica no menu próprio, exclusivo de administrador. Configurações mantém
 backup e conexões, com arquivamento avançado e regras de conferência recolhidos.
-API e frontend devem ser publicados juntos na versão 6. Não há nova migração.
+API e frontend devem ser publicados juntos na versão 7. Não há nova migração.
+
+## Ações em lote e confirmação simples
+
+A confirmação não exige digitar uma frase. O botão **Importar N atendimentos** envia
+a aprovação do administrador com o token da prévia revisada; permissões, revisão,
+expiração e proteção contra duplicidade permanecem verificadas no servidor.
+
+Todos os registros prontos da seleção mensal entram na importação. As caixas de
+seleção de linhas servem somente para agrupar equipamentos. Há ações para selecionar
+todos os meses, todos os registros, todos os resultados filtrados (inclusive fora
+da página atual) ou apenas a página atual, além de limpar a seleção.
+
+**Agrupar pares selecionados** processa de uma vez os pares de mesmo nome e veículo
+escolhidos pelo responsável. Registros sem par continuam separados. Mais de duas
+linhas do mesmo atendimento ou serial repetido ficam sinalizados para revisão;
+não é escolhido um par arbitrário. A primeira linha selecionada continua principal.

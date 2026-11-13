@@ -1,3 +1,8 @@
+import {
+  canSelect,
+  lineId,
+  planGroups,
+} from "@zen/domain/import-selection.mjs";
 import { useEffect, useState } from "react";
 import { api, errorMessage } from "@zen/ui/lib/api";
 import "./spreadsheet-import.css";
@@ -43,7 +48,6 @@ export default function SpreadsheetImport() {
     [compatible, setCompatible] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
-    [confirmation, setConfirmation] = useState(""),
     [filter, setFilter] = useState("ready"),
     [page, setPage] = useState(0),
     [search, setSearch] = useState("");
@@ -53,7 +57,7 @@ export default function SpreadsheetImport() {
     api
       .get("/spreadsheet-imports/capabilities")
       .then(({ data }) => {
-        if (data.version !== 6) throw Error("API incompatível");
+        if (data.version !== 7) throw Error("API incompatível");
         setCompatible(true);
         return reload();
       })
@@ -104,7 +108,7 @@ export default function SpreadsheetImport() {
       setSelectedSheets([]);
       setSelectedArchive("");
       setSelectedLines([]);
-      setConfirmation("");
+
       setPage(0);
       await reload();
     });
@@ -133,6 +137,13 @@ export default function SpreadsheetImport() {
         .join()
         .localeCompare([b.data?.customer_name, b.data?.vehicle].join()),
     );
+  const eligible = rows.filter(canSelect);
+  const selectionPlan = planGroups(batch?.rows || [], selectedLines);
+  function selectRows(list) {
+    setSelectedLines((previous) => [
+      ...new Set([...previous, ...list.map(lineId)]),
+    ]);
+  }
   return (
     <section className="zen-import" aria-label="Importação de planilha">
       <h2>Importação</h2>
@@ -160,7 +171,6 @@ export default function SpreadsheetImport() {
           onChange={(e) => {
             setFile(e.target.files[0] || null);
             setBatch(null);
-            setConfirmation("");
           }}
         />
       </label>
@@ -189,7 +199,6 @@ export default function SpreadsheetImport() {
                   onChange={(e) => {
                     setSelectedArchive(e.target.value);
                     setBatch((b) => ({ ...b, reviewed: false }));
-                    setConfirmation("");
                   }}
                 >
                   <option value="">Selecione a base</option>
@@ -200,6 +209,28 @@ export default function SpreadsheetImport() {
                   ))}
                 </select>
               </label>
+              <div className="zen-import-filters">
+                <button
+                  className="secondary-button"
+                  onClick={() => {
+                    setSelectedSheets(
+                      batch.sheets.filter((s) => s.eligible).map((s) => s.name),
+                    );
+                    setBatch((b) => ({ ...b, reviewed: false }));
+                  }}
+                >
+                  Selecionar todos os meses
+                </button>
+                <button
+                  className="secondary-button"
+                  onClick={() => {
+                    setSelectedSheets([]);
+                    setBatch((b) => ({ ...b, reviewed: false }));
+                  }}
+                >
+                  Limpar meses
+                </button>
+              </div>
               {batch.sheets.map((sheet) => (
                 <label key={sheet.name} style={{ display: "block" }}>
                   <input
@@ -213,7 +244,6 @@ export default function SpreadsheetImport() {
                           : prev.filter((n) => n !== sheet.name),
                       );
                       setBatch((b) => ({ ...b, reviewed: false }));
-                      setConfirmation("");
                     }}
                   />
                   {sheet.name} —{" "}
@@ -243,7 +273,7 @@ export default function SpreadsheetImport() {
                     );
                     setBatch(data);
                     setSelectedLines([]);
-                    setConfirmation("");
+
                     setPage(0);
                   })
                 }
@@ -295,9 +325,54 @@ export default function SpreadsheetImport() {
                 principal; a segunda, o IMEI adicional. Os dados principais
                 seguem a primeira linha.
               </p>
+              <p>
+                Todos os registros prontos serão importados. A seleção abaixo
+                serve apenas para agrupar os equipamentos.
+              </p>
+              <div className="zen-import-filters">
+                <button
+                  className="secondary-button"
+                  disabled={busy || !batch.rows.some(canSelect)}
+                  onClick={() => selectRows(batch.rows.filter(canSelect))}
+                >
+                  Selecionar todos os registros
+                </button>
+                <button
+                  className="secondary-button"
+                  disabled={busy || !eligible.length}
+                  onClick={() => selectRows(eligible)}
+                >
+                  Selecionar todos os resultados ({eligible.length})
+                </button>
+                <button
+                  className="secondary-button"
+                  disabled={busy || !eligible.length}
+                  onClick={() =>
+                    selectRows(
+                      rows.slice(page * 50, (page + 1) * 50).filter(canSelect),
+                    )
+                  }
+                >
+                  Selecionar esta página
+                </button>
+                <button
+                  className="secondary-button"
+                  disabled={busy || !selectedLines.length}
+                  onClick={() => setSelectedLines([])}
+                >
+                  Limpar seleção
+                </button>
+              </div>
+              <p>
+                {selectionPlan.pairs.length} par(es) pronto(s) para agrupar.{" "}
+                {selectionPlan.ambiguous > 0 &&
+                  `${selectionPlan.ambiguous} grupo(s) com mais de duas linhas ou IMEI repetido precisam de revisão.`}{" "}
+                {selectionPlan.singles > 0 &&
+                  `${selectionPlan.singles} registro(s) sem par continuam separados.`}
+              </p>
               <button
                 className="secondary-button"
-                disabled={busy || selectedLines.length !== 2}
+                disabled={busy || !selectionPlan.pairs.length}
                 onClick={() =>
                   run(async () => {
                     const { data } = await api.post(
@@ -305,18 +380,21 @@ export default function SpreadsheetImport() {
                       {
                         sheets: batch.selected_sheets,
                         archive: selectedArchive,
-                        groups: [...(batch.groups || []), selectedLines],
+                        groups: [
+                          ...(batch.groups || []),
+                          ...selectionPlan.pairs,
+                        ],
                       },
                     );
                     setBatch(data);
                     setSelectedLines([]);
-                    setConfirmation("");
+
                     setFilter("ready");
                     setPage(0);
                   })
                 }
               >
-                Agrupar registros selecionados
+                Agrupar pares selecionados
               </button>
               {(batch.groups || []).map((pair, index) => (
                 <div key={pair.join("|")}>
@@ -338,7 +416,6 @@ export default function SpreadsheetImport() {
                         );
                         setBatch(data);
                         setSelectedLines([]);
-                        setConfirmation("");
                       })
                     }
                   >
@@ -538,35 +615,25 @@ export default function SpreadsheetImport() {
                 Corrija o arquivo e gere uma nova prévia. Registros já
                 existentes serão verificados novamente na confirmação.
               </p>
-              <label>
-                Digite IMPORTAR SERVICOS
-                <input
-                  value={confirmation}
-                  onChange={(e) => setConfirmation(e.target.value)}
-                  autoComplete="off"
-                />
-              </label>
               <button
                 className="primary-button"
-                disabled={
-                  confirmation !== "IMPORTAR SERVICOS" || !batch.counts.ready
-                }
+                disabled={!batch.counts.ready}
                 onClick={() =>
                   run(async () => {
                     await api.post(
                       "/spreadsheet-imports/" + batch.id + "/approve",
-                      { confirmation, review_token: batch.review_token },
+                      { confirmed: true, review_token: batch.review_token },
                     );
                     const { data } = await api.get(
                       "/spreadsheet-imports/" + batch.id,
                     );
                     setBatch(data);
-                    setConfirmation("");
+
                     await reload();
                   })
                 }
               >
-                Confirmar importação de {batch.counts.ready} registros
+                Importar {batch.counts.ready} atendimentos
               </button>
             </fieldset>
           )}
@@ -589,7 +656,6 @@ export default function SpreadsheetImport() {
                   setSelectedArchive(data.archive || "");
                   setSelectedLines([]);
                   setPage(0);
-                  setConfirmation("");
                 })
               }
             >
