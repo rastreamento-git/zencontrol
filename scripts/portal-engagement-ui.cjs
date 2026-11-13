@@ -835,6 +835,84 @@ async function main() {
   await recoveryPage
     .getByRole("button", { name: "Abrir ZenControl" })
     .waitFor();
+  await staffChat
+    .getByRole("button", { name: "Fechar chat", exact: true })
+    .click();
+  await staff
+    .getByRole("button", { name: "Configurações", exact: true })
+    .click();
+  const importPanel = staff.getByRole("region", {
+    name: "Importação de planilha",
+  });
+  const ExcelJS = require("exceljs");
+  const importBook = new ExcelJS.Workbook();
+  const importSheet = importBook.addWorksheet("NOVEMBRO 2026");
+  importSheet.addRow([
+    "",
+    "SERVIÇOS",
+    "NOME DO ASSOCIADO",
+    "PLACA / CHASSI",
+    "IMEI",
+    "TERMO",
+    "CONCLUSÃO",
+    "TÉCNICO",
+    "REGIÃO",
+    "VOLUNTÁRIO",
+    "VALOR FIPE",
+    "FIPE",
+    "INCLUIU",
+    "CONCLUIU",
+    "SITUAÇÃO",
+  ]);
+  importSheet.addRow(["Verificado até aqui"]);
+  importSheet.addRow([
+    "",
+    "Instalação",
+    "Importação fictícia",
+    "IMP1A23",
+    "000007260510340",
+    "01/11/2026",
+    "02/11/2026",
+    "Técnico histórico",
+    "Niterói",
+    "",
+    "R$ 30.000,00",
+    "ALTA",
+    "Origem",
+    "Origem",
+    "CONCLUÍDO",
+  ]);
+  await importPanel
+    .getByLabel("Planilha XLSX (até 10 MB)")
+    .setInputFiles({
+      name: "controle-teste.xlsx",
+      mimeType:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      buffer: Buffer.from(await importBook.xlsx.writeBuffer()),
+    });
+  await importPanel
+    .getByRole("button", { name: "Analisar planilha", exact: true })
+    .click();
+  await importPanel
+    .getByRole("button", { name: "Prontas (1)", exact: true })
+    .waitFor();
+  const approveImport = importPanel.getByRole("button", {
+    name: "Confirmar importação de 1 registros",
+    exact: true,
+  });
+  assert.ok(await approveImport.isDisabled());
+  await importPanel
+    .getByLabel("Digite IMPORTAR HISTORICO")
+    .fill("IMPORTAR HISTORICO");
+  await staff.screenshot({
+    path: path.join(directory, "importacao-previa.png"),
+    fullPage: true,
+  });
+  await approveImport.click();
+  await importPanel
+    .getByText("Importação confirmada: 1 registros gravados.", { exact: true })
+    .waitFor();
+  summary.administratorSpreadsheetImport = "passed";
   summary.firstAccessRecoveryAndProactiveChat = "passed";
   summary.mobile320And390 = "passed";
   summary.historyAndDarkMode = "passed";
