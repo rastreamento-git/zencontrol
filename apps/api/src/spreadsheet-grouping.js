@@ -18,6 +18,7 @@ function groupRows(input, groups = []) {
   const rows = structuredClone(input),
     removed = new Set(),
     used = new Set();
+  const byId = new Map(rows.map((row) => [lineId(row), row]));
   for (const pair of groups) {
     if (
       !Array.isArray(pair) ||
@@ -26,7 +27,7 @@ function groupRows(input, groups = []) {
       pair[0] === pair[1]
     )
       fail(400, "Cada linha pode pertencer a um único agrupamento.");
-    const list = pair.map((id) => rows.find((r) => lineId(r) === id));
+    const list = pair.map((id) => byId.get(id));
     if (list.some((r) => !r || r.state !== "ready" || !kind(r)))
       fail(
         400,

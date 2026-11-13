@@ -370,7 +370,7 @@ function report(batch) {
     result: batch.result,
     counts,
     review_token: revision(batch.rows),
-    reviewed: batch.plan?.version === 6 && !!batch.plan?.reviewed,
+    reviewed: batch.plan?.version === 7 && !!batch.plan?.reviewed,
     selected_sheets: batch.plan?.selected_sheets || [],
     sheets: batch.plan?.sheets || [],
     groups: batch.plan?.groups || [],
@@ -408,7 +408,7 @@ function configureSpreadsheetImport(app, pool, auth) {
         selected_sheets: [],
         reviewed: false,
         groups: [],
-        version: 6,
+        version: 7,
       };
       const rows = [];
       const id = randomUUID();
@@ -445,7 +445,7 @@ function configureSpreadsheetImport(app, pool, auth) {
   );
   app.get("/api/spreadsheet-imports/capabilities", admin, (req, res) =>
     res.json({
-      version: 6,
+      version: 7,
       sheet_selection: true,
       manual_equipment_grouping: true,
       admin_archive: true,
@@ -464,7 +464,7 @@ function configureSpreadsheetImport(app, pool, auth) {
       if (!b) fail(404, "Importação não encontrada.");
       if (b.approved_at || new Date(b.expires_at) < new Date())
         fail(409, "Lote confirmado ou expirado. Envie novamente.");
-      if (b.plan?.version !== 6)
+      if (b.plan?.version !== 7)
         fail(409, "Gere uma nova prévia para escolher as abas.");
       const selected = req.body?.sheets;
       if (
@@ -521,7 +521,7 @@ function configureSpreadsheetImport(app, pool, auth) {
       [req.params.id],
     );
     if (!batch) fail(404, "Importação não encontrada.");
-    if (!batch.plan?.reviewed || batch.plan.version !== 6)
+    if (!batch.plan?.reviewed || batch.plan.version !== 7)
       fail(409, "Escolha as abas e a base para gerar a revisão completa.");
     await exportReview(batch, res);
   });
@@ -537,10 +537,7 @@ function configureSpreadsheetImport(app, pool, auth) {
     res.json(report(b));
   });
   app.post("/api/spreadsheet-imports/:id/approve", admin, async (req, res) => {
-    if (
-      req.body?.confirmation !== "IMPORTAR SERVICOS" ||
-      !/^[a-f0-9-]{36}$/.test(req.params.id)
-    )
+    if (req.body?.confirmed !== true || !/^[a-f0-9-]{36}$/.test(req.params.id))
       fail(400, "Confirme a importação dos serviços.");
     const result = await transaction(pool, async (db) => {
       const b = await d.one(
@@ -554,7 +551,7 @@ function configureSpreadsheetImport(app, pool, auth) {
         fail(409, "Prévia expirada. Envie a planilha novamente.");
       if (
         !b.plan?.reviewed ||
-        b.plan.version !== 6 ||
+        b.plan.version !== 7 ||
         !["HOT", "WARM", "COLD"].includes(b.plan.archive)
       )
         fail(

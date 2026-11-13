@@ -937,14 +937,14 @@ async function main() {
     .getByRole("button", { name: "Possíveis duplicidades (2)", exact: true })
     .click();
   await importPanel
-    .getByLabel("Selecionar JUNHO 2026 linha 2", { exact: true })
-    .check();
-  await importPanel
-    .getByLabel("Selecionar JUNHO 2026 linha 3", { exact: true })
-    .check();
+    .getByRole("button", {
+      name: "Selecionar todos os resultados (2)",
+      exact: true,
+    })
+    .click();
   await importPanel
     .getByRole("button", {
-      name: "Agrupar registros selecionados",
+      name: "Agrupar pares selecionados",
       exact: true,
     })
     .click();
@@ -967,13 +967,16 @@ async function main() {
     await exportDownload
   ).saveAs(path.join(directory, "revisao-completa.xlsx"));
   const approveImport = importPanel.getByRole("button", {
-    name: "Confirmar importação de 2 registros",
+    name: "Importar 2 atendimentos",
     exact: true,
   });
-  assert.ok(await approveImport.isDisabled());
-  await importPanel
-    .getByLabel("Digite IMPORTAR SERVICOS")
-    .fill("IMPORTAR SERVICOS");
+  assert.ok(await approveImport.isEnabled());
+  assert.equal(
+    await importPanel
+      .getByText("Digite IMPORTAR SERVICOS", { exact: true })
+      .count(),
+    0,
+  );
   await staff.screenshot({
     path: path.join(directory, "importacao-previa.png"),
     fullPage: true,

@@ -20,7 +20,7 @@ async function call(
   auth = token,
   contentType = "application/json",
 ) {
-  if (body?.confirmation && path.endsWith("/approve") && !body.review_token)
+  if (body?.confirmed && path.endsWith("/approve") && !body.review_token)
     body = { ...body, review_token: reviewTokens.get(path.split("/")[3]) };
   const r = await fetch(base + path, {
     method: body ? "POST" : "GET",
@@ -164,7 +164,7 @@ test("exige administrador, confirmação e prévia persistida; repetições não
   assert.equal(
     (
       await call("/api/spreadsheet-imports/" + p.data.id + "/approve", {
-        confirmation: "sim",
+        confirmed: false,
       })
     ).status,
     400,
@@ -173,7 +173,7 @@ test("exige administrador, confirmação e prévia persistida; repetições não
     (
       await call(
         "/api/spreadsheet-imports/" + p.data.id + "/approve",
-        { confirmation: "IMPORTAR SERVICOS" },
+        { confirmed: true },
         operator,
       )
     ).status,
@@ -182,7 +182,7 @@ test("exige administrador, confirmação e prévia persistida; repetições não
   const results = await Promise.all(
     [1, 2].map(() =>
       call("/api/spreadsheet-imports/" + p.data.id + "/approve", {
-        confirmation: "IMPORTAR SERVICOS",
+        confirmed: true,
         rows: [{ fake: true }],
       }),
     ),
@@ -223,7 +223,7 @@ test("revalida prévias concorrentes e recusa expiração, datas impossíveis e 
   assert.equal(
     (
       await call("/api/spreadsheet-imports/" + a.data.id + "/approve", {
-        confirmation: "IMPORTAR SERVICOS",
+        confirmed: true,
       })
     ).data.imported,
     1,
@@ -231,7 +231,7 @@ test("revalida prévias concorrentes e recusa expiração, datas impossíveis e 
   assert.equal(
     (
       await call("/api/spreadsheet-imports/" + b.data.id + "/approve", {
-        confirmation: "IMPORTAR SERVICOS",
+        confirmed: true,
       })
     ).data.imported,
     0,
@@ -244,7 +244,7 @@ test("revalida prévias concorrentes e recusa expiração, datas impossíveis e 
   assert.equal(
     (
       await call("/api/spreadsheet-imports/" + c.data.id + "/approve", {
-        confirmation: "IMPORTAR SERVICOS",
+        confirmed: true,
       })
     ).status,
     409,
@@ -372,7 +372,7 @@ test("migra pendentes e agenda para operação, vincula técnico único e bloque
   assert.equal(
     (
       await call("/api/spreadsheet-imports/" + p.data.id + "/approve", {
-        confirmation: "IMPORTAR SERVICOS",
+        confirmed: true,
       })
     ).data.imported,
     2,
@@ -406,7 +406,7 @@ test("migra pendentes e agenda para operação, vincula técnico único e bloque
   assert.equal(
     (
       await call("/api/spreadsheet-imports/" + stale.data.id + "/approve", {
-        confirmation: "IMPORTAR SERVICOS",
+        confirmed: true,
       })
     ).status,
     409,
@@ -432,7 +432,7 @@ test("converte duas TAGs em instalação com OS adicional sem movimentações au
   });
   const result = await call(
     "/api/spreadsheet-imports/" + p.data.id + "/approve",
-    { confirmation: "IMPORTAR SERVICOS" },
+    { confirmed: true },
   );
   assert.equal(result.data.imported, 1);
   assert.equal(result.data.additional_orders, 1);
@@ -505,7 +505,7 @@ test("seleciona somente os meses revisados e une rastreador + TAG com dois seria
   assert.equal(
     (
       await call(`/api/spreadsheet-imports/${id}/approve`, {
-        confirmation: "IMPORTAR SERVICOS",
+        confirmed: true,
       })
     ).status,
     409,
@@ -577,7 +577,7 @@ test("seleciona somente os meses revisados e une rastreador + TAG com dois seria
   assert.equal(
     (
       await call(`/api/spreadsheet-imports/${id}/approve`, {
-        confirmation: "IMPORTAR SERVICOS",
+        confirmed: true,
         review_token: review.data.review_token,
       })
     ).status,
@@ -589,7 +589,7 @@ test("seleciona somente os meses revisados e une rastreador + TAG com dois seria
     archive: "HOT",
   });
   const result = await call(`/api/spreadsheet-imports/${id}/approve`, {
-    confirmation: "IMPORTAR SERVICOS",
+    confirmed: true,
     review_token: final.data.review_token,
   });
   assert.equal(result.data.imported, 1);
@@ -688,7 +688,7 @@ test("administrador escolhe a base e exporta todos os campos além do resumo", a
     "Campo complementar integral",
   );
   const result = await call(endpoint + "/approve", {
-    confirmation: "IMPORTAR SERVICOS",
+    confirmed: true,
     review_token: cold.data.review_token,
   });
   assert.equal(result.data.imported, 1);
@@ -749,7 +749,7 @@ test("duplicidade usa nome e veículo, agrupa dois rastreadores e sinaliza concl
   );
 
   const approved = await call(endpoint + "/approve", {
-    confirmation: "IMPORTAR SERVICOS",
+    confirmed: true,
     review_token: review.data.review_token,
   });
   assert.equal(approved.data.imported, 1);
@@ -776,4 +776,42 @@ test("duplicidade usa nome e veículo, agrupa dois rastreadores e sinaliza concl
   assert.equal(check.filter((r) => r.state === "ready").length, 2);
   const existing = await stage(await workbook([row("WXY5Z67")]));
   assert.equal(existing.data.counts.duplicate, 1);
+});
+
+test("seleção em lote alcança todas as páginas e mantém grupos ambíguos para revisão", () => {
+  const {
+    planGroups,
+  } = require("../../../packages/domain/import-selection.mjs");
+  const rows = [];
+  for (let group = 0; group < 75; group++)
+    for (let i = 0; i < 2; i++)
+      rows.push({
+        sheet: "NOVEMBRO 2026",
+        row: rows.length + 2,
+        state: "duplicate",
+        data: {
+          service: "Instalação",
+          customer_name: "Cliente " + group,
+          vehicle: "ABC" + group,
+          imei: "000" + group + i,
+        },
+      });
+  const all = planGroups(
+    rows,
+    rows.map((r) => r.sheet + ":" + r.row),
+  );
+  assert.equal(all.pairs.length, 75);
+  assert.equal(all.ambiguous, 0);
+  const odd = [
+    ...rows.slice(0, 2),
+    { ...rows[0], row: 999 },
+    { ...rows[2], row: 1000 },
+  ];
+  const review = planGroups(
+    odd,
+    odd.map((r) => r.sheet + ":" + r.row),
+  );
+  assert.equal(review.pairs.length, 0);
+  assert.equal(review.ambiguous, 1);
+  assert.equal(review.singles, 1);
 });

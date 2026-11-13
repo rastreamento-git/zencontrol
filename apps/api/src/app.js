@@ -102,6 +102,7 @@ function createApp(pool, env = process.env) {
   app.use("/api/technician/requests", express.json({ limit: "6mb" }));
   app.use("/api/evidence", express.json({ limit: "24mb" }));
   app.use("/api/finance-v2/closings", express.json({ limit: "6mb" }));
+  app.use("/api/spreadsheet-imports", express.json({ limit: "2mb" }));
   app.use(express.json({ limit: "512kb" }));
   app.get("/healthz", async (req, res) => {
     try {
@@ -112,7 +113,7 @@ function createApp(pool, env = process.env) {
         media_storage: cfg.MEDIA_STORAGE || "local",
         chat_directory_version: chatDirectoryVersion,
         chat_photo_version: chatPhotoVersion,
-        spreadsheet_import_version: 6,
+        spreadsheet_import_version: 7,
       });
     } catch {
       res.status(503).json({ status: "unavailable" });
