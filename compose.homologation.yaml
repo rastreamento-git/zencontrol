@@ -1,0 +1,20 @@
+# Optional REAL PostgreSQL for automated integration/concurrency tests only.
+# Demo launcher uses its own persistent local PostgreSQL WASM databases.
+services:
+  postgres-test:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: zen_homolog
+      POSTGRES_PASSWORD: local-test-only-password
+      POSTGRES_DB: zen_homolog
+    ports:
+      - "127.0.0.1:5444:5432"
+    volumes:
+      - zen-homolog-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zen_homolog -d zen_homolog"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+volumes:
+  zen-homolog-postgres:

@@ -1,0 +1,86 @@
+.zen-import {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  margin-top: 24px;
+  padding: 20px;
+  border: 1px solid var(--ep-line);
+  border-radius: 14px;
+  background: var(--ep-surface);
+}
+.zen-import h2,
+.zen-import h3,
+.zen-import p {
+  margin: 0;
+}
+.zen-import label {
+  display: grid;
+  gap: 8px;
+}
+.zen-import input {
+  max-width: 100%;
+  padding: 10px;
+  color: var(--ep-text);
+  background: var(--ep-canvas);
+  border: 1px solid var(--ep-line);
+  border-radius: 8px;
+}
+.zen-import > button {
+  justify-self: start;
+}
+.zen-import-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.zen-import-filters [aria-pressed="true"] {
+  background: var(--ep-primary-soft);
+}
+.zen-import-table {
+  overflow: auto;
+  max-height: 440px;
+}
+.zen-import table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.zen-import td,
+.zen-import th {
+  padding: 10px;
+  border-bottom: 1px solid var(--ep-line);
+  text-align: left;
+  vertical-align: top;
+}
+.zen-import fieldset {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--ep-line);
+  border-radius: 10px;
+  min-width: 0;
+}
+.zen-import dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.zen-import ul {
+  display: grid;
+  gap: 8px;
+  padding-left: 20px;
+}
+
+.zen-import-note {
+  display: block;
+  margin-top: 6px;
+  color: var(--ep-muted);
+  font-size: 12px;
+}
+.zen-import input[type="checkbox"] {
+  margin-right: 8px;
+}
+.zen-import select {
+  padding: 10px;
+  border-radius: 8px;
+  max-width: 360px;
+}

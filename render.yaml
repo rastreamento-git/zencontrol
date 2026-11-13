@@ -49,6 +49,8 @@ services:
         sync: false
       - key: ZEN_PUBLIC_URL
         sync: false
+      - key: TECHNICIAN_PORTAL_URL
+        sync: false
       - key: CORS_ORIGINS
         sync: false
       - key: INTEGRATIONS_ENABLED

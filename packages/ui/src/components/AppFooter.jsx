@@ -1,6 +1,6 @@
 export default function AppFooter({
   product = "ZenControl",
-  version = "6.1.0",
+  version = "6.4.0",
 }) {
   return (
     <footer className="page-footer">

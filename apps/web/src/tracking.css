@@ -1,0 +1,468 @@
+.tracking-app {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--ep-canvas);
+  color: var(--ep-text);
+}
+
+.tracking-boundary {
+  width: min(var(--zen-width), 100%);
+  padding-inline: var(--zen-gutter);
+  margin-inline: auto;
+}
+
+.tracking-header {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  background: var(--zen-topbar);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--ep-line);
+}
+
+.tracking-header-inner {
+  min-height: 68px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: clamp(12px, 2vw, 30px);
+  padding-block: 10px;
+}
+
+.tracking-brand,
+.tracking-account,
+.tracking-header-nav {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.tracking-brand {
+  font-family: var(--zen-font-display);
+  font-size: 1.18rem;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  text-decoration: none;
+  color: var(--ep-text);
+  white-space: nowrap;
+}
+
+.tracking-brand .zen-mark {
+  flex: 0 0 auto;
+}
+
+.tracking-header-nav {
+  gap: clamp(16px, 2.35vw, 36px);
+  justify-content: center;
+  flex: 1;
+}
+
+.tracking-header-nav a {
+  font-size: 0.93rem;
+  color: var(--ep-muted);
+  text-decoration: none;
+}
+
+.tracking-header-nav a:hover {
+  color: var(--ep-text);
+}
+
+.tracking-identity {
+  display: grid;
+  gap: 2px;
+  max-width: 13ch;
+  text-align: right;
+  margin-inline: 6px 3px;
+  font-size: 0.8rem;
+}
+
+.tracking-identity b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tracking-identity small {
+  color: var(--ep-muted);
+}
+
+.tracking-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.tracking-main[role="status"] {
+  padding: 48px var(--zen-gutter);
+  color: var(--ep-muted);
+}
+
+.tracking-hero {
+  position: relative;
+  isolation: isolate;
+  padding-block: clamp(58px, 9.3vw, 126px) clamp(52px, 7vw, 92px);
+  border-bottom: 1px solid var(--ep-line);
+}
+
+.tracking-hero::before,
+.tracking-hero::after {
+  position: absolute;
+  content: "";
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.tracking-hero::before {
+  background: var(--zen-grid);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at 50% 0%, #000, transparent 72%);
+}
+
+.tracking-hero::after {
+  background: radial-gradient(
+    62% 58% at 50% 0%,
+    var(--zen-glow),
+    transparent 74%
+  );
+}
+
+.tracking-intro {
+  max-width: 940px;
+}
+
+.tracking-eyebrow,
+.tracking-card-category,
+.tracking-section-heading > span {
+  font-family: var(--zen-font-mono);
+  font-size: 0.81rem;
+  font-weight: 500;
+  letter-spacing: 0.11em;
+}
+
+.tracking-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 22px;
+  color: var(--zen-signal);
+}
+
+.tracking-eyebrow i,
+.tracking-card-category i {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.tracking-eyebrow i {
+  box-shadow: 0 0 13px var(--zen-signal);
+}
+
+.tracking-intro h1 {
+  margin: 0;
+  color: var(--ep-text);
+  font-family: var(--zen-font-display);
+  font-size: clamp(2.55rem, 5.55vw, 72px);
+  line-height: 1.03;
+  letter-spacing: -0.038em;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.tracking-intro h1 span {
+  display: block;
+  color: var(--ep-muted);
+}
+
+.tracking-description {
+  max-width: 42ch;
+  margin: 24px 0 0;
+  color: var(--ep-muted);
+  font-size: clamp(1rem, 1.48vw, 18px);
+  line-height: 1.62;
+}
+
+.tracking-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: clamp(22px, 3vw, 39px);
+}
+
+.tracking-hero-actions a {
+  min-height: 48px;
+  padding-inline: 20px;
+  text-decoration: none;
+  font-size: 1rem;
+}
+
+.tracking-app .tracking-hero-actions .secondary-button {
+  background: transparent;
+  color: var(--ep-text);
+  border: 1px solid var(--ep-line);
+}
+
+.tracking-hero > .tracking-boundary > .error-banner {
+  margin-block: 20px 0;
+}
+
+.tracking-catalog {
+  margin-top: clamp(36px, 5vw, 70px);
+}
+
+.tracking-catalog,
+.tracking-shortcuts {
+  scroll-margin-top: 90px;
+}
+
+.tracking-section-heading {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin-bottom: 12px;
+}
+
+.tracking-section-heading h2 {
+  margin: 0;
+  font-family: var(--zen-font-display);
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.tracking-section-heading > span {
+  color: var(--ep-muted);
+  letter-spacing: 0.03em;
+}
+
+.tracking-apps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  overflow: clip;
+  border: 1px solid var(--ep-line);
+  border-radius: var(--zen-radius);
+  background: var(--ep-surface);
+}
+
+.tracking-card {
+  --card-accent: var(--zen-stock);
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  padding: clamp(18px, 2vw, 25px);
+  color: var(--ep-text);
+  background: var(--ep-surface);
+  text-align: left;
+  transition: background 160ms ease;
+}
+
+.tracking-card + .tracking-card {
+  border-inline-start: 1px solid var(--ep-line);
+}
+
+.tracking-card[data-product="control"] {
+  --card-accent: var(--zen-control);
+}
+
+.tracking-card[data-product="field"] {
+  --card-accent: var(--zen-field);
+}
+
+.tracking-card:not(:disabled):hover {
+  background: var(--ep-subtle);
+}
+
+.tracking-card:focus-visible {
+  outline-offset: -3px;
+}
+
+.tracking-card-top {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.tracking-card-top .zen-mark {
+  flex: 0 0 auto;
+}
+
+.tracking-card-category {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--ep-muted);
+  line-height: 1.5;
+}
+
+.tracking-card-category i {
+  background: var(--card-accent);
+}
+
+.tracking-card-name {
+  color: var(--card-accent);
+  font-family: var(--zen-font-display);
+  font-weight: 600;
+  font-size: clamp(1.4rem, 2.1vw, 26px);
+  letter-spacing: -0.025em;
+  line-height: 1.25;
+}
+
+.tracking-card-description {
+  color: var(--ep-muted);
+  line-height: 1.55;
+  font-size: 0.93rem;
+}
+
+.tracking-features {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 3px;
+  color: var(--ep-muted);
+  font-size: 0.77rem;
+}
+
+.tracking-features > span + span::before {
+  content: "·";
+  margin-right: 7px;
+}
+
+.tracking-card-action {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--card-accent);
+  margin-top: auto;
+  padding-top: 7px;
+  font-weight: 700;
+}
+
+.tracking-shortcuts {
+  padding-block: clamp(38px, 6vw, 80px);
+}
+
+.tracking-shortcuts h2 {
+  margin: 0 0 24px;
+  color: var(--ep-text);
+  font-family: var(--zen-font-display);
+  font-size: clamp(1.7rem, 3.2vw, 42px);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+}
+
+.tracking-shortcut-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.tracking-shortcut-grid a {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 76px;
+  padding: 14px 16px;
+  background: var(--ep-surface);
+  color: var(--ep-text);
+  border: 1px solid var(--ep-line);
+  border-radius: 14px;
+  text-decoration: none;
+}
+
+.tracking-shortcut-grid a:hover {
+  background: var(--ep-subtle);
+  border-color: var(--ep-primary-ink);
+}
+
+.tracking-shortcut-grid strong,
+.tracking-shortcut-grid small {
+  display: block;
+}
+
+.tracking-shortcut-grid small {
+  margin-top: 3px;
+  color: var(--ep-muted);
+}
+
+.tracking-shortcut-grid a > svg:first-child {
+  color: var(--zen-control);
+}
+
+@media (max-width: 950px) {
+  .tracking-identity {
+    display: none;
+  }
+}
+
+@media (max-width: 700px) {
+  .tracking-header-nav {
+    display: none;
+  }
+
+  .tracking-hero {
+    padding-top: 50px;
+  }
+
+  .tracking-apps,
+  .tracking-shortcut-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tracking-card + .tracking-card {
+    border-inline-start: 0;
+    border-block-start: 1px solid var(--ep-line);
+  }
+
+  .tracking-shortcut-grid a {
+    min-height: 66px;
+  }
+}
+
+@media (max-width: 440px) {
+  .tracking-brand {
+    font-size: 1.03rem;
+    gap: 6px;
+  }
+
+  .tracking-brand .zen-mark {
+    width: 28px;
+    height: 28px;
+  }
+
+  .tracking-header-inner,
+  .tracking-account {
+    gap: 4px;
+  }
+
+  .tracking-account .zen-profile-trigger > span,
+  .tracking-account .zen-theme-control > svg {
+    display: none;
+  }
+
+  .tracking-account .zen-theme-control {
+    padding-inline: 5px;
+  }
+
+  .tracking-account .zen-theme-control select {
+    width: 66px;
+    min-width: 0;
+    font-size: 11px;
+  }
+
+  .tracking-account .icon-button,
+  .tracking-account .zen-profile-trigger {
+    width: 39px;
+    min-width: 39px;
+    padding-inline: 0;
+  }
+}

@@ -26,6 +26,15 @@ function mock(t, handler) {
 }
 test("SGA plate search loads full ID record, volunteer and only whitelisted document data", async (t) => {
   const calls = mock(t, (path) => {
+    if (path === "/listar/classificacao-veiculo/todos")
+      return [
+        {
+          codigo: 21,
+          descricao: "Instalação agendada (atual)",
+          situacao: "ATIVO",
+        },
+      ];
+    if (path.startsWith("/listar/")) return [];
     if (path === "/usuario/autenticar")
       return { token_usuario: "test-only-user-token" };
     if (path === "/veiculo/buscar/QAT1A23/placa")
@@ -44,6 +53,8 @@ test("SGA plate search loads full ID record, volunteer and only whitelisted docu
         marca: null,
         descricao_modelo: "Modelo completo",
         cpf: "000.000.000-00",
+        ddd_celular: "21",
+        telefone_celular: "21999999999",
         rg: "00",
         renavam: "00000000000",
         ano_fabricacao: 2025,
@@ -67,8 +78,9 @@ test("SGA plate search loads full ID record, volunteer and only whitelisted docu
   assert.equal(result.document_data.model, "Modelo completo");
   assert.equal(result.document_data.cpf_cnpj, "000.000.000-00");
   assert.equal(result.document_data.year, "2025/2026");
+  assert.equal(result.contact, "21999999999");
   assert.equal(result.volunteer, "Voluntário de exemplo");
-  assert.equal(result.sga_classification, "Instalação agendada");
+  assert.equal(result.sga_classification, "Instalação agendada (atual)");
   assert.equal(result.document_data.customer_address, "Rua fictícia, 10");
   assert.ok(!JSON.stringify(result).includes("never-copy"));
   assert.equal(result.service, undefined);
@@ -118,4 +130,103 @@ test("invalid SGA search is rejected before network access and empty results do 
   await assert.rejects(client.lookup("abc"), /válido/);
   assert.equal(calls.length, 0);
   await assert.rejects(client.lookup("QAT1A23"), /não encontrado/);
+});
+test("SGA rejects multiple matches and inconsistent full vehicle identities", async (t) => {
+  let ambiguous = true;
+  mock(t, (path) => {
+    if (path === "/usuario/autenticar") return { token_usuario: "test-token" };
+    if (path.endsWith("/QAT1A23/placa"))
+      return ambiguous
+        ? [
+            { codigo_veiculo: 42, placa: "QAT1A23" },
+            { codigo_veiculo: 43, placa: "QAT1A23" },
+          ]
+        : [{ codigo_veiculo: 42, placa: "QAT1A23" }];
+    if (path.endsWith("/42/id"))
+      return { codigo_veiculo: 42, placa: "OUT1A23", nome: "Outra pessoa" };
+    return [];
+  });
+  const client = new SGAClient(cfg);
+  await assert.rejects(client.lookup("QAT1A23"), /Mais de um veículo/);
+  ambiguous = false;
+  await assert.rejects(client.lookup("QAT1A23"), /mesmo veículo/);
+  await assert.rejects(
+    client.lookup({ sga_id: "42", term: "QAT1A23" }),
+    /mesmo veículo/,
+  );
+});
+test("SGA read-only mode blocks all write methods before network access", async (t) => {
+  const calls = mock(t, () => {
+    throw Error("Unexpected network");
+  });
+  const client = new SGAClient({
+    ...cfg,
+    INTEGRATIONS_ENABLED: false,
+    SGA_READ_ENABLED: true,
+  });
+  assert.equal(client.ready(), true);
+  await assert.rejects(client.classification("42", "1"), /desativadas/);
+  await assert.rejects(client.upload("42", [], "QA"), /desativadas/);
+  assert.equal(calls.length, 0);
+});
+
+test("consulta situações do associado e financeira, usa classificações atuais e não presume adimplência", async (t) => {
+  let finance = "ADIMPLENTE";
+  mock(t, (path) => {
+    if (path === "/usuario/autenticar") return { token_usuario: "test-token" };
+    if (path === "/listar/classificacao-veiculo/todos")
+      return [
+        { codigo: 21, descricao: "Instalação pendente", situacao: "ATIVO" },
+      ];
+    if (path === "/listar/classificacao-associado/todos")
+      return [{ codigo: 2, descricao: "Associado padrão", situacao: "ATIVO" }];
+    if (path === "/listar/situacao/todos")
+      return [
+        { codigo_situacao: 1, descricao_situacao: "ATIVO", situacao: "ATIVO" },
+      ];
+    if (path.startsWith("/listar/")) return [];
+    if (
+      path === "/veiculo/buscar/SGA1A23/placa" ||
+      path === "/veiculo/buscar/42/id"
+    )
+      return {
+        codigo_veiculo: 42,
+        codigo_associado: 7,
+        placa: "SGA1A23",
+        nome: "Associado fictício",
+        cpf: "00000000000",
+        codigo_situacao: 1,
+        codigo_classificacao: 21,
+      };
+    if (path === "/associado/buscar/7/codigo")
+      return {
+        codigo_associado: 7,
+        cpf: "00000000000",
+        codigo_classificacao: 2,
+        descricao_situacao: "ATIVO",
+        senha: "NEVER-COPY",
+      };
+    if (path === "/buscar/situacao-associado/00000000000")
+      return { codigo_associado: 7, descricao: "ATIVO" };
+    if (path === "/buscar/situacao-financeira-veiculo/42")
+      return finance === null
+        ? { status: 503, data: { error: "Falha simulada" } }
+        : {
+            codigo_veiculo: 42,
+            placa: "SGA1A23",
+            situacao_financeira: finance,
+          };
+    throw Error(path);
+  });
+  const client = new SGAClient({ ...cfg, SGA_SCHEDULING_GUARD: true });
+  const good = await client.lookup("SGA1A23");
+  assert.equal(good.sga_assessment.eligible, true);
+  assert.equal(good.sga_assessment.customer_classification, "Associado padrão");
+  assert.equal(good.sga_assessment.customer_status, "ATIVO");
+  assert.ok(good.sga_assessment.checked_at);
+  assert.ok(!JSON.stringify(good).includes("NEVER-COPY"));
+  finance = "INADIMPLENTE";
+  assert.equal((await client.lookup("SGA1A23")).sga_assessment.eligible, false);
+  finance = null;
+  assert.equal((await client.lookup("SGA1A23")).sga_assessment.eligible, false);
 });

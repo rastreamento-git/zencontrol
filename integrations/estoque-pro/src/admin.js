@@ -10,6 +10,8 @@ const tables = [
   "movimentacoes",
   "eventos_seriais",
   "zencontrol_installations",
+  "adesivo_saldos",
+  "adesivo_movimentos",
 ];
 function canonical(value) {
   if (Array.isArray(value)) return value.map(canonical);
@@ -64,21 +66,19 @@ function validateBackup(value) {
     typeof value.data !== "object"
   )
     fail(400, "Arquivo não é um backup compatível do inventário.");
-  const incomingTables = Object.keys(value.data).sort();
-  const legacyTables = tables
-    .filter((t) => t !== "zencontrol_installations")
-    .toSorted();
-  const legacy = incomingTables.join(",") === legacyTables.join(",");
+  const optional = [
+    "zencontrol_installations",
+    "adesivo_saldos",
+    "adesivo_movimentos",
+  ];
+  const required = tables.filter((t) => !optional.includes(t));
   if (
-    (!legacy &&
-      Object.keys(value.data).sort().join(",") !==
-        tables.toSorted().join(",")) ||
-    (legacy ? legacyTables : tables).some(
-      (t) =>
-        !Array.isArray(value.data[t]) ||
-        value.data[t].some(
-          (r) => !r || typeof r !== "object" || Array.isArray(r),
-        ),
+    Object.keys(value.data).some((t) => !tables.includes(t)) ||
+    required.some((t) => !Array.isArray(value.data[t])) ||
+    Object.values(value.data).some(
+      (rows) =>
+        !Array.isArray(rows) ||
+        rows.some((r) => !r || typeof r !== "object" || Array.isArray(r)),
     )
   )
     fail(400, "Tabelas do backup inválidas.");
@@ -87,9 +87,13 @@ function validateBackup(value) {
       400,
       "O conteúdo do backup não confere com sua verificação de integridade.",
     );
-  return legacy
-    ? { ...value, data: { ...value.data, zencontrol_installations: [] } }
-    : value;
+  return {
+    ...value,
+    data: {
+      ...Object.fromEntries(optional.map((t) => [t, []])),
+      ...value.data,
+    },
+  };
 }
 async function verifyCurrent(client, expected) {
   if (typeof expected !== "string" || !/^[a-f0-9]{64}$/.test(expected))
@@ -104,6 +108,14 @@ async function verifyCurrent(client, expected) {
 }
 function configureAdmin(app, pool, auth) {
   app.use("/api/admin", auth.requireAdmin);
+  app.use("/api/admin/users", (req, res, next) => {
+    if (auth.federated)
+      fail(
+        409,
+        "Gerencie as contas ZEN em ZenControl → Usuários. O perfil vale também para o Estoque Pro.",
+      );
+    next();
+  });
   app.get("/api/admin/users", async (req, res) =>
     res.json(
       (await pool.query("SELECT * FROM usuarios ORDER BY nome,id")).rows.map(
@@ -156,7 +168,10 @@ function configureAdmin(app, pool, auth) {
       if (!row) fail(404, "Usuário não encontrado.");
       const active = req.body.ativo ?? row.ativo,
         role = papel ?? row.papel;
-      if (id === req.user.id && (!active || role !== "admin"))
+      if (
+        id === req.user.id &&
+        (!active || (row.papel === "admin" && role !== "admin"))
+      )
         fail(
           409,
           "Você não pode desativar ou retirar seu próprio perfil de administrador.",
@@ -207,11 +222,11 @@ function configureAdmin(app, pool, auth) {
       const data = await verifyCurrent(client, req.body.expectedChecksum);
       if (scope === "all")
         await client.query(
-          "TRUNCATE zencontrol_installations,eventos_seriais,movimentacoes,equipamentos_seriais,estoque_tecnicos,tecnicos,produtos RESTART IDENTITY",
+          "TRUNCATE adesivo_movimentos,adesivo_saldos,zencontrol_installations,eventos_seriais,movimentacoes,equipamentos_seriais,estoque_tecnicos,tecnicos,produtos RESTART IDENTITY",
         );
       else {
         await client.query(
-          "TRUNCATE zencontrol_installations,eventos_seriais,movimentacoes,equipamentos_seriais,estoque_tecnicos RESTART IDENTITY",
+          "TRUNCATE adesivo_movimentos,adesivo_saldos,zencontrol_installations,eventos_seriais,movimentacoes,equipamentos_seriais,estoque_tecnicos RESTART IDENTITY",
         );
         await client.query("UPDATE produtos SET quantidade_matriz=0");
       }
@@ -232,7 +247,7 @@ function configureAdmin(app, pool, auth) {
     await transaction(pool, async (client) => {
       await verifyCurrent(client, req.body.expectedChecksum);
       await client.query(
-        "TRUNCATE zencontrol_installations,eventos_seriais,movimentacoes,equipamentos_seriais,estoque_tecnicos,tecnicos,produtos RESTART IDENTITY",
+        "TRUNCATE adesivo_movimentos,adesivo_saldos,zencontrol_installations,eventos_seriais,movimentacoes,equipamentos_seriais,estoque_tecnicos,tecnicos,produtos RESTART IDENTITY",
       );
       for (const table of tables) {
         // Table/column names come only from our fixed schema; values are parameterized.

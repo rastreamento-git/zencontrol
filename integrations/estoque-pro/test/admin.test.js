@@ -45,7 +45,7 @@ async function makeUser(loginName = "operador", role = "operador") {
   const r = await request("admin/users", {
     login: loginName,
     nome: "Pessoa de teste",
-    password: "new-user-password",
+    password: "User1!ab",
     papel: role,
   });
   assert.equal(r.status, 201);
@@ -87,13 +87,13 @@ test("bootstrap creates a hashed administrator; user endpoints never expose pass
   assert.equal((await login("admin", "incorrect-password")).status, 401);
   assert.equal((await login("unknown-user", "incorrect-password")).status, 401);
 });
-test("operators can move stock but secret codes cannot grant administrative permissions", async () => {
+test("operators have complete stock access; destructive actions still require confirmation and backup", async () => {
   const person = await makeUser();
-  const auth = await login(person.login, "new-user-password");
+  const auth = await login(person.login, "User1!ab");
   assert.equal(auth.status, 200);
   const token = auth.body.token;
   for (const path of ["admin/users", "admin/backup", "admin/audit"])
-    assert.equal((await get(path, token)).status, 403);
+    assert.equal((await get(path, token)).status, 200);
   assert.equal(
     (
       await request(
@@ -101,25 +101,25 @@ test("operators can move stock but secret codes cannot grant administrative perm
         {
           login: "intruder",
           nome: "Intruder",
-          password: "intruder-password",
+          password: "Intruder1!ab",
           papel: "admin",
         },
         "POST",
         token,
       )
     ).status,
-    403,
+    201,
   );
   assert.equal(
     (
       await request(
         "admin/reset",
-        { confirmation: "thereisnourflevel", password: "new-user-password" },
+        { confirmation: "thereisnourflevel", password: "User1!ab" },
         "POST",
         token,
       )
     ).status,
-    403,
+    400,
   );
   const id = await product();
   assert.equal(
@@ -155,7 +155,7 @@ test("user validation, duplicate login and deactivation revoke active sessions; 
       await request("admin/users", {
         login: "invalid space",
         nome: "Ana",
-        password: "valid-user-password",
+        password: "Valid1!ab",
       })
     ).status,
     400,
@@ -166,12 +166,12 @@ test("user validation, duplicate login and deactivation revoke active sessions; 
       await request("admin/users", {
         login: "OPERADOR",
         nome: "Ana",
-        password: "new-user-password",
+        password: "User1!ab",
       })
     ).status,
     409,
   );
-  const token = (await login("operador", "new-user-password")).body.token;
+  const token = (await login("operador", "User1!ab")).body.token;
   assert.equal((await get("produtos", token)).status, 200);
   assert.equal(
     (await request(`admin/users/${person.id}`, { ativo: false }, "PUT")).status,

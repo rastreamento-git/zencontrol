@@ -1,0 +1,489 @@
+/* ZenTracking · identidade visual compartilhada pelos três frontends. */
+@font-face {
+  font-family: Manrope;
+  src: url("@fontsource-variable/manrope/files/manrope-latin-wght-normal.woff2")
+    format("woff2");
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: Sora;
+  src: url("@fontsource-variable/sora/files/sora-latin-wght-normal.woff2")
+    format("woff2");
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2")
+    format("woff2");
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+}
+
+:root,
+:root[data-theme="light"] {
+  --zen-font-body: Manrope, "Segoe UI", system-ui, sans-serif;
+  --zen-font-display: Sora, var(--zen-font-body);
+  --zen-font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --zen-radius: 20px;
+  --zen-shadow: none;
+  --zen-width: 1152px;
+  --zen-gutter: clamp(16px, 3.2vw, 28px);
+  --ep-canvas: #f2f6fc;
+  --ep-surface: #ffffff;
+  --ep-subtle: #eaf0f8;
+  --ep-text: #13233c;
+  --ep-muted: #4e627d;
+  --ep-line: #d5e0ee;
+  --ep-sidebar: #f8fbff;
+  --ep-primary: #195ccd;
+  --ep-primary-hover: #144cab;
+  --ep-primary-soft: #e0ecff;
+  --ep-primary-ink: #184ea8;
+  --zen-signal: #177444;
+  --zen-stock: #166ab7;
+  --zen-control: #8c5608;
+  --zen-field: #08765b;
+  --zen-glow: #6198fa33;
+  --zen-grid-line: #20407414;
+  --zen-topbar: #f8fbfff2;
+  --zen-work-glow: #6398ec16;
+  --zen-grid:
+    linear-gradient(var(--zen-grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--zen-grid-line) 1px, transparent 1px);
+  font-family: var(--zen-font-body);
+}
+
+:root[data-theme="dark"] {
+  --ep-canvas: #040f23;
+  --ep-surface: #09182f;
+  --ep-subtle: #122239;
+  --ep-text: #edf2f8;
+  --ep-muted: #94a6be;
+  --ep-line: #22334c;
+  --ep-sidebar: #071429;
+  --ep-primary: #0e64e5;
+  --ep-primary-hover: #145bc9;
+  --ep-primary-soft: #15315a;
+  --ep-primary-ink: #9fc6ff;
+  --ep-green-soft: #0c302c;
+  --ep-green-ink: #85e4bb;
+  --ep-blue-soft: #102a4d;
+  --ep-blue-ink: #9cc9ff;
+  --ep-purple-soft: #252445;
+  --ep-purple-ink: #d2c6ff;
+  --ep-amber-soft: #342716;
+  --ep-amber-ink: #f6c571;
+  --ep-red-soft: #381f2b;
+  --ep-red-ink: #ffa4b1;
+  --zen-signal: #6af18f;
+  --zen-stock: #319cfc;
+  --zen-control: #f5ae39;
+  --zen-field: #4ae2ac;
+  --zen-glow: #3480fc59;
+  --zen-grid-line: #edf2f80d;
+  --zen-topbar: #040f23ed;
+  --zen-work-glow: #3480fc18;
+}
+
+body {
+  background: var(--ep-canvas);
+  color: var(--ep-text);
+  font-family: var(--zen-font-body);
+}
+
+.zen-shell,
+.tracking-app,
+.auth-page {
+  --zen-app-accent: var(--zen-stock);
+}
+
+.zen-shell-control {
+  --zen-app-accent: var(--zen-control);
+}
+
+.zen-shell-field {
+  --zen-app-accent: var(--zen-field);
+}
+
+.zen-shell :is(h1, h2, h3),
+.zen-shell .brand strong,
+.auth-page :is(h1, h2) {
+  font-family: var(--zen-font-display);
+  letter-spacing: -0.025em;
+}
+
+.zen-shell :is(.eyebrow, .portal-eyebrow, .breadcrumb, .nav-group > p),
+.auth-story .eyebrow {
+  font-family: var(--zen-font-mono);
+  font-weight: 500;
+  letter-spacing: 0.12em;
+}
+
+.zen-shell :is(.eyebrow, .portal-eyebrow) {
+  color: var(--zen-app-accent);
+}
+
+.zen-shell .app-sidebar {
+  background: var(--ep-sidebar);
+  border-color: var(--ep-line);
+}
+
+.zen-shell .app-sidebar .brand {
+  border-bottom: 1px solid var(--ep-line);
+}
+
+.zen-shell :is(.app-sidebar, .portal-header) .brand strong > span {
+  color: var(--zen-app-accent);
+}
+
+.zen-shell :is(.topbar, .portal-header) {
+  background: var(--zen-topbar);
+  border-color: var(--ep-line);
+}
+
+.zen-shell .nav-item {
+  border-radius: 10px;
+}
+
+.zen-shell .nav-item.is-active {
+  color: var(--ep-text);
+  background: color-mix(in srgb, var(--zen-app-accent) 12%, var(--ep-sidebar));
+  box-shadow: inset 2px 0 var(--zen-app-accent);
+}
+
+.zen-shell .nav-item.is-active > svg:first-child {
+  color: var(--zen-app-accent);
+}
+
+.zen-shell .app-content,
+.zen-shell.portal-app {
+  background:
+    radial-gradient(
+      680px 340px at 58% 0%,
+      var(--zen-work-glow),
+      transparent 75%
+    ),
+    var(--ep-canvas);
+}
+
+.zen-shell
+  :is(.dashboard-intro, .page-intro, .portal-intro, .field-selector-intro) {
+  align-items: flex-start;
+}
+
+.zen-shell :is(.dashboard-intro, .page-intro) h2,
+.zen-shell :is(.portal-intro, .field-selector-intro, .eco-home-hero) h1 {
+  font-size: clamp(1.65rem, 2.75vw, 2.6rem);
+  font-weight: 600;
+  line-height: 1.15;
+}
+
+.zen-shell-field .portal-areas button.is-active {
+  background: color-mix(in srgb, var(--zen-field) 14%, var(--ep-surface));
+  color: var(--zen-field);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--zen-field) 28%, var(--ep-line));
+}
+
+.zen-shell-field .eco-home-hero {
+  background:
+    radial-gradient(75% 120% at 85% 0%, var(--zen-work-glow), transparent 75%),
+    var(--ep-surface);
+  border: 1px solid var(--ep-line);
+  border-radius: var(--zen-radius);
+}
+
+.zen-shell
+  :is(
+    .dashboard-panel,
+    .stat-card,
+    .stock-overview,
+    .portal-order,
+    .portal-step,
+    .portal-service-summary,
+    .eco-card
+  ),
+.pro-dialog {
+  border-radius: var(--zen-radius);
+  border-color: var(--ep-line);
+  box-shadow: none;
+}
+
+.zen-shell
+  :is(
+    .dashboard-panel,
+    .stat-card,
+    .stock-overview,
+    .portal-order,
+    .portal-step,
+    .portal-service-summary
+  ),
+.pro-dialog {
+  background: var(--ep-surface);
+  color: var(--ep-text);
+}
+
+.zen-shell .stat-card {
+  position: relative;
+}
+
+.zen-shell .stat-card::before {
+  position: absolute;
+  content: "";
+  inset: 0 auto auto 20px;
+  height: 3px;
+  width: 26px;
+  border-radius: 0 0 6px 6px;
+  background: var(--zen-app-accent);
+}
+
+.zen-shell .stat-value {
+  font-family: var(--zen-font-display);
+  font-variant-numeric: tabular-nums;
+}
+
+.zen-shell :is(.zc-table, .trace-table) th {
+  font-family: var(--zen-font-mono);
+  font-weight: 500;
+  letter-spacing: 0.045em;
+}
+
+.zen-shell :is(.primary-button, .secondary-button),
+.tracking-app :is(.primary-button, .secondary-button),
+.auth-card :is(.primary-button, .secondary-button) {
+  border-radius: 999px;
+}
+
+.zen-shell .primary-button,
+.tracking-app .primary-button,
+.auth-card .primary-button,
+.pro-dialog .primary-button {
+  background: var(--ep-primary);
+  color: #fff;
+  box-shadow: none;
+}
+
+.zen-shell .primary-button:not(:disabled):hover,
+.tracking-app .primary-button:not(:disabled):hover,
+.auth-card .primary-button:not(:disabled):hover,
+.pro-dialog .primary-button:not(:disabled):hover {
+  background: var(--ep-primary-hover);
+}
+
+.zen-shell .page-footer,
+.tracking-app .page-footer {
+  background: var(--ep-canvas);
+  border-color: var(--ep-line);
+}
+
+#root > .auth-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  isolation: isolate;
+  position: relative;
+  background: var(--ep-canvas);
+}
+
+.auth-page::before {
+  content: "";
+  position: absolute;
+  inset: 68px 0 auto;
+  height: min(710px, 95%);
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(64% 80% at 50% 0%, var(--zen-glow), transparent 75%),
+    var(--zen-grid);
+  background-size:
+    auto,
+    48px 48px,
+    48px 48px;
+  mask-image: radial-gradient(ellipse at 50% 0%, #000, transparent 78%);
+}
+
+.auth-site-header {
+  background: var(--zen-topbar);
+  border-bottom: 1px solid var(--ep-line);
+}
+
+.auth-site-nav {
+  min-height: 68px;
+  width: min(var(--zen-width), 100%);
+  padding: 10px var(--zen-gutter);
+  margin-inline: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.auth-site-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-family: var(--zen-font-display);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+}
+
+.auth-site-brand .zen-mark {
+  flex: 0 0 32px;
+}
+
+.auth-page .auth-layout {
+  width: min(var(--zen-width), 100%);
+  max-width: none;
+  align-content: start;
+  align-items: center;
+  justify-items: stretch;
+  grid-template-columns: minmax(0, 1.4fr) minmax(300px, 0.86fr);
+  gap: clamp(26px, 5vw, 76px);
+  padding: clamp(52px, 7.8vw, 112px) var(--zen-gutter) 54px;
+  margin-inline: auto;
+}
+
+.auth-page .auth-story {
+  display: block;
+  max-width: none;
+}
+
+.auth-story .eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--zen-signal);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.auth-story .eyebrow::before,
+.auth-app-tile .auth-app-dot {
+  display: inline-block;
+  flex: 0 0 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.auth-story .eyebrow::before {
+  content: "";
+  box-shadow: 0 0 12px var(--zen-signal);
+}
+
+.auth-page .auth-story h2 {
+  margin: 20px 0 22px;
+  font-size: clamp(2.1rem, 4.65vw, 4.65rem);
+  font-weight: 600;
+  line-height: 1.06;
+  letter-spacing: -0.04em;
+  color: var(--ep-text);
+}
+
+.auth-story h2 span {
+  display: block;
+  color: var(--ep-muted);
+}
+
+.auth-page .auth-story > p {
+  max-width: 34rem;
+  margin: 0;
+  font-size: clamp(0.95rem, 1.25vw, 1.2rem);
+  color: var(--ep-muted);
+  line-height: 1.65;
+}
+
+#root > .auth-page .auth-card {
+  width: 100%;
+  max-width: none;
+  padding: clamp(22px, 2.8vw, 38px);
+  border-radius: var(--zen-radius);
+  background: var(--ep-surface);
+  box-shadow: none;
+}
+
+.auth-app-strip {
+  grid-column: 1 / -1;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: var(--ep-surface);
+  border: 1px solid var(--ep-line);
+  border-radius: var(--zen-radius);
+}
+
+.auth-app-tile {
+  --auth-app-accent: var(--zen-stock);
+  min-width: 0;
+  padding: 21px 23px;
+  color: var(--ep-muted);
+}
+
+.auth-app-tile + .auth-app-tile {
+  border-inline-start: 1px solid var(--ep-line);
+}
+
+.auth-app-tile[data-product="control"] {
+  --auth-app-accent: var(--zen-control);
+}
+
+.auth-app-tile[data-product="field"] {
+  --auth-app-accent: var(--zen-field);
+}
+
+.auth-app-tile > div {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--auth-app-accent);
+  font-family: var(--zen-font-display);
+  font-size: 1.16rem;
+}
+
+.auth-app-tile p {
+  margin: 7px 0 0;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+@media (max-width: 760px) {
+  .zen-shell .topbar-context {
+    flex: 1 0 auto;
+    max-width: 100%;
+  }
+
+  .zen-shell .topbar h1 {
+    overflow-wrap: anywhere;
+  }
+
+  .auth-page .auth-layout {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 580px;
+    gap: 24px;
+    padding-top: 34px;
+  }
+
+  .auth-page .auth-story h2 {
+    font-size: clamp(1.9rem, 6.8vw, 3.25rem);
+    margin: 10px 0 12px;
+  }
+
+  .auth-app-strip {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .auth-app-tile + .auth-app-tile {
+    border-inline-start: 0;
+    border-block-start: 1px solid var(--ep-line);
+  }
+}

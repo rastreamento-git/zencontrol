@@ -1,4 +1,11 @@
 import { useEffect, useState } from "react";
+import { classifyFipe, fipeRegions } from "@zen/domain/fipe.mjs";
+import {
+  addressFields,
+  brazilStates,
+  formatPhone,
+  schedulingServices,
+} from "@zen/domain/order-fields.mjs";
 import {
   Plus,
   Search,
@@ -6,9 +13,6 @@ import {
   Send,
   CheckCheck,
   RefreshCw,
-  Phone,
-  MapPin,
-  Wrench,
   ArrowRight,
   Wallet,
   Trash2,
@@ -28,11 +32,17 @@ import {
   Field,
   download,
   format,
-  initials,
   money,
   useLoad,
 } from "./common";
-export function Orders({ agenda, meta, revision, openOrder, globalQuery }) {
+export function Orders({
+  agenda,
+  meta,
+  revision,
+  openOrder,
+  globalQuery,
+  onChangeView,
+}) {
   const [q, setQ] = useState(globalQuery || ""),
     [term, setTerm] = useState(q),
     [page, setPage] = useState(1),
@@ -78,6 +88,24 @@ export function Orders({ agenda, meta, revision, openOrder, globalQuery }) {
         </button>
       </Intro>
       <Panel>
+        <nav className="zc-filters" aria-label="Visualização dos serviços">
+          <button
+            type="button"
+            className={agenda ? "secondary-button" : "primary-button"}
+            aria-pressed={!agenda}
+            onClick={() => onChangeView("orders")}
+          >
+            Lista de OS
+          </button>
+          <button
+            type="button"
+            className={agenda ? "primary-button" : "secondary-button"}
+            aria-pressed={agenda}
+            onClick={() => onChangeView("agenda")}
+          >
+            Agenda
+          </button>
+        </nav>
         {agenda ? (
           <div className="zc-filters">
             <label>
@@ -156,7 +184,7 @@ export function Orders({ agenda, meta, revision, openOrder, globalQuery }) {
         ) : (
           <>
             <div className="zc-table-scroll">
-              <table className="zc-table">
+              <table className="zc-table zc-responsive-table">
                 <thead>
                   <tr>
                     <th>ORDEM / ASSOCIADO</th>
@@ -170,7 +198,7 @@ export function Orders({ agenda, meta, revision, openOrder, globalQuery }) {
                 <tbody>
                   {data.items.map((o) => (
                     <tr key={o.id}>
-                      <td>
+                      <td data-label="Ordem / associado">
                         <button
                           className="zc-link zc-mono"
                           onClick={() => openOrder(o.id)}
@@ -181,21 +209,51 @@ export function Orders({ agenda, meta, revision, openOrder, globalQuery }) {
                           {o.customer_name || "Associado não informado"}
                         </small>
                       </td>
-                      <td>
+                      <td data-label="Veículo">
                         <span className="zc-plate">
                           {o.vehicle || "Sem identificação"}
                         </span>
+                        {!!o.group_imeis?.length && (
+                          <small>
+                            IMEI/serial: {o.group_imeis.join(" · ")}
+                          </small>
+                        )}
+                        {o.vehicle_electric && <small>Veículo elétrico</small>}
                       </td>
-                      <td>
-                        <strong>{o.service || "Não informado"}</strong>
+                      <td data-label="Serviço / técnico">
+                        <strong>
+                          {o.service_label || o.service || "Não informado"}
+                        </strong>
                         <small>{o.technician_name || "Sem técnico"}</small>
+                        {o.additional_orders?.map((extra) => (
+                          <button
+                            className="zc-link"
+                            key={extra.id}
+                            onClick={() => openOrder(extra.id)}
+                          >
+                            + {extra.additional_equipment} · {extra.status}
+                            {extra.imei
+                              ? ` · IMEI adicional: ${extra.imei}`
+                              : ""}
+                          </button>
+                        ))}
                       </td>
-                      <td>
+                      <td data-label="Agendamento">
                         <strong>{format(o.scheduled_at, true)}</strong>
                         <small>{o.location || "Local não informado"}</small>
                       </td>
-                      <td>
-                        <Badge value={o.status} />
+                      <td data-label="Situação">
+                        <Badge value={o.group_status || o.status} />
+                        {o.document_data?.completion_date_source ===
+                          "import_date" && (
+                          <small>
+                            Conclusão: {format(o.completed_at)} · data da
+                            importação
+                          </small>
+                        )}
+                        {o.group_status && o.group_status !== o.status && (
+                          <small>OS principal: {o.status}</small>
+                        )}
                         {o.legacy_status &&
                           !meta.statuses.includes(o.legacy_status) && (
                             <small>Legado: {o.legacy_status}</small>
@@ -222,7 +280,15 @@ export function Orders({ agenda, meta, revision, openOrder, globalQuery }) {
     </>
   );
 }
-export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
+export function OrderEditor({
+  id,
+  meta,
+  user,
+  refresh,
+  onClose,
+  navigate,
+  openOrder,
+}) {
   const [order, setOrder] = useState(null),
     [values, setValues] = useState({
       vehicle: "",
@@ -232,12 +298,23 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
       technician_id: "",
       scheduled_at: "",
       additional: "",
+      tracker_waiver_authorized: false,
+      travel_fee_cents: 0,
+      document_data: {
+        scheduled_service: "Instalação",
+        service_address_same: true,
+        equipment_counts: { tracker: 1, tag: 0 },
+        reinstallation: false,
+        reuse_equipment: false,
+        visit_outcome: "",
+      },
     }),
     [techs, setTechs] = useState([]),
     [busy, setBusy] = useState(false),
+    [lookupBusy, setLookupBusy] = useState(false),
     [error, setError] = useState(""),
     [action, setAction] = useState(null);
-  const admin = user.papel === "admin";
+  const admin = ["admin", "operador"].includes(user.papel);
   useEffect(() => {
     let active = true;
     Promise.all([
@@ -263,12 +340,60 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
     };
   }, [id]);
   const change = (e) =>
-    setValues((v) => ({ ...v, [e.target.name]: e.target.value }));
+    setValues((v) => ({
+      ...v,
+      ...(["vehicle", "customer_name", "chassis"].includes(e.target.name) &&
+      e.target.value !== v[e.target.name]
+        ? { sga_check: null, sga_verification: "", sga_review_required: true }
+        : {}),
+      [e.target.name]:
+        e.target.name === "contact"
+          ? formatPhone(e.target.value)
+          : e.target.value,
+    }));
   const documentData = values.document_data || {};
+  const equipmentCounts =
+    documentData.equipment_counts ||
+    [order, ...(order?.additional_orders || [])].filter(Boolean).reduce(
+      (counts, item) => {
+        for (const key of item.document_data?.equipment ||
+          (item.service.startsWith("Instalação") ||
+          item.service.startsWith("Reinstalação")
+            ? ["tracker"]
+            : []))
+          counts[key === "tag" ? "tag" : "tracker"]++;
+        return counts;
+      },
+      { tracker: 0, tag: 0 },
+    );
+  const scheduleType =
+    documentData.scheduled_service ||
+    (values.service?.startsWith("Reinstalação")
+      ? "Instalação"
+      : values.service);
+  const installation =
+    scheduleType === "Instalação" && !documentData.visit_outcome;
+  const fipe = classifyFipe({
+    value: values.fipe_value,
+    vehicleType: documentData.vehicle_type,
+    region: documentData.fipe_region,
+  });
   const changeDocument = (key, value) =>
     setValues((v) => ({
       ...v,
-      document_data: { ...v.document_data, [key]: value },
+      document_data: {
+        ...v.document_data,
+        [key]: value,
+        ...(["customer_", "service_"].some((prefix) =>
+          addressFields.some(([field]) => key === prefix + field),
+        ) && v.document_data?.service_address_same === undefined
+          ? {
+              service_address_same:
+                !order?.location ||
+                order.location === order.document_data?.customer_address,
+            }
+          : {}),
+      },
     }));
   const documentField = (label, key, opts = {}) => (
     <Field
@@ -280,6 +405,21 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
       {...opts}
     />
   );
+  const addressInputs = (prefix) =>
+    addressFields.map(([key, label, max]) =>
+      documentField(
+        label + (prefix === "service" ? " do atendimento" : ""),
+        prefix + "_" + key,
+        key === "state"
+          ? {
+              options: [
+                ["", "Selecione a UF"],
+                ...brazilStates.map((uf) => [uf, uf]),
+              ],
+            }
+          : { maxLength: max },
+      ),
+    );
   const technician = techs.find(
     (t) => String(t.id) === String(values.technician_id),
   );
@@ -296,14 +436,14 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
       "chassis",
       "sga_id",
       "fipe_value",
-      "fipe_risk",
       "volunteer",
-      "imei",
-      "term",
       "location",
       "shift",
       "notes",
       "document_data",
+      "tracker_waiver_authorized",
+      "travel_fee_cents",
+      "sticker_discount_opt_in",
     ].some(
       (k) => JSON.stringify(values[k] ?? "") !== JSON.stringify(order[k] ?? ""),
     );
@@ -332,16 +472,17 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
         "chassis",
         "sga_id",
         "fipe_value",
-        "fipe_risk",
         "volunteer",
-        "imei",
-        "term",
         "location",
         "shift",
         "notes",
         "document_data",
+        "tracker_waiver_authorized",
+        "travel_fee_cents",
         "sga_classification",
         "sga_status",
+        "sga_verification",
+        "sticker_discount_opt_in",
       ];
       const data = Object.fromEntries(
         fields
@@ -385,13 +526,18 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
     }
   }
   async function lookup() {
+    setLookupBusy(true);
     setBusy(true);
     try {
-      const { data } = await api.post("/sga/lookup", {
-        term: values.vehicle,
-        sga_id: values.sga_id,
-        chassis: values.chassis,
-      });
+      const { data } = await api.post(
+        "/sga/lookup",
+        {
+          term: values.vehicle,
+          sga_id: values.sga_id,
+          chassis: values.chassis,
+        },
+        { timeout: 180000 },
+      );
       setValues((v) => ({
         ...v,
         ...data,
@@ -403,6 +549,7 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
       setError(errorMessage(e));
     } finally {
       setBusy(false);
+      setLookupBusy(false);
     }
   }
   const field = (label, name, opts = {}) => (
@@ -426,6 +573,50 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
         <p className="dialog-description">
           {id || "Preencha os dados do atendimento."}
         </p>
+        {order?.parent_order_id && (
+          <div className="zc-notice">
+            <b>OS de equipamento adicional · {order.additional_equipment}</b>
+            <p>
+              OS principal: {order.parent_order_id}. Conferência e remuneração
+              independentes.
+            </p>
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={busy}
+              onClick={() => openOrder(order.parent_order_id)}
+            >
+              Abrir OS principal
+            </button>
+          </div>
+        )}
+        {!!order?.additional_orders?.length && (
+          <div className="zc-notice">
+            <b>Equipamentos adicionais deste atendimento</b>
+            <p>
+              Exibidos junto à OS principal. Cada instalação mantém seu registro
+              de serviço e remuneração.
+            </p>
+            {order.document_data?.equipment_counts ? (
+              <p>
+                {order.additional_orders.length} instalação(ões) adicional(is)
+                para contabilização. O atendimento e o PDF são únicos.
+              </p>
+            ) : (
+              order.additional_orders.map((extra) => (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  key={extra.id}
+                  disabled={busy}
+                  onClick={() => openOrder(extra.id)}
+                >
+                  {extra.id} · {extra.additional_equipment} · {extra.status}
+                </button>
+              ))
+            )}
+          </div>
+        )}
         {id && order && (
           <div className="zc-actions">
             <button
@@ -464,14 +655,16 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
             )}
             {!["CONCLUÍDO", "CANCELADO"].includes(order.status) && (
               <>
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={() => setAction("dispatch")}
-                >
-                  <Send size={15} />
-                  Encaminhar ao técnico
-                </button>
+                {order.workflow_mode !== "controlled" && (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => setAction("dispatch")}
+                  >
+                    <Send size={15} />
+                    Encaminhar ao técnico
+                  </button>
+                )}
                 <button
                   type="button"
                   className="secondary-button"
@@ -520,6 +713,66 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
           )}
         <fieldset className="zc-fieldset">
           <legend>01 · Veículo e associado</legend>
+          {((values.sga_review_required && !values.sga_check?.verified_at) ||
+            (!values.sga_check?.verified_at &&
+              meta.sga_scheduling_required)) && (
+            <p className="zc-notice amber">
+              Cadastro SGA pendente. Complete e valide os dados antes de
+              agendar.
+            </p>
+          )}
+          {values.proposed_scheduled_at && (
+            <p className="zc-notice amber">
+              Data proposta na planilha:{" "}
+              {format(values.proposed_scheduled_at, true)}. Agendamento
+              aguardando validação SGA.
+            </p>
+          )}
+          {values.sga_check?.assessment && (
+            <div
+              role="status"
+              className={
+                values.sga_check.assessment.eligible
+                  ? "zc-notice"
+                  : "zc-notice amber"
+              }
+            >
+              <strong>
+                {values.sga_check.assessment.eligible
+                  ? "SGA: cadastro liberado para agendamento"
+                  : "SGA: agendamento bloqueado"}
+              </strong>
+              <p>
+                Veículo:{" "}
+                {values.sga_check.assessment.vehicle_classification ||
+                  "Classificação não informada"}{" "}
+                ·{" "}
+                {values.sga_check.assessment.vehicle_status ||
+                  "Situação não confirmada"}
+              </p>
+              <p>
+                Associado:{" "}
+                {values.sga_check.assessment.customer_classification ||
+                  "Classificação não informada"}{" "}
+                ·{" "}
+                {values.sga_check.assessment.customer_status ||
+                  "Situação não confirmada"}
+              </p>
+              <p>
+                Financeiro:{" "}
+                {values.sga_check.assessment.financial_status ||
+                  "Não confirmado"}
+              </p>
+              {!!values.sga_check.assessment.reasons?.length && (
+                <p>{values.sga_check.assessment.reasons.join("; ")}</p>
+              )}
+              <small>
+                Consulta: {format(values.sga_check.verified_at, true)}. A
+                validação para um novo agendamento vale por 15 minutos.
+              </small>
+            </div>
+          )}
+
           <div className="zc-form-grid">
             {field("Placa ou chassi", "vehicle", { required: true })}
             <div className="zc-lookup">
@@ -527,50 +780,211 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
               <button
                 type="button"
                 className="secondary-button"
-                disabled={busy}
+                disabled={lookupBusy}
                 onClick={lookup}
               >
-                <Search size={15} />
-                Consultar SGA
+                {lookupBusy ? (
+                  <RefreshCw size={15} className="animate-spin" />
+                ) : (
+                  <Search size={15} />
+                )}
+                {lookupBusy
+                  ? "Consultando SGA…"
+                  : "Consultar cadastro e situação SGA"}
               </button>
             </div>
+            <div className="zc-full zc-document-equipment">
+              <label className="zc-checkbox">
+                <input
+                  type="checkbox"
+                  checked={!!values.sticker_discount_opt_in}
+                  disabled={!!order?.parent_order_id}
+                  onChange={(e) =>
+                    setValues((v) => ({
+                      ...v,
+                      sticker_discount_opt_in: e.target.checked,
+                    }))
+                  }
+                />
+                Cliente optou pelo desconto do adesivo Perfurado (produto SGA
+                2371)
+              </label>
+              {values.sticker_discount_opt_in && (
+                <p className="zc-notice">
+                  O técnico responsável deverá aplicar 1 adesivo Perfurado. A
+                  opção será exibida no ZenField e na OS; o desconto não terá
+                  valor calculado pelo sistema.
+                </p>
+              )}
+            </div>
             {field("Associado", "customer_name", { required: true })}
-            {field("Contato", "contact")}
+            {field("Contato", "contact", {
+              type: "tel",
+              autoComplete: "tel-national",
+              maxLength: 20,
+            })}
             {documentField("CPF / CNPJ", "cpf_cnpj")}
             {documentField("RG", "rg")}
-            {documentField("Endereço do associado", "customer_address", {
-              full: true,
-            })}
+            <div className="zc-full">
+              <b>Endereço do associado</b>
+              {documentData.customer_address &&
+                !documentData.customer_street && (
+                  <small className="zc-muted">
+                    Endereço anterior: {documentData.customer_address}. Preencha
+                    os campos abaixo para atualizar.
+                  </small>
+                )}
+            </div>
+            {addressInputs("customer")}
             {field("Chassi", "chassis")}
             {documentField("Renavam", "renavam")}
             {documentField("Marca", "brand")}
             {documentField("Modelo", "model")}
             {documentField("Ano de fabricação/modelo", "year")}
-            {documentField("Tipo de veículo", "vehicle_type")}
+            {documentField("Tipo de veículo", "vehicle_type", {
+              options: [
+                ["", "Selecione o tipo"],
+                ["Automóvel", "Automóvel"],
+                ["Moto", "Moto"],
+                ["Outro", "Outro tipo de veículo"],
+                ...(documentData.vehicle_type &&
+                !["Automóvel", "Moto", "Outro"].includes(
+                  documentData.vehicle_type,
+                )
+                  ? [[documentData.vehicle_type, documentData.vehicle_type]]
+                  : []),
+              ],
+            })}
             {documentField("Categoria", "category")}
             {field("Código do veículo SGA", "sga_id")}
             {field("Valor FIPE", "fipe_value")}
-            {field("Tipo / risco FIPE", "fipe_risk")}
+            {documentField("Regra regional FIPE", "fipe_region", {
+              options: [["", "Selecione a regra regional"], ...fipeRegions],
+            })}
+            <label className="zc-fipe-result zc-full">
+              Tipo FIPE (automático)
+              <output aria-live="polite">
+                {fipe.label || "Não classificado"}
+              </output>
+              <small>{fipe.message}</small>
+              {!!order?.fipe_risk && fipe.status !== "classified" && (
+                <small>
+                  Registro anterior: {order.fipe_risk}. Informe os dados de
+                  classificação para atualizar.
+                </small>
+              )}
+            </label>
             {field("Voluntário", "volunteer")}
-            {field("IMEI(s)", "imei")}
+            <div className="zc-full zc-document-equipment">
+              <label className="zc-checkbox">
+                <input
+                  type="checkbox"
+                  checked={documentData.vehicle_electric === true}
+                  onChange={(e) =>
+                    changeDocument("vehicle_electric", e.target.checked)
+                  }
+                />
+                Veículo elétrico
+              </label>
+              {documentData.vehicle_electric === true && (
+                <small>
+                  Confirme com o cliente a autorização para instalar o
+                  rastreador. Se houver impedimento, registre as observações e a
+                  autorização de dispensa correspondente.
+                </small>
+              )}
+            </div>
           </div>
         </fieldset>
         <fieldset className="zc-fieldset">
           <legend>02 · Atendimento e responsável</legend>
           <div className="zc-form-grid">
-            {field("Serviço", "service", {
-              options: [...new Set([...meta.services, values.service])]
-                .filter(Boolean)
-                .map((s) => [s, s]),
+            <Field
+              label="Serviço"
+              name="service"
+              value={scheduleType}
+              disabled={!!order?.parent_order_id}
+              options={[
+                ...schedulingServices,
+                ...(scheduleType && !schedulingServices.includes(scheduleType)
+                  ? [scheduleType]
+                  : []),
+              ].map((service) => [service, service])}
+              onChange={(e) =>
+                setValues((v) => ({
+                  ...v,
+                  service: e.target.value,
+                  document_data: {
+                    ...v.document_data,
+                    scheduled_service: e.target.value,
+                    equipment_counts:
+                      e.target.value === "Instalação"
+                        ? v.document_data?.equipment_counts?.tracker +
+                            v.document_data?.equipment_counts?.tag >
+                          0
+                          ? v.document_data.equipment_counts
+                          : { tracker: 1, tag: 0 }
+                        : { tracker: 0, tag: 0 },
+                    reinstallation: false,
+                    reuse_equipment: false,
+                    visit_outcome: "",
+                  },
+                }))
+              }
+            />
+            {documentField("Sinalização do atendimento", "visit_outcome", {
+              options: [
+                ["", "Atendimento previsto"],
+                ["unproductive", "Visita improdutiva"],
+                ["reschedule", "Reagendamento"],
+              ],
             })}
-            {!id &&
-              field("Criar OS adicional", "additional", {
-                options: [
-                  ["", "Nenhum"],
-                  ["Tag Extra", "Tag extra"],
-                  ["Rastreador Extra", "Rastreador extra"],
-                ],
-              })}
+            {scheduleType === "Instalação" && (
+              <div className="zc-full zc-document-equipment">
+                <label className="zc-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={
+                      documentData.reinstallation ??
+                      values.service?.startsWith("Reinstalação")
+                    }
+                    onChange={(e) =>
+                      setValues((v) => ({
+                        ...v,
+                        document_data: {
+                          ...v.document_data,
+                          scheduled_service: "Instalação",
+                          reinstallation: e.target.checked,
+                          reuse_equipment: false,
+                        },
+                      }))
+                    }
+                  />
+                  Reinstalação
+                </label>
+                {(documentData.reinstallation ??
+                  values.service?.startsWith("Reinstalação")) && (
+                  <label className="zc-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={documentData.reuse_equipment === true}
+                      onChange={(e) =>
+                        changeDocument("reuse_equipment", e.target.checked)
+                      }
+                    />
+                    Reaproveitar os equipamentos existentes
+                  </label>
+                )}
+                {(documentData.reinstallation ??
+                  values.service?.startsWith("Reinstalação")) && (
+                  <small>
+                    {documentData.reuse_equipment
+                      ? "A central conferirá as fotos dos equipamentos existentes. O reaproveitamento não consome novos aparelhos da carga."
+                      : "Serão utilizados equipamentos da carga do técnico."}
+                  </small>
+                )}
+              </div>
+            )}
             {field("Técnico", "technician_id", {
               options: [
                 ["", "Ainda não definido"],
@@ -596,52 +1010,205 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
                 .map((s) => [s, s]),
               disabled: order?.status === "CONCLUÍDO",
             })}
-            {field("Termo", "term")}
-            {field("Local de atendimento", "location", { full: true })}
             <div className="zc-full zc-document-equipment">
-              <span>Equipamentos previstos no atendimento</span>
-              <div>
-                {[
-                  ["tracker", "Rastreador"],
-                  ["tracker_extra", "Rastreador extra"],
-                  ["tag", "Tag"],
-                ].map(([key, label]) => (
-                  <label className="zc-checkbox" key={key}>
-                    <input
-                      type="checkbox"
-                      checked={(documentData.equipment || []).includes(key)}
-                      onChange={(e) =>
-                        changeDocument(
-                          "equipment",
-                          e.target.checked
-                            ? [...(documentData.equipment || []), key]
-                            : (documentData.equipment || []).filter(
-                                (v) => v !== key,
-                              ),
-                        )
-                      }
-                    />
-                    {label}
-                  </label>
-                ))}
-              </div>
               <label className="zc-checkbox">
                 <input
                   type="checkbox"
-                  checked={documentData.technician_brings_equipment !== false}
+                  checked={values.tracker_waiver_authorized === true}
+                  disabled={order?.status === "CONCLUÍDO"}
                   onChange={(e) =>
-                    changeDocument(
-                      "technician_brings_equipment",
-                      e.target.checked,
-                    )
+                    setValues((v) => ({
+                      ...v,
+                      tracker_waiver_authorized: e.target.checked,
+                    }))
                   }
                 />
-                O técnico deverá levar os equipamentos
+                Dispensa de rastreador autorizada
               </label>
+              <small>
+                Cliente autorizado a permanecer sem rastreador. Esta OS não
+                entra na remuneração nem no fechamento do técnico, incluindo
+                adicionais e ajustes. A conclusão exige checklist assinado e
+                conferência da central, sem registrar instalação no estoque.
+              </small>
             </div>
-            {field("Observações", "notes", { type: "textarea", full: true })}
+            <div className="zc-full zc-document-equipment">
+              <b>Endereço do atendimento</b>
+              <label className="zc-checkbox">
+                <input
+                  type="checkbox"
+                  checked={
+                    documentData.service_address_same ??
+                    (!order?.location ||
+                      order.location === documentData.customer_address)
+                  }
+                  onChange={(e) =>
+                    changeDocument("service_address_same", e.target.checked)
+                  }
+                />
+                Atendimento no endereço do associado
+              </label>
+              {documentData.service_address_same === undefined &&
+                order?.location && (
+                  <small>Local anterior: {order.location}</small>
+                )}
+            </div>
+            {(documentData.service_address_same === false ||
+              (documentData.service_address_same === undefined &&
+                order?.location &&
+                order.location !== documentData.customer_address)) &&
+              addressInputs("service")}
+            {installation && !values.tracker_waiver_authorized && (
+              <div className="zc-full zc-document-equipment">
+                <b>Quantidade de equipamentos a instalar</b>
+                <div className="zc-equipment-quantities">
+                  {[
+                    ["tracker", "Rastreadores"],
+                    ["tag", "TAGs"],
+                  ].map(([key, label]) => (
+                    <label key={key}>
+                      {label}
+                      <input
+                        type="number"
+                        min="0"
+                        max="20"
+                        step="1"
+                        value={equipmentCounts[key]}
+                        disabled={!!order?.parent_order_id}
+                        onChange={(e) =>
+                          changeDocument("equipment_counts", {
+                            ...equipmentCounts,
+                            [key]:
+                              e.target.value === ""
+                                ? 0
+                                : Number(e.target.value),
+                          })
+                        }
+                      />
+                    </label>
+                  ))}
+                </div>
+                <small>
+                  {equipmentCounts.tracker + equipmentCounts.tag}{" "}
+                  equipamento(s): 1 serviço principal e{" "}
+                  {Math.max(
+                    0,
+                    equipmentCounts.tracker + equipmentCounts.tag - 1,
+                  )}{" "}
+                  instalação(ões) adicional(is), conforme as tarifas do técnico.
+                  Todas as fotos e equipamentos são registrados na mesma OS e no
+                  mesmo PDF.
+                </small>
+              </div>
+            )}
+            <label className="zc-full">
+              Taxa de deslocamento (R$)
+              <input
+                aria-label="Taxa de deslocamento (R$)"
+                type="number"
+                min="0"
+                max="1000000"
+                step="0.01"
+                value={(values.travel_fee_cents || 0) / 100}
+                disabled={
+                  !!order?.parent_order_id ||
+                  !!order?.execution_finished_at ||
+                  !!order?.submissions?.some((b) =>
+                    ["submitted", "approved_sync", "completed"].includes(
+                      b.state,
+                    ),
+                  )
+                }
+                onChange={(e) =>
+                  setValues((v) => ({
+                    ...v,
+                    travel_fee_cents: Math.round(Number(e.target.value) * 100),
+                  }))
+                }
+              />
+              <small>
+                Definida pela central, uma única vez por atendimento. O valor é
+                preservado ao registrar a execução.
+              </small>
+            </label>
+            {field("Observações da central", "notes", {
+              type: "textarea",
+              full: true,
+            })}
           </div>
         </fieldset>
+        {order && (
+          <section className="zc-detail-section">
+            <h3>Retorno do técnico</h3>
+            <p>
+              Os IMEIs/seriais aparecem após o envio para validação no ZenField.
+            </p>
+            {(order.document_data?.equipment_counts
+              ? [order]
+              : [order, ...(order.additional_orders || [])]
+            ).map((item) => (
+              <div className="zc-return" key={item.id}>
+                <b>
+                  {item.parent_order_id
+                    ? `Equipamento adicional · ${item.additional_equipment}`
+                    : "Equipamentos da OS principal"}
+                </b>
+                <p>
+                  {item.reported_imeis?.length
+                    ? item.reported_imeis.join(" · ")
+                    : item.imei_submitted_at
+                      ? "Nenhum equipamento instalado neste envio"
+                      : "Aguardando envio do técnico"}
+                </p>
+                {item.imei_submission_state === "rejected" && (
+                  <small>
+                    Envio devolvido para correção. Aguarde nova validação.
+                  </small>
+                )}
+                <label className="zc-field">
+                  Observações do técnico
+                  <textarea
+                    readOnly
+                    aria-label="Observações do técnico"
+                    rows={3}
+                    value={item.technician_notes || ""}
+                    placeholder="Preenchidas pelo técnico no ZenField"
+                  />
+                </label>
+              </div>
+            ))}
+          </section>
+        )}
+        {order?.audit_summary && (
+          <section className="zc-detail-section">
+            <h3>Responsáveis pela OS</h3>
+            <div className="zc-audit-summary">
+              {[
+                [
+                  "Abertura",
+                  order.audit_summary.opened_by,
+                  order.audit_summary.opened_at,
+                ],
+                [
+                  "Baixa",
+                  order.audit_summary.closed_by || "Aguardando conclusão",
+                  order.audit_summary.closed_at,
+                ],
+                [
+                  "Última modificação",
+                  order.audit_summary.last_modified_by,
+                  order.audit_summary.last_modified_at,
+                ],
+              ].map(([label, name, at]) => (
+                <div key={label}>
+                  <small>{label}</small>
+                  <b>{name}</b>
+                  {at && <small>{format(at, at.includes("T"))}</small>}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
         <div className="zc-notice zc-document-notice">
           <b>Preenchimento automático do PDF</b>
           <span>
@@ -658,8 +1225,11 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
         </div>
         {order?.completed_at && (
           <div className="zc-notice">
-            Concluída em {format(order.completed_at)} por{" "}
-            {order.closed_by || "Operação legada"}.
+            Concluída em {format(order.completed_at)}
+            {order.document_data?.completion_date_source === "import_date"
+              ? " (data da importação)"
+              : ""}{" "}
+            por {order.closed_by || "Operação legada"}.
           </div>
         )}
         {order?.sga_classification && (
@@ -715,7 +1285,7 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
         {!!order?.history?.length && (
           <div className="zc-detail-section">
             <h3>Histórico desta OS</h3>
-            {order.history.slice(0, 10).map((a) => (
+            {order.history.map((a) => (
               <div className="zc-timeline" key={a.id}>
                 <i />
                 <div>
@@ -723,6 +1293,24 @@ export function OrderEditor({ id, meta, user, refresh, onClose, navigate }) {
                   <small>
                     {a.actor} · {format(a.created_at, true)}
                   </small>
+                  {a.order_id !== order.id && (
+                    <small>Equipamento adicional · {a.order_id}</small>
+                  )}
+                  {a.detail?.changes && (
+                    <details>
+                      <summary>Ver alterações</summary>
+                      {Object.entries(a.detail.changes).map(([key, change]) => (
+                        <div key={key} className="zc-audit-change">
+                          <b>{auditFieldLabel(key)}</b>
+                          <span>
+                            {auditValue(change.before)} →{" "}
+                            {auditValue(change.after)}
+                          </span>
+                        </div>
+                      ))}
+                    </details>
+                  )}
+                  {a.detail?.reason && <small>{a.detail.reason}</small>}
                 </div>
               </div>
             ))}
@@ -858,6 +1446,8 @@ export const jobLabel = (k) =>
   ({
     dispatch: "Envio ao técnico",
     sga_classification: "Classificação SGA",
+    sticker_discount_opt_in: "Desconto do adesivo Perfurado (2371)",
+    sga_check: "Validação SGA",
     download_evidence: "Download de fotos",
     stock_installation: "Confirmar instalação no Estoque Pro",
     upload_evidence: "Fotos para o SGA",
@@ -876,197 +1466,56 @@ export const actionLabel = (k) =>
     settled: "Fechamento registrado",
     deleted: "Registro arquivado",
     reopened: "OS reaberta",
+    portal_draft: "Registro iniciado pelo técnico",
+    portal_draft_updated: "Rascunho atualizado",
+    portal_photo_added: "Evidência recebida",
+    portal_photo_removed: "Evidência removida",
+    portal_submitted: "Técnico enviou para validação",
+    portal_approved: "Envio técnico aprovado",
+    portal_correction_requested: "Correção solicitada",
+    execution_finished: "Execução finalizada pelo técnico",
+    conference_started: "Conferência iniciada",
+    approved_for_stock: "Instalação aprovada",
+    stock_installation_confirmed: "Instalação confirmada no estoque",
+    additional_order_created: "Equipamento adicional incluído",
+    operational_service_created: "Bloqueio operacional registrado",
+    operational_service_updated: "Bloqueio operacional atualizado",
   })[k] || k.replaceAll("_", " ");
-export function Technicians({ user, revision, refresh }) {
-  const { data: catalog } = useLoad(
-    user.papel === "admin" ? "/stock/catalog" : "/meta",
-    revision,
-  );
-  const admin = user.papel === "admin";
-  const { data, loading, error } = useLoad("/technicians", revision);
-  const [showInactive, setShowInactive] = useState(false),
-    [edit, setEdit] = useState(null),
-    [q, setQ] = useState("");
-  const prices = [
-    "price_install",
-    "price_maintenance",
-    "price_removal",
-    "price_visit",
-  ];
-  const list = (data?.items || []).filter(
-    (t) =>
-      (showInactive || t.active) &&
-      t.name.toLocaleLowerCase().includes(q.toLocaleLowerCase()),
-  );
-  return (
-    <>
-      <Intro
-        title="Sua equipe, conectada."
-        subtitle="Organize os canais de envio e retorno dos técnicos."
-      >
-        <button
-          className="secondary-button"
-          onClick={() => setShowInactive((v) => !v)}
-        >
-          {showInactive ? "Somente ativos" : "Ver inativos"}
-        </button>
-        {admin && (
-          <button className="primary-button" onClick={() => setEdit({})}>
-            <Plus size={16} />
-            Cadastrar técnico
-          </button>
-        )}
-      </Intro>
-      <div className="trace-search zc-standalone-search">
-        <Search size={17} />
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Buscar técnico…"
-          aria-label="Buscar técnico"
-        />
-      </div>
-      {loading || error ? (
-        <Loading error={error} />
-      ) : !list.length ? (
-        <Empty description="Cadastre os técnicos para organizar os atendimentos." />
-      ) : (
-        <div className="zc-cards">
-          {list.map((t) => (
-            <article className="dashboard-panel zc-tech-card" key={t.id}>
-              <div className="zc-tech-heading">
-                <span className="avatar">{initials(t.name)}</span>
-                <div>
-                  <h3>{t.name}</h3>
-                  <p>{t.tags || "Técnico de campo"}</p>
-                </div>
-                {!t.active && <Badge value="Inativo" />}
-              </div>
-              <p>
-                <Phone size={14} />
-                {t.phone || "Telefone não informado"}
-              </p>
-              <p>
-                <MapPin size={14} />
-                {t.address || "Região não informada"}
-              </p>
-              <p>
-                <Send size={14} />
-                {t.send_group_name || t.send_group || "Envio no privado"}
-              </p>
-              <div className="zc-tech-footer">
-                <span>
-                  {admin ? (
-                    <>
-                      Instalação <b>{money(t.price_install)}</b>
-                    </>
-                  ) : t.active ? (
-                    "Cadastro ativo"
-                  ) : (
-                    "Cadastro inativo"
-                  )}
-                </span>
-                {admin && (
-                  <button
-                    className="secondary-button"
-                    onClick={() =>
-                      setEdit({
-                        ...t,
-                        ...Object.fromEntries(
-                          prices.map((k) => [k, (t[k] / 100).toFixed(2)]),
-                        ),
-                      })
-                    }
-                  >
-                    Gerenciar
-                    <ArrowRight size={14} />
-                  </button>
-                )}
-              </div>
-            </article>
-          ))}
-        </div>
-      )}
-      {edit && (
-        <FormModal
-          title={edit.id ? "Editar técnico" : "Cadastrar técnico"}
-          wide
-          initial={{ active: true, ...edit }}
-          fields={[
-            { name: "name", label: "Nome", required: true, full: true },
-            { name: "phone", label: "WhatsApp com DDI e DDD" },
-            {
-              name: "stock_technician_id",
-              label: "Cadastro correspondente no Estoque Pro",
-              full: true,
-              options: [
-                ["", "Sem vínculo"],
-                ...(catalog?.technicians || []).map((t) => [t.id, t.nome]),
-                ...(edit.stock_technician_id &&
-                !catalog?.technicians?.some(
-                  (t) => t.id === edit.stock_technician_id,
-                )
-                  ? [
-                      [
-                        edit.stock_technician_id,
-                        "Vínculo atual (conecte o Estoque Pro para conferir)",
-                      ],
-                    ]
-                  : []),
-              ],
-            },
-            { name: "tags", label: "Habilidades / tags" },
-            { name: "address", label: "Endereço / região base", full: true },
-            { name: "receive_group", label: "JID do grupo de retorno" },
-            { name: "receive_group_name", label: "Nome do grupo de retorno" },
-            { name: "send_group", label: "JID do grupo de envio" },
-            { name: "send_group_name", label: "Nome do grupo de envio" },
-            ...prices.map((k, i) => ({
-              name: k,
-              label: [
-                "Instalação (R$)",
-                "Manutenção (R$)",
-                "Retirada (R$)",
-                "Visita / improdutiva (R$)",
-              ][i],
-              type: "number",
-            })),
-            { name: "active", label: "Técnico ativo", type: "checkbox" },
-          ]}
-          onClose={() => setEdit(null)}
-          onSave={async (v) => {
-            const payload = Object.fromEntries(
-              [
-                "name",
-                "phone",
-                "stock_technician_id",
-                "tags",
-                "address",
-                "receive_group",
-                "receive_group_name",
-                "send_group",
-                "send_group_name",
-                "active",
-                ...prices,
-              ]
-                .filter((k) => v[k] !== undefined)
-                .map((k) => [k, v[k]]),
-            );
-            if (edit.id)
-              await api.patch("/technicians/" + edit.id, {
-                ...payload,
-                version: edit.version,
-              });
-            else await api.post("/technicians", payload);
-            setEdit(null);
-            refresh();
-            notify("Cadastro do técnico salvo.");
-          }}
-        />
-      )}
-    </>
-  );
-}
+const auditFieldLabel = (key) =>
+  ({
+    vehicle: "Veículo",
+    customer_name: "Associado",
+    service: "Serviço",
+    status: "Situação",
+    technician_id: "Código do técnico",
+    technician_name: "Técnico",
+    fipe_value: "Valor FIPE",
+    fipe_risk: "Tipo FIPE",
+    notes: "Observações da central",
+    travel_fee_cents: "Deslocamento (centavos)",
+    document_data: "Dados do veículo e documento",
+    scheduled_at: "Agendamento",
+    tracker_waiver_authorized: "Dispensa de rastreador",
+    vehicle_electric: "Veículo elétrico",
+    fipe_region: "Regra regional FIPE",
+    vehicle_type: "Tipo de veículo",
+    equipment: "Equipamentos",
+  })[key] || key;
+const auditValue = (value) =>
+  value == null || value === ""
+    ? "Não informado"
+    : typeof value === "boolean"
+      ? value
+        ? "Sim"
+        : "Não"
+      : typeof value === "object"
+        ? Object.entries(value)
+            .map(
+              ([key, entry]) =>
+                `${auditFieldLabel(key)}: ${Array.isArray(entry) ? entry.join(", ") : String(entry)}`,
+            )
+            .join("; ")
+        : String(value);
 export function Volunteers({ user, revision, refresh }) {
   const [q, setQ] = useState(""),
     [page, setPage] = useState(1),
@@ -1122,7 +1571,7 @@ export function Volunteers({ user, revision, refresh }) {
                       </td>
                       <td>{v.sga_code || "Não informado"}</td>
                       <td>
-                        {user.papel === "admin" && (
+                        {["admin", "operador"].includes(user.papel) && (
                           <button
                             className="icon-button"
                             aria-label={"Remover " + v.name}
@@ -1167,127 +1616,6 @@ export function Volunteers({ user, revision, refresh }) {
             setEdit(false);
             refresh();
             notify("Voluntário cadastrado.");
-          }}
-        />
-      )}
-    </>
-  );
-}
-export function UsersPage({ revision, refresh }) {
-  const { data: technicians } = useLoad("/technicians", revision);
-  const { data, loading, error } = useLoad("/users", revision),
-    [edit, setEdit] = useState(null);
-  return (
-    <>
-      <Intro
-        title="Equipe e permissões."
-        subtitle="Os acessos seguem o mesmo padrão do Estoque Pro."
-      >
-        <button className="primary-button" onClick={() => setEdit({})}>
-          <Plus size={16} />
-          Adicionar pessoa
-        </button>
-      </Intro>
-      <Panel>
-        {loading || error ? (
-          <Loading error={error} />
-        ) : (
-          <div className="zc-table-scroll">
-            <table className="zc-table">
-              <thead>
-                <tr>
-                  <th>PESSOA</th>
-                  <th>USUÁRIO</th>
-                  <th>PERFIL</th>
-                  <th>ACESSO</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {data.items.map((u) => (
-                  <tr key={u.id}>
-                    <td>
-                      <div className="zc-person">
-                        <span className="avatar">{initials(u.nome)}</span>
-                        <strong>{u.nome}</strong>
-                      </div>
-                    </td>
-                    <td>{u.login}</td>
-                    <td>
-                      {u.papel === "admin"
-                        ? "Administrador"
-                        : u.papel === "tecnico"
-                          ? "Técnico"
-                          : "Operador"}
-                    </td>
-                    <td>
-                      <Badge value={u.ativo ? "approved" : "CANCELADO"} />
-                    </td>
-                    <td>
-                      <button
-                        className="secondary-button"
-                        onClick={() => setEdit(u)}
-                      >
-                        Gerenciar
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Panel>
-      {edit && (
-        <FormModal
-          title={edit.id ? "Editar acesso" : "Adicionar pessoa"}
-          initial={{ ativo: true, papel: "operador", ...edit }}
-          fields={[
-            { name: "nome", label: "Nome", required: true },
-            { name: "login", label: "Usuário", required: true },
-            {
-              name: "papel",
-              label: "Perfil",
-              options: [
-                ["operador", "Operador"],
-                ["admin", "Administrador"],
-                ["tecnico", "Técnico"],
-              ],
-            },
-            {
-              name: "technician_id",
-              label: "Cadastro do técnico (obrigatório no perfil Técnico)",
-              options: [
-                ["", "Selecione o técnico"],
-                ...(technicians?.items || [])
-                  .filter((t) => t.active)
-                  .map((t) => [t.id, t.name]),
-              ],
-              full: true,
-            },
-            {
-              name: "password",
-              label: edit.id ? "Nova senha (opcional)" : "Senha inicial",
-              type: "password",
-              required: !edit.id,
-            },
-            { name: "ativo", label: "Acesso ativo", type: "checkbox" },
-          ]}
-          onClose={() => setEdit(null)}
-          onSave={async (v) => {
-            const payload = {
-              nome: v.nome,
-              login: v.login,
-              papel: v.papel,
-              technician_id: v.technician_id,
-              ativo: v.ativo,
-              ...(v.password ? { password: v.password } : {}),
-            };
-            if (edit.id) await api.patch("/users/" + edit.id, payload);
-            else await api.post("/users", payload);
-            setEdit(null);
-            refresh();
-            notify("Acesso salvo.");
           }}
         />
       )}

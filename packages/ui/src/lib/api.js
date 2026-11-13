@@ -1,6 +1,9 @@
 import axios from "axios";
 import { apiBaseUrl } from "./api-url";
-const TOKEN_KEY = "zencontrol.session";
+const TOKEN_KEY =
+  import.meta.env.VITE_APP_AUDIENCE === "technician"
+    ? "technician.session"
+    : "zencontrol.session";
 let mutationPending = false;
 
 export const api = axios.create({
@@ -12,6 +15,7 @@ export function saveToken(token) {
   if (token) sessionStorage.setItem(TOKEN_KEY, token);
   else sessionStorage.removeItem(TOKEN_KEY);
 }
+export const sessionToken = () => sessionStorage.getItem(TOKEN_KEY);
 
 export function errorMessage(error) {
   if (error.code === "INVENT_BUSY") return "Aguarde a operação em andamento.";

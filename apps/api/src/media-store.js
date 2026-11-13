@@ -4,7 +4,7 @@ const { createHash } = require("node:crypto");
 const { fail } = require("./errors");
 
 const stores = new WeakMap();
-const photoName = /^[-a-f0-9]+\.jpg$/;
+const photoName = /^[-a-f0-9]+\.(?:jpg|pdf)$/;
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 function validateMediaConfig(cfg) {
   const provider = cfg.MEDIA_STORAGE || "local";
@@ -58,6 +58,13 @@ function createMediaStore(cfg) {
     store = {
       ready: async () => {},
       read: (name) => fs.readFile(path.join(root, checked(name))),
+      async remove(names) {
+        await Promise.all(
+          names.map((name) =>
+            fs.rm(path.join(root, checked(name)), { force: true }),
+          ),
+        );
+      },
       async put(name, bytes) {
         checked(name);
         await fs.mkdir(root, { recursive: true });
@@ -107,12 +114,16 @@ function createMediaStore(cfg) {
         if (data.size > 16 * 1024 * 1024) throw unavailable();
         return Buffer.from(await data.arrayBuffer());
       },
+      async remove(names) {
+        const { error } = await bucket.remove(names.map(checked));
+        if (error) throw unavailable();
+      },
       async put(name, bytes) {
         checked(name);
         if (!Buffer.isBuffer(bytes) || bytes.length > 16 * 1024 * 1024)
           fail(400, "Foto acima do limite de armazenamento.");
         const { error } = await bucket.upload(name, bytes, {
-          contentType: "image/jpeg",
+          contentType: name.endsWith(".pdf") ? "application/pdf" : "image/jpeg",
           cacheControl: "0",
           upsert: false,
         });

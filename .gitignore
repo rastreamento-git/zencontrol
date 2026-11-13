@@ -15,3 +15,5 @@ wppconnect-server/dist/
 wppconnect-server/
 *.zip
 *.7z
+
+.homologation*/

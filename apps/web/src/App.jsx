@@ -1,8 +1,19 @@
+import SpreadsheetImport from "./components/SpreadsheetImport";
+import ThemeControl from "@zen/ui/components/ThemeControl";
+import ZenMark from "@zen/ui/components/ZenMark";
+import {
+  passwordInputProps,
+  passwordRequirements,
+} from "@zen/ui/lib/password-policy";
+import AppLinks from "@zen/ui/components/AppLinks";
+import ProfileButton from "@zen/ui/components/ProfileButton";
+import Chat from "@zen/ui/components/Chat";
+import { NoticeBell, FinancePanel } from "./components/Ecosystem";
+import OperationalServices from "./components/OperationalServices";
 import { useEffect, useRef, useState } from "react";
 import {
   Activity,
   Bell,
-  CalendarDays,
   CheckCheck,
   ChevronRight,
   ClipboardList,
@@ -10,33 +21,28 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
+  MessageCircle,
   Plus,
   RefreshCw,
   Search,
   Settings,
   Users,
   Wallet,
-  Wrench,
   X,
   Download,
+  FileUp,
   Heart,
-  KeyRound,
+  ShieldCheck,
 } from "lucide-react";
 import { useSession } from "@zen/ui/lib/session";
 import { api, errorMessage, saveToken } from "@zen/ui/lib/api";
 import { notify } from "@zen/ui/lib/feedback";
 import AppFooter from "@zen/ui/components/AppFooter";
 import Dashboard from "./components/Dashboard";
-import {
-  Orders,
-  OrderEditor,
-  Technicians,
-  Volunteers,
-  UsersPage,
-} from "./components/Records";
+import { Orders, OrderEditor, Volunteers } from "./components/Records";
+import TeamAccess from "./components/TeamAccess";
 import {
   Batches,
-  Finance,
   SettingsPage,
   Queue,
   HistoryPage,
@@ -51,9 +57,9 @@ const groups = [
     label: "Operação",
     items: [
       ["orders", "Ordens de serviço", ClipboardList],
-      ["agenda", "Agenda", CalendarDays],
       ["batches", "Validações", CheckCheck],
-      ["technicians", "Equipe técnica", Wrench],
+      ["chat", "Conversas", MessageCircle],
+      ["blocking", "Bloqueios", ShieldCheck],
     ],
   },
   {
@@ -63,14 +69,28 @@ const groups = [
       ["finance", "Financeiro", Wallet, true],
       ["history", "Histórico", History, true],
       ["users", "Equipe e acessos", Users, true],
+      ["imports", "Importação", FileUp, true],
       ["settings", "Configurações", Settings, true],
     ],
   },
 ];
 export default function App() {
   const user = useSession(),
-    admin = user.papel === "admin";
-  const [tab, setTab] = useState("dashboard"),
+    admin = ["admin", "operador"].includes(user.papel);
+  const shortcut = new URLSearchParams(window.location.search).get("area");
+  const [tab, setTab] = useState(
+      [
+        "orders",
+        "agenda",
+        "batches",
+        ...(user.papel === "admin" ? ["imports"] : []),
+      ].includes(shortcut)
+        ? shortcut
+        : "dashboard",
+    ),
+    [chatMode, setChatMode] = useState(shortcut === "chat" ? "full" : "closed"),
+    [chatTarget, setChatTarget] = useState(null),
+    [chatNoticeRevision, setChatNoticeRevision] = useState(0),
     [menu, setMenu] = useState(false),
     [search, setSearch] = useState(""),
     [query, setQuery] = useState(""),
@@ -82,18 +102,33 @@ export default function App() {
     [order, setOrder] = useState(null),
     [password, setPassword] = useState(false),
     [updated, setUpdated] = useState(null);
-  const body = useRef(null);
+  const body = useRef(null),
+    menuToggle = useRef(null);
+  const menuTab = tab === "agenda" ? "orders" : tab;
   const title =
-    groups.flatMap((g) => g.items).find((v) => v[0] === tab)?.[1] ||
-    "Fila de integrações";
+    tab === "agenda"
+      ? "Agenda"
+      : groups.flatMap((g) => g.items).find((v) => v[0] === tab)?.[1] ||
+        "Fila de integrações";
   const [loading, setLoading] = useState(true);
   function navigate(t) {
-    setTab(t);
     setMenu(false);
+    if (t === "chat") setChatMode("full");
+    else setTab(t);
   }
   function refresh() {
     setRevision((r) => r + 1);
   }
+  useEffect(() => {
+    if (!menu) return;
+    const close = (event) => {
+      if (event.key !== "Escape") return;
+      setMenu(false);
+      menuToggle.current?.focus();
+    };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [menu]);
   useEffect(() => {
     const handler = (e) => setBusy(e.detail);
     window.addEventListener("invent:busy", handler);
@@ -140,7 +175,10 @@ export default function App() {
     openOrder: (id) => setOrder({ id: id || null }),
   };
   return (
-    <div className="inventory-app">
+    <div className="inventory-app zen-shell zen-shell-control">
+      <a className="skip-link" href="#zencontrol-content">
+        Ir para o conteúdo
+      </a>
       {menu && (
         <button
           className="sidebar-backdrop"
@@ -154,13 +192,13 @@ export default function App() {
       >
         <div className="brand">
           <span className="brand-mark">
-            <Activity size={23} />
+            <ZenMark variant="control" size={36} />
           </span>
           <div>
             <strong>
               Zen<span>Control</span>
             </strong>
-            <small>Agendamentos & atendimento</small>
+            <small>Gestão de serviços</small>
           </div>
           <button
             className="icon-button sidebar-close"
@@ -175,42 +213,50 @@ export default function App() {
             <div className="nav-group" key={g.label}>
               <p>{g.label}</p>
               {g.items
-                .filter(([, , , a]) => !a || admin)
+                .filter(
+                  ([id, , , a]) =>
+                    (id !== "imports" || user.papel === "admin") &&
+                    (!a || admin),
+                )
                 .map(([id, label, Icon]) => (
                   <button
                     key={id}
-                    className={"nav-item " + (tab === id ? "is-active" : "")}
+                    className={
+                      "nav-item " + (menuTab === id ? "is-active" : "")
+                    }
                     onClick={() => navigate(id)}
-                    aria-current={tab === id ? "page" : undefined}
+                    aria-current={menuTab === id ? "page" : undefined}
+                    aria-haspopup={id === "chat" ? "dialog" : undefined}
                   >
                     <Icon size={18} />
                     <span>{label}</span>
-                    {tab === id && <ChevronRight size={15} />}
+                    {menuTab === id && <ChevronRight size={15} />}
                   </button>
                 ))}
             </div>
           ))}
+          <AppLinks />
         </nav>
         <div className="sidebar-footer">
           <span className="avatar">{initials(user.nome)}</span>
           <div>
             <strong>{user.nome}</strong>
-            <small>{admin ? "Administrador" : "Operador"}</small>
+            <small>
+              {user.papel === "admin" ? "Administrador" : "Operador"}
+            </small>
           </div>
-          <button
-            className="icon-button"
-            title="Alterar senha"
-            aria-label="Alterar senha"
-            onClick={() => setPassword(true)}
-          >
-            <KeyRound size={17} />
-          </button>
           <button
             className="icon-button"
             title="Sair"
             aria-label="Sair"
             disabled={busy}
-            onClick={() => {
+            onClick={async () => {
+              try {
+                await api.post("/auth/logout", {});
+              } catch (e) {
+                notify(errorMessage(e), "error");
+                return;
+              }
               saveToken(null);
               window.dispatchEvent(
                 new CustomEvent("invent:unauthorized", {
@@ -229,7 +275,9 @@ export default function App() {
             <button
               className="icon-button menu-toggle"
               aria-label="Abrir menu"
+              ref={menuToggle}
               aria-expanded={menu}
+              aria-controls="zencontrol-menu"
               onClick={() => setMenu(true)}
             >
               <Menu size={22} />
@@ -242,46 +290,59 @@ export default function App() {
               <h1>{title}</h1>
             </div>
           </div>
-          <form
-            className="topbar-search"
-            role="search"
-            onSubmit={(e) => {
-              e.preventDefault();
-              setQuery(search.trim());
-              navigate("orders");
-            }}
-          >
-            <Search size={17} />
-            <input
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Pesquisar OS, placa ou associado…"
-              aria-label="Pesquisar OS, placa ou associado"
-              maxLength={200}
-            />
-            <button type="submit" aria-label="Executar pesquisa">
-              <ChevronRight size={18} />
-            </button>
-          </form>
+          {tab !== "orders" && (
+            <form
+              className="topbar-search"
+              role="search"
+              onSubmit={(e) => {
+                e.preventDefault();
+                setQuery(search.trim());
+                navigate("orders");
+              }}
+            >
+              <Search size={17} />
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Pesquisar OS, placa ou associado…"
+                aria-label="Pesquisar OS, placa ou associado"
+                maxLength={200}
+              />
+              <button type="submit" aria-label="Executar pesquisa">
+                <ChevronRight size={18} />
+              </button>
+            </form>
+          )}
           <div className="topbar-actions">
+            <ThemeControl />
             <span className="header-date">
               {new Date().toLocaleDateString("pt-BR", {
                 day: "2-digit",
                 month: "long",
               })}
             </span>
-            <button
-              className="icon-button notification-button is-enabled"
-              aria-label="Fila de envios e avisos"
-              title="Fila de envios e avisos"
-              onClick={() => navigate("queue")}
-            >
-              <Bell size={20} />
-              {overview?.validations > 0 && (
-                <span className="notification-dot" />
-              )}
-            </button>
+            <NoticeBell
+              chatRevision={chatNoticeRevision}
+              onOpen={(n) => {
+                if (
+                  n.target === "chat" &&
+                  Number.isSafeInteger(n.detail.technician_id)
+                ) {
+                  setChatTarget({
+                    id: n.detail.technician_id,
+                    name: n.detail.technician,
+                  });
+                  navigate("chat");
+                  return;
+                }
+                if (n.detail.order_id) {
+                  setOrder({ id: n.detail.order_id });
+                  navigate("batches");
+                } else
+                  navigate(n.target === "requests" ? "finance" : "batches");
+              }}
+            />
             {admin && (
               <button
                 className="icon-button"
@@ -296,12 +357,15 @@ export default function App() {
                 <Download size={19} />
               </button>
             )}
-            <span className="avatar header-avatar" title={user.nome}>
-              {initials(user.nome)}
-            </span>
+            <ProfileButton compact onPassword={() => setPassword(true)} />
           </div>
         </header>
-        <div className="app-content" ref={body}>
+        <div
+          className="app-content"
+          id="zencontrol-content"
+          tabIndex={-1}
+          ref={body}
+        >
           <div className="sync-toolbar">
             <span
               className={"sync-status " + (error ? "has-error" : "")}
@@ -337,22 +401,26 @@ export default function App() {
               <Dashboard {...props} />
             ) : ["orders", "agenda"].includes(tab) ? (
               <Orders
+                key={tab}
                 {...props}
                 agenda={tab === "agenda"}
                 globalQuery={query}
+                onChangeView={navigate}
               />
-            ) : tab === "technicians" ? (
-              <Technicians {...props} />
             ) : tab === "volunteers" ? (
               <Volunteers {...props} />
-            ) : tab === "users" ? (
-              <UsersPage {...props} />
+            ) : tab === "users" && admin ? (
+              <TeamAccess revision={revision} refresh={refresh} />
             ) : tab === "batches" ? (
               <Batches {...props} />
+            ) : tab === "blocking" ? (
+              <OperationalServices {...props} />
             ) : tab === "finance" ? (
-              <Finance {...props} />
+              <FinancePanel />
             ) : tab === "history" ? (
               <HistoryPage {...props} />
+            ) : tab === "imports" && user.papel === "admin" ? (
+              <SpreadsheetImport />
             ) : tab === "settings" ? (
               <SettingsPage {...props} />
             ) : (
@@ -362,6 +430,15 @@ export default function App() {
         </div>
         <AppFooter />
       </main>
+      <Chat
+        mode={chatMode}
+        onModeChange={setChatMode}
+        targetThread={chatTarget}
+        onNotice={(newMessage) => {
+          setChatNoticeRevision((n) => n + 1);
+          if (newMessage) notify("Nova mensagem na caixa da operação.", "info");
+        }}
+      />
       {order && (
         <OrderEditor
           key={order.id || "new"}
@@ -373,10 +450,11 @@ export default function App() {
       {password && (
         <FormModal
           title="Alterar senha"
-          description="Use uma senha de 12 a 128 caracteres."
+          description={passwordRequirements}
           fields={[
             {
               name: "current_password",
+              autoComplete: "current-password",
               label: "Senha atual",
               type: "password",
               required: true,
@@ -384,6 +462,7 @@ export default function App() {
             },
             {
               name: "new_password",
+              ...passwordInputProps,
               label: "Nova senha",
               type: "password",
               required: true,

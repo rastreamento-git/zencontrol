@@ -2,6 +2,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const os = require("node:os");
 const { createMediaStore, photoName } = require("./media-store");
+const { maxChatPhotos, validPhotoReference } = require("./chat-photos");
 const { createHash } = require("node:crypto");
 const { transaction } = require("./database");
 const { fail } = require("./errors");
@@ -9,6 +10,7 @@ const d = require("./domain");
 const tables = [
   "zc_technicians",
   "zc_volunteers",
+  "zc_order_counters",
   "zc_orders",
   "zc_order_extras",
   "zc_settlements",
@@ -21,6 +23,18 @@ const tables = [
   "zc_batches",
   "zc_evidence",
   "zc_migration_runs",
+  "zc_spreadsheet_imports",
+  "zc_sga_import_tasks",
+  "zc_rates",
+  "zc_closing_policies",
+  "zc_holidays",
+  "zc_financial_ledger",
+  "zc_requests",
+  "zc_adjustments",
+  "zc_payments",
+  "zc_notifications",
+  "zc_operational_services",
+  "zc_chat_messages",
 ];
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 async function prepareBackup(pool, cfg) {
@@ -53,9 +67,16 @@ async function prepareBackup(pool, cfg) {
   };
   try {
     for (const name of new Set(
-      snapshot.data.zc_evidence
-        .flatMap((e) => [e.path, e.original_path])
-        .filter(Boolean),
+      [
+        ...snapshot.data.zc_evidence.flatMap((e) => [e.path, e.original_path]),
+        ...snapshot.data.zc_chat_messages.flatMap((m) =>
+          m.photos.map((p) => p.path),
+        ),
+        ...snapshot.data.zc_payments.map((p) => p.receipt_path),
+        ...snapshot.data.zc_requests
+          .filter((r) => r.kind === "expense")
+          .map((r) => r.proposed.receipt?.path),
+      ].filter(Boolean),
     )) {
       if (!photoName.test(name))
         fail(
@@ -136,6 +157,30 @@ async function restoreBackup(pool, cfg, source, apply = false) {
     Array.isArray(manifest.media)
   )
     fail(400, "Formato ou integridade do backup inválidos.");
+  const additions = [
+    "zc_rates",
+    "zc_closing_policies",
+    "zc_holidays",
+    "zc_financial_ledger",
+    "zc_requests",
+    "zc_adjustments",
+    "zc_payments",
+    "zc_notifications",
+  ];
+  // Backups from before operational services remain restorable.
+  if (!Object.hasOwn(snapshot.data, "zc_operational_services"))
+    snapshot.data.zc_operational_services = [];
+  if (!Object.hasOwn(snapshot.data, "zc_chat_messages"))
+    snapshot.data.zc_chat_messages = [];
+  if (!Object.hasOwn(snapshot.data, "zc_spreadsheet_imports"))
+    snapshot.data.zc_spreadsheet_imports = [];
+  if (!Object.hasOwn(snapshot.data, "zc_sga_import_tasks"))
+    snapshot.data.zc_sga_import_tasks = [];
+  if (!Object.hasOwn(snapshot.data, "zc_order_counters"))
+    snapshot.data.zc_order_counters = [];
+  const legacy = tables.filter((t) => !additions.includes(t));
+  if (Object.keys(snapshot.data).sort().join() === legacy.sort().join())
+    for (const table of additions) snapshot.data[table] = [];
   if (Object.keys(snapshot.data).sort().join() !== [...tables].sort().join())
     fail(400, "As tabelas do backup não correspondem a esta versão.");
   const media = new Map();
@@ -153,6 +198,28 @@ async function restoreBackup(pool, cfg, source, apply = false) {
     for (const name of [e.path, e.original_path].filter(Boolean))
       if (!media.has(name))
         fail(400, "Uma foto referenciada não está no backup.");
+  if (!Array.isArray(snapshot.data.zc_chat_messages))
+    fail(400, "Mensagens em formato inválido.");
+  for (const message of snapshot.data.zc_chat_messages) {
+    if (message?.photos === undefined) continue;
+    if (
+      !Array.isArray(message.photos) ||
+      message.photos.length > maxChatPhotos ||
+      message.photos.some(
+        (photo) => !validPhotoReference(photo) || !media.has(photo.path),
+      )
+    )
+      fail(400, "Foto do chat inválida ou ausente no backup.");
+  }
+  for (const p of snapshot.data.zc_payments)
+    if (p.receipt_path && !media.has(p.receipt_path))
+      fail(400, "Comprovante ausente no backup.");
+  for (const r of snapshot.data.zc_requests)
+    if (
+      r.kind === "expense" &&
+      (!r.proposed.receipt?.path || !media.has(r.proposed.receipt.path))
+    )
+      fail(400, "Comprovante de despesa ausente no backup.");
   const report = {
     dry_run: !apply,
     tables: {},
@@ -200,6 +267,18 @@ async function restoreBackup(pool, cfg, source, apply = false) {
             copy.available_at = 0;
           }
           if (table === "zc_batches") copy.source_user_id = null;
+          if (table === "zc_spreadsheet_imports") {
+            copy.created_by = null;
+            copy.approved_by = null;
+          }
+          if (
+            table === "zc_sga_import_tasks" &&
+            ["running", "queued"].includes(copy.state)
+          ) {
+            copy.state = "interrupted";
+            copy.message = "Consulta recuperada de backup. Gere nova revisão.";
+          }
+          if (table === "zc_chat_messages") copy.sender_user_id = null;
           const keys = Object.keys(copy);
           if (!keys.length || keys.some((k) => !allowed.has(k)))
             fail(400, "Coluna inválida no backup.");
@@ -217,6 +296,7 @@ async function restoreBackup(pool, cfg, source, apply = false) {
             "zc_volunteers",
             "zc_order_extras",
             "zc_audit",
+            "zc_chat_messages",
           ].includes(table)
         )
           await tx.query(
@@ -237,7 +317,7 @@ async function restoreBackup(pool, cfg, source, apply = false) {
             seen.has(r.service) ||
             !Array.isArray(r.required_photos) ||
             !r.required_photos.length ||
-            r.required_photos.length > 5
+            r.required_photos.length > 7
           )
             fail(400, "Regra do backup inválida.");
           seen.add(r.service);
@@ -258,9 +338,15 @@ async function restoreBackup(pool, cfg, source, apply = false) {
           for (const p of r.required_photos) {
             if (
               !p ||
-              !["vehicle", "label", "installed", "service", "other"].includes(
-                p.kind,
-              ) ||
+              ![
+                "vehicle",
+                "label",
+                "installed",
+                "service",
+                "other",
+                "inspection",
+                "checklist",
+              ].includes(p.kind) ||
               kinds.has(p.kind) ||
               !Number.isInteger(p.min) ||
               p.min < 1 ||
