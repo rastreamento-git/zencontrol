@@ -53,7 +53,7 @@ function configureSgaIntake(app, pool, cfg, client) {
   });
   app.get("/api/sga-intake/runs", staff, async (req, res) =>
     res.json({
-      items: (await d.rows(
+      items: await d.rows(
         pool,
         "SELECT id,day,state,actor,attempts,created_at,finished_at,summary,message,CASE WHEN run_key LIKE 'daily:%' THEN 'automatic' ELSE 'manual' END AS origin,COALESCE(config->>'period_start',day) AS period_start,COALESCE(config->>'period_end',day) AS period_end FROM zc_sga_intake_runs ORDER BY created_at DESC,id DESC LIMIT 15",
       ),
@@ -83,7 +83,7 @@ function configureSgaIntake(app, pool, cfg, client) {
       total,
       page,
       limit,
-      items: await d.rows(
+      items: (await d.rows(
         pool,
         "SELECT e.id,e.customer_name,e.vehicle,e.chassis,e.movement_at,e.received_at,e.data,e.run_id,e.sga_vehicle_id,e.raw_source,CASE WHEN r.run_key LIKE 'daily:%' THEN 'automatic' ELSE 'manual' END AS origin,COALESCE(r.config->>'period_start',r.day) AS period_start,COALESCE(r.config->>'period_end',r.day) AS period_end" + from +
           condition +
