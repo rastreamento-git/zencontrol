@@ -39,6 +39,8 @@ import {
 } from "./common";
 export function Orders({
   agenda,
+  pending = false,
+  initialRunId = "",
   meta,
   revision,
   openOrder,
@@ -75,12 +77,14 @@ export function Orders({
     <>
       <Intro
         title={
-          agenda
+          pending ? "Instalações aguardando OS"
+            : agenda
             ? "Sua agenda, organizada."
             : "Cada atendimento no lugar certo."
         }
         subtitle={
-          agenda
+          pending ? "Cadastros SGA prontos para revisão e atribuição, ainda sem numeração."
+            : agenda
             ? "Confira os atendimentos por dia e técnico."
             : "Cadastre, encaminhe e acompanhe as ordens de serviço."
         }
@@ -90,19 +94,12 @@ export function Orders({
           Nova ordem de serviço
         </button>
       </Intro>
-      {!agenda && (
-        <SgaIntake
-          revision={revision}
-          openOrder={openOrder}
-          refresh={refresh}
-        />
-      )}
       <Panel>
         <nav className="zc-filters" aria-label="Visualização dos serviços">
           <button
             type="button"
-            className={agenda ? "secondary-button" : "primary-button"}
-            aria-pressed={!agenda}
+            className={agenda || pending ? "secondary-button" : "primary-button"}
+            aria-pressed={!agenda && !pending}
             onClick={() => onChangeView("orders")}
           >
             Lista de OS
@@ -115,7 +112,15 @@ export function Orders({
           >
             Agenda
           </button>
+          <button type="button" className={pending ? "primary-button" : "secondary-button"} aria-pressed={pending} onClick={() => onChangeView("sga-pending")}>
+            Pendências SGA · Sem OS
+          </button>
         </nav>
+      </Panel>
+      {pending ? (
+        <SgaIntake revision={revision} openOrder={openOrder} refresh={refresh} initialRunId={initialRunId} />
+      ) : (
+      <Panel>
         {agenda ? (
           <div className="zc-filters">
             <label>
@@ -287,6 +292,7 @@ export function Orders({
           </>
         )}
       </Panel>
+      )}
     </>
   );
 }

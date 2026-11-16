@@ -569,10 +569,18 @@ test("rotas reservam configuração e coleta ao administrador e impedem acesso t
       403,
     );
     assert.equal((await get("/api/sga-intake/entries", "tecnico")).status, 403);
-    assert.equal(
-      (await get("/api/sga-intake/entries", "operador")).status,
-      200,
-    );
+    const manualResponse = await get("/api/sga-intake/entries?origin=manual", "operador");
+    assert.equal(manualResponse.status, 200);
+    const manual = await manualResponse.json();
+    assert.ok(manual.items.length > 0);
+    assert.ok(manual.items.every(entry => entry.origin === "manual" && entry.run_id && entry.period_start && entry.period_end));
+    const selectedRun = manual.items[0].run_id;
+    const byRun = await (await get("/api/sga-intake/entries?run_id=" + selectedRun, "operador")).json();
+    assert.ok(byRun.items.length > 0);
+    assert.ok(byRun.items.every(entry => entry.run_id === selectedRun));
+    const auto = await (await get("/api/sga-intake/entries?origin=automatic", "operador")).json();
+    assert.ok(auto.items.every(entry => entry.origin === "automatic"));
+    assert.equal((await get("/api/sga-intake/entries?origin=invalid", "operador")).status,400);
     assert.equal(
       (await get("/api/sga-intake/runs", "admin", "POST", {})).status,
       400,

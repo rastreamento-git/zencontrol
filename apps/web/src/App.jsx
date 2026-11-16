@@ -82,6 +82,7 @@ export default function App() {
       [
         "orders",
         "agenda",
+        "sga-pending",
         "batches",
         ...(user.papel === "admin" ? ["imports"] : []),
       ].includes(shortcut)
@@ -92,6 +93,7 @@ export default function App() {
     [chatTarget, setChatTarget] = useState(null),
     [chatNoticeRevision, setChatNoticeRevision] = useState(0),
     [menu, setMenu] = useState(false),
+    [pendingRun, setPendingRun] = useState(""),
     [search, setSearch] = useState(""),
     [query, setQuery] = useState(""),
     [meta, setMeta] = useState(null),
@@ -104,17 +106,25 @@ export default function App() {
     [updated, setUpdated] = useState(null);
   const body = useRef(null),
     menuToggle = useRef(null);
-  const menuTab = tab === "agenda" ? "orders" : tab;
+  const menuTab = ["agenda", "sga-pending"].includes(tab) ? "orders" : tab;
   const title =
     tab === "agenda"
       ? "Agenda"
-      : groups.flatMap((g) => g.items).find((v) => v[0] === tab)?.[1] ||
+      : tab === "sga-pending" ? "Ordens de serviço · Pendências SGA" : groups.flatMap((g) => g.items).find((v) => v[0] === tab)?.[1] ||
         "Fila de integrações";
   const [loading, setLoading] = useState(true);
   function navigate(t) {
     setMenu(false);
     if (t === "chat") setChatMode("full");
-    else setTab(t);
+    else {
+      if (t === "sga-pending") setPendingRun("");
+      setTab(t);
+    }
+  }
+  function openPendingQueue(runId = "") {
+    setPendingRun(runId);
+    setMenu(false);
+    setTab("sga-pending");
   }
   function refresh() {
     setRevision((r) => r + 1);
@@ -399,11 +409,13 @@ export default function App() {
               <Loading error={error} />
             ) : tab === "dashboard" ? (
               <Dashboard {...props} />
-            ) : ["orders", "agenda"].includes(tab) ? (
+            ) : ["orders", "agenda", "sga-pending"].includes(tab) ? (
               <Orders
                 key={tab}
                 {...props}
                 agenda={tab === "agenda"}
+                pending={tab === "sga-pending"}
+                initialRunId={pendingRun}
                 globalQuery={query}
                 onChangeView={navigate}
               />
@@ -420,7 +432,7 @@ export default function App() {
             ) : tab === "history" ? (
               <HistoryPage {...props} />
             ) : tab === "imports" && user.papel === "admin" ? (
-              <ImportPage {...props} />
+              <ImportPage {...props} onOpenQueue={openPendingQueue} />
             ) : tab === "settings" ? (
               <SettingsPage {...props} />
             ) : (
