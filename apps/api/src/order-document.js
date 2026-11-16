@@ -241,7 +241,7 @@ function orderDocument(order, masked = true, { portalUrl = "" } = {}) {
         ? formatPhone(order.contact)
         : order.contact,
       document: hidden(data.cpf_cnpj, "cpf_cnpj", masked),
-      rg: scalar(v.rg, owner.rg),
+      rg: hidden(data.rg, "rg", masked),
       address: data.customer_address,
     },
     vehicle: {
@@ -347,7 +347,7 @@ function mapSgaVehicle(v) {
     location: address,
     document_data: {
       cpf_cnpj: scalar(v.cpf, v.cnpj, v.cpf_cnpj, owner.cpf, owner.cnpj, owner.cpf_cnpj),
-      rg: scalar(v.rg),
+      rg: scalar(v.rg, owner.rg),
       customer_address: address,
       customer_street: scalar(v.logradouro, v.endereco, owner.logradouro, owner.endereco),
       customer_number: scalar(v.numero, owner.numero),
