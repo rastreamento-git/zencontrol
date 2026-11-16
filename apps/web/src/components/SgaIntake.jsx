@@ -3,6 +3,8 @@ import Modal from "@zen/ui/components/Modal";
 import { api, errorMessage, format } from "./common";
 import { notify } from "@zen/ui/lib/feedback";
 import SgaProducts from "./SgaProducts";
+import { classifyFipe, fipeRegions } from "@zen/domain/fipe.mjs";
+import { brazilStates, addressFields } from "@zen/domain/order-fields.mjs";
 import "./sga-intake.css";
 export default function SgaIntake({
   settings = false,
@@ -31,7 +33,7 @@ export default function SgaIntake({
     [expanded, setExpanded] = useState(true),
     [showSettings, setShowSettings] = useState(false);
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-  const [start, setStart] = useState(today), [end, setEnd] = useState(today), [complementary, setComplementary] = useState(false);
+  const [start, setStart] = useState(today), [end, setEnd] = useState(today), [complementary, setComplementary] = useState(true);
   const activeRuns = runs.filter(r => ["running","queued"].includes(r.state));
   const reload = async () => {
     const [{ data: entries }, { data: history }] = await Promise.all([
@@ -117,14 +119,21 @@ export default function SgaIntake({
       setAssignment({
         technician_id: "",
         scheduled_at: "",
-        archive: "",
+        archive: "HOT",
         electric: "",
         customer_choice: "",
-        fipe_value: "", vehicle_type: "", fipe_region: "",
+        fipe_value: "", vehicle_type: "", fipe_region: "", contact: "", volunteer: "", document_data: {},
         sticker_discount_opt_in: data.data.sga_products?.perfurado === true,
       });
     });
   }
+  const doc = selected?.data.document_data || {};
+  const fipe = classifyFipe({ value: selected?.data.fipe_value || assignment.fipe_value, vehicleType: doc.vehicle_type || assignment.vehicle_type, region: doc.fipe_region || assignment.fipe_region });
+  const field = (label, key, document = false) => {
+    const stored = document ? doc[key] : selected?.data[key];
+    const value = stored || (document ? assignment.document_data?.[key] : assignment[key]) || "";
+    return <label key={key}>{label}{key === "customer_state" ? <select disabled={!!stored || busy} value={value} onChange={e => setAssignment(a => ({...a,document_data:{...a.document_data,[key]:e.target.value}}))}><option value="">Selecione a UF</option>{brazilStates.map(uf => <option key={uf}>{uf}</option>)}</select> : <input readOnly={!!stored} disabled={busy} value={value} placeholder="Não informado" onChange={e => setAssignment(a => document ? {...a,document_data:{...a.document_data,[key]:e.target.value}} : {...a,[key]:e.target.value})}/>}</label>;
+  };
   return (
     <section className="sga-intake" aria-label="Instalações pendentes do SGA">
       <div className="sga-intake-heading">
@@ -374,7 +383,7 @@ export default function SgaIntake({
             <p>Nenhuma instalação pendente recebida nesta lista.</p>
           ) : (
             <div className="zc-table-scroll">
-              <table className="zc-table">
+              <table className="zc-table zc-responsive-table">
                 <thead>
                   <tr>
                     <th>Associado / veículo</th>
@@ -396,10 +405,11 @@ export default function SgaIntake({
                           "Modelo não informado"}
                         <br />
                         <small>SGA {entry.data.sga_id} · Sem OS</small>
+                        <small>{[entry.data.contact,entry.data.document_data?.customer_city,entry.data.document_data?.customer_state].filter(Boolean).join(" · ") || "Contato ou endereço não informado"}</small>
                       </td>
                       <td>{format(entry.movement_at, true)}</td>
                       <td>{entry.origin === "automatic" ? "Automática" : "Manual"}<br/><small>{entry.period_start} a {entry.period_end}</small></td>
-                      <td>{entry.data.fipe_value || "Não informado"}</td>
+                      <td><strong>{entry.data.fipe_value || "Não informado"}</strong><small>{entry.data.fipe_risk || "Não classificado"}</small></td>
                       <td>
                         {entry.data.sga_products?.perfurado === true
                           ? "Ativo"
@@ -454,23 +464,26 @@ export default function SgaIntake({
           onClose={() => setSelected(null)}
         >
           <div className="sga-intake-detail">
-            <p>
-              <strong>{selected.customer_name}</strong> · {selected.vehicle} ·{" "}
-              {selected.data.document_data?.model}
-            </p>
-            <p>
-              Este cadastro ainda não tem OS. Ao confirmar a atribuição, a
-              regularidade será consultada novamente no SGA e o número será
-              gerado com a data de hoje.
-            </p>
-            <p><strong>FIPE:</strong> {selected.data.fipe_value || "Não informada no SGA"} · {selected.data.document_data?.vehicle_type || "Tipo não informado"}. FIPE alta exige rastreador e TAG; elétricos exigem consulta ao cliente.</p>
-            <SgaProducts value={selected.data.sga_products} />
-            <details>
-              <summary>Todos os dados originais recebidos</summary>
-              <pre className="sga-raw-data">
-                {JSON.stringify(selected.raw_source, null, 2)}
-              </pre>
-            </details>
+            <div className="sga-prepared-header">
+              <div><small>INSTALAÇÃO · SEM NÚMERO DE OS</small><h2>{selected.customer_name}</h2><p>{selected.vehicle} · {doc.model || "Modelo não informado"}</p></div>
+              <div className="sga-prepared-status"><strong>Cadastro importado</strong><small>SGA {selected.data.sga_id} · {format(selected.received_at,true)}</small></div>
+            </div>
+            <p className="zc-notice">Dados recuperados da importação salva. Complete apenas os campos ausentes. A regularidade precisa estar válida no momento de atribuir.</p>
+            <div className="sga-prepared-metrics"><div><small>Valor FIPE</small><strong>{selected.data.fipe_value || "Não informado"}</strong></div><div><small>Classificação</small><strong>{fipe.label || "A confirmar"}</strong></div><div><small>Equipamentos previstos</small><strong>{assignment.electric === "yes" && !assignment.customer_choice ? "Consultar cliente" : assignment.customer_choice === "tag_only" ? "1 TAG" : fipe.label === "Alta" ? "1 Rastreador + 1 TAG" : fipe.label ? "1 Rastreador" : "A confirmar"}</strong></div></div>
+            <fieldset className="zc-fieldset"><legend>01 · Veículo e associado</legend><div className="zc-form-grid">
+              <label>Associado<input readOnly value={selected.customer_name}/></label>
+              {field("Contato","contact")}{field("CPF / CNPJ","cpf_cnpj",true)}{field("RG","rg",true)}
+              <label>Placa ou chassi<input readOnly value={selected.vehicle}/></label><label>Chassi<input readOnly value={selected.chassis || ""}/></label>
+              {field("Renavam","renavam",true)}{field("Marca","brand",true)}{field("Modelo","model",true)}{field("Ano","year",true)}{field("Cor","color",true)}{field("Categoria","category",true)}{field("Voluntário","volunteer")}
+            </div></fieldset>
+            <fieldset className="zc-fieldset"><legend>02 · Endereço do associado</legend><div className="zc-form-grid">{addressFields.map(([key,label]) => field(label,"customer_"+key,true))}</div></fieldset>
+            <fieldset className="zc-fieldset"><legend>03 · FIPE e produtos</legend><div className="zc-form-grid">
+              <label>Valor FIPE<input readOnly={!!selected.data.fipe_value} value={selected.data.fipe_value || assignment.fipe_value || ""} onChange={e=>setAssignment(a=>({...a,fipe_value:e.target.value}))}/></label>
+              <label>Tipo de veículo<select disabled={!!doc.vehicle_type} value={doc.vehicle_type || assignment.vehicle_type || ""} onChange={e=>setAssignment(a=>({...a,vehicle_type:e.target.value}))}><option value="">Selecione</option>{[...new Set(["Automóvel","Motocicleta",doc.vehicle_type].filter(Boolean))].map(v=><option key={v}>{v}</option>)}</select></label>
+              <label>Regra regional<select disabled={!!doc.fipe_region} value={doc.fipe_region || assignment.fipe_region || ""} onChange={e=>setAssignment(a=>({...a,fipe_region:e.target.value}))}><option value="">Selecione</option>{fipeRegions.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>
+            </div><SgaProducts value={selected.data.sga_products}/></fieldset>
+            <button type="button" className="secondary-button" disabled={busy} onClick={()=>action(async()=>{const {data}=await api.patch("/sga-intake/entries/"+selected.id+"/draft",assignment);setSelected(data);await reload();notify("Cadastro salvo, sem gerar OS.");})}>Salvar preenchimento sem gerar OS</button>
+            <details><summary>Dados originais do SGA (JSON)</summary><pre className="sga-raw-data">{JSON.stringify(selected.raw_source,null,2)}</pre></details>
           </div>
           <form
             onSubmit={(e) => {
@@ -489,6 +502,7 @@ export default function SgaIntake({
               });
             }}
           >
+            <fieldset className="zc-fieldset sga-assignment-section"><legend>04 · Atendimento e responsável</legend>
             <div className="zc-form-grid">
               <label>
                 Técnico
@@ -545,7 +559,6 @@ export default function SgaIntake({
                 </select>
               </label>
             </div>
-            <details><summary>Completar FIPE ou tipo de veículo ausentes no SGA</summary><div className="zc-form-grid"><label>Valor FIPE (se ausente)<input value={assignment.fipe_value} onChange={e => setAssignment({...assignment,fipe_value:e.target.value})} placeholder="R$ 80.000,00" /></label><label>Tipo (se ausente)<select value={assignment.vehicle_type} onChange={e => setAssignment({...assignment,vehicle_type:e.target.value})}><option value="">Usar SGA</option><option>Automóvel</option><option>Motocicleta</option></select></label><label>Região FIPE (se UF ausente)<select value={assignment.fipe_region} onChange={e => setAssignment({...assignment,fipe_region:e.target.value})}><option value="">Usar SGA</option><option value="GERAL">Demais UFs</option><option>SP</option><option>RJ</option></select></label></div></details>
             <label>Veículo elétrico<select required value={assignment.electric} onChange={e => setAssignment({ ...assignment, electric: e.target.value, customer_choice: "" })} disabled={busy}><option value="">Confirme o tipo</option><option value="no">Não</option><option value="yes">Sim</option></select></label>
             {assignment.electric === "yes" && <label>Autorização após contato com o cliente<select required value={assignment.customer_choice} disabled={busy} onChange={e => setAssignment({ ...assignment, customer_choice: e.target.value })}><option value="">Aguardando consulta</option><option value="tracker">Cliente autorizou rastreador</option><option value="tag_only">Cliente autorizou somente TAG</option></select></label>}
             <label className="sga-intake-check">
@@ -563,6 +576,7 @@ export default function SgaIntake({
               Confirmar que o cliente optou pelo desconto do adesivo Perfurado
               (2371)
             </label>
+            </fieldset>
             {error && (
               <p className="form-error" role="alert">
                 {error}

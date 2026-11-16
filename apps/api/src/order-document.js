@@ -241,7 +241,7 @@ function orderDocument(order, masked = true, { portalUrl = "" } = {}) {
         ? formatPhone(order.contact)
         : order.contact,
       document: hidden(data.cpf_cnpj, "cpf_cnpj", masked),
-      rg: hidden(data.rg, "rg", masked),
+      rg: scalar(v.rg, owner.rg),
       address: data.customer_address,
     },
     vehicle: {
@@ -303,14 +303,15 @@ function displaySga(code, description) {
   return description || (code && code !== "0" ? "Cód: " + code : "");
 }
 function mapSgaVehicle(v) {
-  const phone = scalar(v.telefone_celular, v.telefone),
+  const owner = v.associado && typeof v.associado === "object" ? v.associado : {};
+  const phone = scalar(v.telefone_celular, v.celular, v.telefone, owner.telefone_celular, owner.celular, owner.telefone),
     digits = phone.replace(/\D/g, ""),
-    area = scalar(v.ddd_celular, v.ddd).replace(/\D/g, ""),
+    area = scalar(v.ddd_celular, v.ddd_telefone_celular, v.ddd, v.ddd_telefone, owner.ddd_celular, owner.ddd).replace(/\D/g, ""),
     contact = [8, 9].includes(digits.length) && area ? area + digits : phone;
-  const address = ["logradouro", "numero", "bairro", "cidade", "estado", "cep"]
-    .map((k) => scalar(v[k]))
-    .filter(Boolean)
-    .join(", ");
+  const states = {ACRE:"AC",ALAGOAS:"AL",AMAPA:"AP",AMAZONAS:"AM",BAHIA:"BA",CEARA:"CE","DISTRITO FEDERAL":"DF","ESPIRITO SANTO":"ES",GOIAS:"GO",MARANHAO:"MA","MATO GROSSO":"MT","MATO GROSSO DO SUL":"MS","MINAS GERAIS":"MG",PARA:"PA",PARAIBA:"PB",PARANA:"PR",PERNAMBUCO:"PE",PIAUI:"PI","RIO DE JANEIRO":"RJ","RIO GRANDE DO NORTE":"RN","RIO GRANDE DO SUL":"RS",RONDONIA:"RO",RORAIMA:"RR","SANTA CATARINA":"SC","SAO PAULO":"SP",SERGIPE:"SE",TOCANTINS:"TO"};
+  const stateName = d.normalized(scalar(v.uf, owner.uf, v.estado, owner.estado));
+  const state = brazilStates.includes(stateName) ? stateName : states[stateName] || "";
+  const address = [scalar(v.logradouro, v.endereco, owner.logradouro, owner.endereco), scalar(v.numero, owner.numero), scalar(v.bairro, owner.bairro), scalar(v.cidade, v.municipio, owner.cidade, owner.municipio), state, scalar(v.cep, owner.cep)].filter(Boolean).join(", ");
   const classification = scalar(
     v.classificacao_real,
     v.descricao_classificacao,
@@ -345,16 +346,16 @@ function mapSgaVehicle(v) {
     ),
     location: address,
     document_data: {
-      cpf_cnpj: scalar(v.cpf, v.cnpj, v.cpf_cnpj),
+      cpf_cnpj: scalar(v.cpf, v.cnpj, v.cpf_cnpj, owner.cpf, owner.cnpj, owner.cpf_cnpj),
       rg: scalar(v.rg),
       customer_address: address,
-      customer_street: scalar(v.logradouro),
-      customer_number: scalar(v.numero),
-      customer_block: scalar(v.bloco),
-      customer_complement: scalar(v.complemento),
-      customer_neighborhood: scalar(v.bairro),
-      customer_city: scalar(v.cidade, v.municipio),
-      customer_state: scalar(v.estado, v.uf).toUpperCase(),
+      customer_street: scalar(v.logradouro, v.endereco, owner.logradouro, owner.endereco),
+      customer_number: scalar(v.numero, owner.numero),
+      customer_block: scalar(v.bloco, owner.bloco),
+      customer_complement: scalar(v.complemento, owner.complemento),
+      customer_neighborhood: scalar(v.bairro, owner.bairro),
+      customer_city: scalar(v.cidade, v.municipio, owner.cidade, owner.municipio),
+      customer_state: state,
       plate: scalar(v.placa),
       renavam: scalar(v.renavam),
       brand: scalar(v.marca, v.descricao_marca),
@@ -363,7 +364,7 @@ function mapSgaVehicle(v) {
       year: [scalar(v.ano_fabricacao), scalar(v.ano_modelo)]
         .filter(Boolean)
         .join("/"),
-      vehicle_type: scalar(v.tipo, v.descricao_tipo_veiculo),
+      vehicle_type: scalar(v.tipo, v.descricao_tipo_veiculo, v.descricao_tipo),
       category: scalar(v.categoria, v.descricao_categoria),
     },
   };

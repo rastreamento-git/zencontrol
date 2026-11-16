@@ -25,6 +25,80 @@ function equipmentForIntake(data, input) {
   document.equipment_counts = { tracker: document.vehicle_electric && input.customer_choice === "tag_only" ? 0 : 1, tag: fipe.label === "Alta" || (document.vehicle_electric && input.customer_choice === "tag_only") ? 1 : 0 };
   return document;
 }
+// Rebuild the working form locally from the immutable imported payload.
+function preparedData(entry) {
+  const saved = entry.data || {};
+  const raw = entry.raw_source?.vehicle;
+  const mapped = raw && String(raw.codigo_veiculo) === String(entry.sga_vehicle_id) ? require("./order-document").mapSgaVehicle(raw) : {};
+  const fill = (base, extra) => {
+    const result = { ...base };
+    for (const [key, value] of Object.entries(extra || {}))
+      if ((result[key] == null || result[key] === "") && value != null && value !== "") result[key] = value;
+    return result;
+  };
+  const data = fill(saved, mapped);
+  const doc = fill(saved.document_data, mapped.document_data);
+  const { brazilStates, formatAddress } = require("../../../packages/domain/order-fields.mjs");
+  if (!brazilStates.includes(doc.customer_state)) doc.customer_state = mapped.document_data?.customer_state || "";
+  if (!doc.fipe_region && doc.customer_state) doc.fipe_region = ["SP","RJ"].includes(doc.customer_state) ? doc.customer_state : "GERAL";
+  doc.scheduled_service = "Instalação";
+  doc.service_address_same = true;
+  data.document_data = doc;
+  if (!data.location) data.location = formatAddress(doc) || doc.customer_address || "";
+  const fipe = classifyFipe({ value: data.fipe_value, vehicleType: doc.vehicle_type, region: doc.fipe_region });
+  data.fipe_risk = fipe.label || "";
+  return data;
+}
+function completeDraft(data, input) {
+  const result = { ...data, document_data: { ...data.document_data } };
+  const fields = { contact:20, volunteer:120 };
+  for (const [key, max] of Object.entries(fields))
+    if (!result[key] && input[key] !== undefined) result[key] = d.string(input[key], key, max);
+  const { documentFields } = require("./order-document");
+  const allowed = ["cpf_cnpj","rg","renavam","brand","model","year","color","category","customer_street","customer_number","customer_block","customer_complement","customer_neighborhood","customer_city","customer_state"];
+  for (const key of allowed)
+    if (!result.document_data[key] && input.document_data?.[key] !== undefined)
+      result.document_data[key] = d.string(input.document_data[key], key, documentFields[key]);
+  if (!fipeCents(result.fipe_value) && input.fipe_value) result.fipe_value = d.string(input.fipe_value,"FIPE",40);
+  if (!fipeVehicleType(result.document_data.vehicle_type) && ["Automóvel","Motocicleta"].includes(input.vehicle_type)) result.document_data.vehicle_type = input.vehicle_type;
+  if (!result.document_data.fipe_region && ["GERAL","SP","RJ"].includes(input.fipe_region)) result.document_data.fipe_region = input.fipe_region;
+  const { formatAddress } = require("../../../packages/domain/order-fields.mjs");
+  result.document_data = require("./order-document").normalizeDocumentData(result.document_data);
+  result.location = formatAddress(result.document_data) || result.location || "";
+  return result;
+}
+async function saveDraft(pool, id, input, actor) {
+  return transaction(pool, async db => {
+    const entry = await d.one(db,"SELECT * FROM zc_sga_intake WHERE id=$1 FOR UPDATE",[id]);
+    if (!entry) fail(404,"Pendência não encontrada.");
+    if (entry.order_id) fail(409,"Esta pendência já foi atribuída.");
+    const data = completeDraft(preparedData(entry), input || {});
+    await db.query("UPDATE zc_sga_intake SET data=$2 WHERE id=$1",[id,JSON.stringify(data)]);
+    await d.audit(db,actor,"sga_intake_draft_completed","sga_intake",id);
+    return { ...entry, data: preparedData({...entry,data}) };
+  });
+}
+async function schedulingData(client, entry, data) {
+  const check = eligibility.snapshot(data);
+  // A timestamp must come from the stored assessment, not snapshot's fallback.
+  if (data.sga_assessment?.checked_at && eligibility.usable(check,data) && check.assessment.eligible) return data;
+  const searches = [{sga_id:entry.sga_vehicle_id}];
+  const chassis = d.vehicle(data.chassis), plate = d.vehicle(data.document_data?.plate || data.vehicle);
+  if (chassis.length === 17) searches.push({chassis});
+  if (/^[A-Z]{3}[0-9][A-Z0-9][0-9]{2}$/.test(plate)) searches.push({term:plate});
+  let last;
+  for (const search of searches) {
+    try {
+      const fresh = await client.lookup(search);
+      if (String(fresh.sga_id) !== String(entry.sga_vehicle_id)) fail(409,"O SGA retornou outro veículo.");
+      return fresh;
+    } catch (error) {
+      if (error.reasonCode !== "vehicle_not_found" && ![404,406].includes(error.upstreamStatus)) throw error;
+      last = error;
+    }
+  }
+  throw last || new IntegrationError("Não foi possível confirmar a situação atual no SGA.");
+}
 const customerKey = (value) => d.normalized(value).replace(/[^A-Z0-9]/g, "");
 const localTime = (date = new Date()) =>
   new Intl.DateTimeFormat("en-GB", {
@@ -476,10 +550,11 @@ async function assign(pool, cfg, client, id, input, actor) {
     fail(400, "Selecione o técnico e a data do atendimento para gerar a OS.");
   if (!["HOT", "WARM", "COLD"].includes(input.archive))
     fail(400, "Selecione a base da OS.");
-  const fresh = await client.lookup({ sga_id: entry.sga_vehicle_id });
+  const prepared = preparedData(entry);
+  const fresh = await schedulingData(client, entry, prepared);
   const check = eligibility.snapshot(fresh);
   // Neither a stale raw snapshot nor values forged in the browser can release scheduling.
-  eligibility.assertEligible(check, entry.data);
+  eligibility.assertEligible(check, prepared);
   if (fresh.sga_id !== entry.sga_vehicle_id)
     fail(409, "O SGA retornou outro veículo.");
   const run = await d.one(
@@ -510,11 +585,8 @@ async function assign(pool, cfg, client, id, input, actor) {
         409,
         "Já existe uma OS para este cadastro. Nenhum dado foi sobrescrito.",
       );
-    const data = { ...locked.data, fipe_value: fresh.fipe_value || locked.data.fipe_value, document_data: { ...locked.data.document_data, ...Object.fromEntries(Object.entries(fresh.document_data || {}).filter(([,v]) => v !== "" && v != null)) } };
-    // Permit completing absent values, never replace a valid live SGA value with a browser value.
-    if (!fipeCents(data.fipe_value) && input.fipe_value) data.fipe_value = d.string(input.fipe_value, "FIPE", 40);
-    if (!fipeVehicleType(data.document_data.vehicle_type) && ["Automóvel","Motocicleta"].includes(input.vehicle_type)) data.document_data.vehicle_type = input.vehicle_type;
-    if (!data.document_data.customer_state && ["GERAL","SP","RJ"].includes(input.fipe_region)) data.document_data.fipe_region = input.fipe_region;
+    const cached = preparedData(locked);
+    const data = completeDraft({ ...cached, fipe_value: fresh.fipe_value || cached.fipe_value, document_data: { ...cached.document_data, ...Object.fromEntries(Object.entries(fresh.document_data || {}).filter(([,v]) => v !== "" && v != null)) } }, input);
     const document = equipmentForIntake(data, input);
     const order = await o.createInTransaction(
       db,
@@ -573,4 +645,7 @@ module.exports = {
   existingOrder,
   periodDays,
   equipmentForIntake,
+  preparedData,
+  saveDraft,
+  schedulingData,
 };
