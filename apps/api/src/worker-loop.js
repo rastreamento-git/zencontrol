@@ -26,11 +26,16 @@ function startWorker(
           onError,
         })
       : null;
+  let nextStorageCheck = 0;
   const done = (async () => {
     while (!stopped) {
       let worked = false,
         delay = intervalMs;
       try {
+        if (execute === runOne && Date.now() >= nextStorageCheck) {
+          nextStorageCheck = Date.now() + 60 * 60 * 1000;
+          try { await require("./storage-policy").reconcile(pool); } catch(error) { onError(error); }
+        }
         worked = await execute(pool, cfg);
       } catch (error) {
         onError(error);

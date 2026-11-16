@@ -1,0 +1,9 @@
+# Política interna de armazenamento ZenControl
+- HOT: todas as OS abertas, reagendadas ou em execução, independentemente da idade; encerradas no mês vigente.
+- WARM: encerradas nos três meses anteriores, inclusive agosto/outubro quando o mês vigente é novembro.
+- COLD: encerradas antes dessa janela. Sem descarte automático.
+- Referência: maior data válida de abertura e conclusão; datas ausentes ficam HOT; canceladas sem conclusão usam abertura.
+- O gatilho do banco classifica no INSERT e em mudanças de status/datas; o worker reconcilia uma vez por hora. A classificação não altera versão operacional, nem data ou numeração da OS.
+- Nesta etapa todas as camadas são lógicas no mesmo PostgreSQL. Não reduz capacidade física, não há mudança de infraestrutura ou cobrança. Exportações não são backup nem autorização para apagar dados.
+- Fase futura de banco pago: manter índice global pequeno e cadastros de referência no PostgreSQL; particionar histórico mensal, separar payloads e evidências fechadas para armazenamento de objetos econômico; só migrar registros terminais sem dependências financeiras/estoque/validação abertas. Verificar checksum, criptografia, controle de acesso, manifestos, consulta transparente, restauração testada e trilha de auditoria antes de desalocar espaço do banco rápido. Reativação promove dados e dependências ao HOT de forma transacional. Aprovar retenção e descarte com responsáveis jurídicos e de dados; não inferir prazo legal.
+- Relatórios por abertura, agendamento ou conclusão, inclusive datas-limite, independente da camada. CSV UTF-8 com BOM e ponto e vírgula, cabeçalhos comerciais e neutralização de fórmulas; Excel com campos de texto para identificadores, datas/moeda formatadas, cabeçalhos, filtros, congelamento, alternância e resumo. Apenas administrador.

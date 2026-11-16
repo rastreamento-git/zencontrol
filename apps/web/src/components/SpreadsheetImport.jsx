@@ -17,7 +17,6 @@ const fieldLabels = {
   "document_data.customer_address": "Endereço do associado",
   "document_data.year": "Ano",
   period: "Competência",
-  archive: "Base",
   workflow_mode: "Fluxo",
   scheduled_at: "Agendamento",
   shift: "Turno",
@@ -51,7 +50,6 @@ export default function SpreadsheetImport() {
     [batch, setBatch] = useState(null),
     [history, setHistory] = useState([]),
     [selectedSheets, setSelectedSheets] = useState([]),
-    [selectedArchive, setSelectedArchive] = useState(""),
     [compatible, setCompatible] = useState(false),
     [sgaStatus, setSgaStatus] = useState(null),
     [sgaMode, setSgaMode] = useState("fill_missing"),
@@ -169,7 +167,6 @@ export default function SpreadsheetImport() {
       setSgaPollError("");
       setSgaMode("fill_missing");
       setSelectedSheets([]);
-      setSelectedArchive("");
 
       setPage(0);
       await reload();
@@ -213,8 +210,8 @@ export default function SpreadsheetImport() {
       <p>
         <strong>Importação por etapa:</strong> o sistema identifica os
         cabeçalhos, o mês/ano da aba e os sinais de cada atendimento. Serviços
-        seguem a etapa identificada; a base HOT, WARM ou COLD é escolhida pelo
-        administrador. Confira a etapa proposta e o motivo antes de confirmar. A
+        seguem a etapa identificada; o armazenamento é administrado automaticamente.
+        Confira a etapa proposta e o motivo antes de confirmar. A
         importação não lança pagamentos, movimenta estoque ou envia mensagens.
       </p>
       <p>
@@ -313,23 +310,7 @@ export default function SpreadsheetImport() {
           {!batch.approved_at && (
             <fieldset disabled={busy}>
               <legend>1. Escolha os meses para importar</legend>
-              <label>
-                Base de destino (escolha do administrador)
-                <select
-                  value={selectedArchive}
-                  onChange={(e) => {
-                    setSelectedArchive(e.target.value);
-                    setBatch((b) => ({ ...b, reviewed: false }));
-                  }}
-                >
-                  <option value="">Selecione a base</option>
-                  {["HOT", "WARM", "COLD"].map((base) => (
-                    <option key={base} value={base}>
-                      {base}
-                    </option>
-                  ))}
-                </select>
-              </label>
+
               {sgaStatus?.configured && (
                 <label>
                   Preenchimento automático pelo SGA
@@ -403,14 +384,13 @@ export default function SpreadsheetImport() {
               ))}
               <button
                 className="primary-button"
-                disabled={!selectedSheets.length || !selectedArchive}
+                disabled={!selectedSheets.length}
                 onClick={() =>
                   run(async () => {
                     const { data } = await api.post(
                       `/spreadsheet-imports/${batch.id}/review`,
                       {
                         sheets: selectedSheets,
-                        archive: selectedArchive,
                         sga_mode: sgaMode,
                         groups: (batch.groups || []).filter((pair) =>
                           pair.every((id) =>
@@ -429,23 +409,13 @@ export default function SpreadsheetImport() {
               >
                 Revisar abas selecionadas
               </button>
-              {(!selectedSheets.length || !selectedArchive) && (
-                <p role="status">
-                  Para liberar a revisão, escolha{" "}
-                  {!selectedSheets.length && !selectedArchive
-                    ? "ao menos um mês e a base de destino"
-                    : !selectedSheets.length
-                      ? "ao menos um mês"
-                      : "a base de destino"}
-                  .
-                </p>
-              )}
+              {!selectedSheets.length && <p role="status">Escolha ao menos um mês para revisar.</p>}
             </fieldset>
           )}
           {batch.reviewed && (
             <p>
               Meses da prévia: {batch.selected_sheets.join(", ")}. Confira
-              composição, situação e destino antes de importar.
+              composição e situação antes de importar.
             </p>
           )}
           {batch.approved_at ? (
@@ -656,7 +626,7 @@ export default function SpreadsheetImport() {
                           <p>
                             {r.sheet} /{" "}
                             {r.sources?.map((s) => s.row).join(" + ") || r.row}{" "}
-                            · {r.data?.status} · Base: {r.data?.archive}
+                            · {r.data?.status}
                           </p>
                           {r.inference?.map((reason, i) => (
                             <p key={i}>{reason}</p>
@@ -835,7 +805,6 @@ export default function SpreadsheetImport() {
                   );
                   setBatch(data);
                   setSelectedSheets(data.selected_sheets);
-                  setSelectedArchive(data.archive || "");
                   setSgaMode(data.sga_mode || "fill_missing");
 
                   setPage(0);

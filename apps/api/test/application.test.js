@@ -989,9 +989,11 @@ test("fechamento usa centavos, prévia consistente e impede pagamento duplicado"
 test("arquivamento mensal simula antes de aplicar e mantém ordens abertas no HOT", async () => {
   const row = await create({ vehicle: "ARQA123" });
   await pool.query(
-    "UPDATE zc_orders SET created_date='2020-01-01',archive='COLD' WHERE id=$1",
+    "UPDATE zc_orders SET created_date='2020-01-01' WHERE id=$1",
     [row.id],
   );
+  // Simulate a stale storage tier left by an older deployment.
+  await pool.query("UPDATE zc_orders SET archive='COLD' WHERE id=$1",[row.id]);
   const simulated = await request("/api/archive-month", "POST", {
     month: d.today().slice(0, 7),
   });

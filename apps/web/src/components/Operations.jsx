@@ -974,8 +974,16 @@ export function SettingsPage({ revision, refresh, navigate }) {
     [qr, setQr] = useState(""),
     [result, setResult] = useState(null),
     [busy, setBusy] = useState(false),
-    [month, setMonth] = useState(new Date().toISOString().slice(0, 7)),
-    [preview, setPreview] = useState(null);
+    [reportStart, setReportStart] = useState(new Date().toISOString().slice(0, 7)+"-01"),
+    [reportEnd, setReportEnd] = useState(new Date().toISOString().slice(0,10)),
+    [reportReference, setReportReference] = useState("created");
+  async function exportReport(format) {
+    setBusy(true);
+    try {
+      const params=new URLSearchParams({start:reportStart,end:reportEnd,reference:reportReference});
+      await download("/export/orders."+format+"?"+params,"ZenControl-ordens-"+reportStart+"-a-"+reportEnd+"."+format);
+    } catch(e) { notify(errorMessage(e),"error"); } finally { setBusy(false); }
+  }
   async function call(path, method = "get") {
     setBusy(true);
     try {
@@ -1088,95 +1096,21 @@ export function SettingsPage({ revision, refresh, navigate }) {
                 <Download size={14} />
                 Baixar backup
               </button>
-              <button
-                className="secondary-button"
-                onClick={() =>
-                  download("/export/orders.csv", "ZenControl-ordens.csv").catch(
-                    (e) => notify(errorMessage(e), "error"),
-                  )
-                }
-              >
-                <FileText size={14} />
-                Exportar CSV
-              </button>
             </div>
-            <details>
-              <summary>Arquivamento avançado</summary>
-              <h3 className="zc-section-gap">Organizar bases por mês</h3>
-              <p className="zc-muted">
-                Ordens abertas permanecem no HOT. Serviços encerrados seguem
-                para WARM e COLD sem excluir dados.
-              </p>
-              <form
-                className="zc-actions"
-                onSubmit={async (e) => {
-                  e.preventDefault();
-                  setBusy(true);
-                  try {
-                    setPreview(
-                      (
-                        await api.post("/archive-month", {
-                          month,
-                          dry_run: true,
-                        })
-                      ).data,
-                    );
-                  } catch (e) {
-                    notify(errorMessage(e), "error");
-                  } finally {
-                    setBusy(false);
-                  }
-                }}
-              >
-                <input
-                  type="month"
-                  aria-label="Mês de referência"
-                  required
-                  value={month}
-                  onChange={(e) => {
-                    setMonth(e.target.value);
-                    setPreview(null);
-                  }}
-                />
-                <button className="secondary-button" disabled={busy}>
-                  Simular organização
-                </button>
-              </form>
-              {preview && (
-                <div className="zc-notice zc-section-gap">
-                  {preview.count} OS terão a base alterada.
-                  {preview.count > 0 && (
-                    <button
-                      type="button"
-                      className="zc-link"
-                      onClick={async () => {
-                        if (
-                          !(await confirmAction(
-                            "Aplicar a organização das bases referente a " +
-                              preview.month +
-                              "?",
-                          ))
-                        )
-                          return;
-                        try {
-                          const { data } = await api.post("/archive-month", {
-                            month: preview.month,
-                            dry_run: false,
-                          });
-                          notify(`${data.count} registro(s) reorganizados.`);
-                          setPreview(null);
-                          refresh();
-                        } catch (e) {
-                          notify(errorMessage(e), "error");
-                        }
-                      }}
-                    >
-                      Aplicar organização
-                    </button>
-                  )}
-                </div>
-              )}
-            </details>
+            <fieldset className="zc-fieldset zc-section-gap">
+              <legend>Relatórios por período</legend>
+              <div className="zc-form-grid">
+                <label>Data inicial<input type="date" value={reportStart} onChange={e=>setReportStart(e.target.value)} max={reportEnd}/></label>
+                <label>Data final<input type="date" value={reportEnd} onChange={e=>setReportEnd(e.target.value)} min={reportStart}/></label>
+                <label>Referência do período<select value={reportReference} onChange={e=>setReportReference(e.target.value)}><option value="created">Abertura da OS</option><option value="scheduled">Agendamento</option><option value="completed">Conclusão</option></select></label>
+              </div>
+              <p className="zc-muted">Excel para apresentação executiva; CSV para integração ou tratamento de dados. O histórico permanece disponível sem intervenção manual.</p>
+              <div className="zc-actions">
+                <button className="primary-button" disabled={busy||!reportStart||!reportEnd||reportStart>reportEnd} onClick={()=>exportReport("xlsx")}><Download size={14}/> Baixar Excel</button>
+                <button className="secondary-button" disabled={busy||!reportStart||!reportEnd||reportStart>reportEnd} onClick={()=>exportReport("csv")}><FileText size={14}/> Baixar CSV</button>
+              </div>
+            </fieldset>
+
           </div>
         </Panel>
       </div>

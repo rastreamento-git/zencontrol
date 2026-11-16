@@ -195,7 +195,7 @@ test("cadastro já existente na operação é ignorado integralmente", async () 
   assert.equal((await o.get(db.pool, original.id)).notes, "Não sobrescrever");
   assert.equal((await o.get(db.pool, original.id)).version, original.version);
 });
-test("atribuição exige técnico, base, agendamento e consulta regular; número só nasce uma vez", async () => {
+test("atribuição exige técnico, agendamento e consulta regular; número só nasce uma vez", async () => {
   const entry = (
     await db.pool.query("SELECT * FROM zc_sga_intake WHERE sga_vehicle_id=$1", [
       "901",
@@ -213,17 +213,6 @@ test("atribuição exige técnico, base, agendamento e consulta regular; número
   await assert.rejects(
     intake.assign(db.pool, cfg, client, entry.id, {}, "Operação"),
     /Selecione o técnico/,
-  );
-  await assert.rejects(
-    intake.assign(
-      db.pool,
-      cfg,
-      client,
-      entry.id,
-      { ...input, archive: "" },
-      "Operação",
-    ),
-    /base/,
   );
   overrides["901"] = {
     sga_assessment: {
@@ -250,7 +239,7 @@ test("atribuição exige técnico, base, agendamento e consulta regular; número
     new RegExp("^" + day.replaceAll("-", "") + "[0-9A-F]{3}$"),
   );
   assert.equal(first.technician_id, tech);
-  assert.equal(first.archive, "WARM");
+  assert.equal(first.archive, "HOT");
   assert.equal(first.sticker_discount_opt_in, true);
   assert.equal(first.sga_check.products.perfurado, true);
   assert.equal(
