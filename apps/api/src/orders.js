@@ -470,30 +470,32 @@ async function ensureAdditionalOrders(db, parent, types, actor) {
     }
   return result;
 }
-async function create(pool, input, actor, cfg = {}) {
-  return transaction(pool, async (db) => {
-    const data = await validate(db, input, null, cfg);
-    const additional = prepareEquipment(data, input);
-    const generatedOn = d.today();
-    const o = await insert(db, "zc_orders", {
-      ...data,
-      workflow_mode: "controlled",
-      id: await nextOrderId(db, generatedOn),
-      created_date: generatedOn,
-      created_by: actor,
-      updated_at: d.now(),
-    });
-    await require("./notifications").orderEvent(db, o, "created");
-    await d.audit(db, actor, "created", "order", o.id);
-    const additionalOrders = await ensureAdditionalOrders(
-      db,
-      o,
-      additional,
-      actor,
-    );
-    return { ...o, additional_orders: additionalOrders };
+async function createInTransaction(db, input, actor, cfg = {}) {
+  const data = await validate(db, input, null, cfg);
+  const additional = prepareEquipment(data, input);
+  const generatedOn = d.today();
+  const o = await insert(db, "zc_orders", {
+    ...data,
+    workflow_mode: "controlled",
+    id: await nextOrderId(db, generatedOn),
+    created_date: generatedOn,
+    created_by: actor,
+    updated_at: d.now(),
   });
+  await require("./notifications").orderEvent(db, o, "created");
+  await d.audit(db, actor, "created", "order", o.id);
+  const additionalOrders = await ensureAdditionalOrders(
+    db,
+    o,
+    additional,
+    actor,
+  );
+  return { ...o, additional_orders: additionalOrders };
 }
+async function create(pool, input, actor, cfg = {}) {
+  return transaction(pool, (db) => createInTransaction(db, input, actor, cfg));
+}
+
 async function edit(pool, id, input, actor, cfg = {}) {
   return transaction(pool, async (db) => {
     const old = await get(db, id);
@@ -808,6 +810,7 @@ module.exports = {
   update,
   guard,
   create,
+  createInTransaction,
   edit,
   enqueue,
   complete,

@@ -39,6 +39,7 @@ function snapshot(data) {
     sga_id: data.sga_id || "",
     verified_at: data.sga_assessment?.checked_at || d.now(),
     assessment: evaluate(data.sga_assessment),
+    ...(data.sga_products ? { products: data.sga_products } : {}),
   };
 }
 function sign(check, secret) {
@@ -50,7 +51,7 @@ function sign(check, secret) {
   );
 }
 function read(token, secret) {
-  if (typeof token !== "string" || token.length > 16000)
+  if (typeof token !== "string" || token.length > 128000)
     fail(400, "Validação SGA inválida. Consulte novamente.");
   const [data, mac, ...extra] = token.split(".");
   const expected = createHmac("sha256", secret)

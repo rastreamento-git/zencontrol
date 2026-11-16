@@ -25,6 +25,9 @@ const tables = [
   "zc_migration_runs",
   "zc_spreadsheet_imports",
   "zc_sga_import_tasks",
+  "zc_sga_intake_config",
+  "zc_sga_intake_runs",
+  "zc_sga_intake",
   "zc_rates",
   "zc_closing_policies",
   "zc_holidays",
@@ -178,6 +181,12 @@ async function restoreBackup(pool, cfg, source, apply = false) {
     snapshot.data.zc_sga_import_tasks = [];
   if (!Object.hasOwn(snapshot.data, "zc_order_counters"))
     snapshot.data.zc_order_counters = [];
+  for (const name of [
+    "zc_sga_intake_config",
+    "zc_sga_intake_runs",
+    "zc_sga_intake",
+  ])
+    if (!Object.hasOwn(snapshot.data, name)) snapshot.data[name] = [];
   const legacy = tables.filter((t) => !additions.includes(t));
   if (Object.keys(snapshot.data).sort().join() === legacy.sort().join())
     for (const table of additions) snapshot.data[table] = [];
@@ -253,6 +262,16 @@ async function restoreBackup(pool, cfg, source, apply = false) {
           if (!row || typeof row !== "object" || Array.isArray(row))
             fail(400, "Linha inválida no backup.");
           const copy = { ...row };
+          if (table === "zc_sga_intake_config") copy.enabled = false;
+          if (
+            table === "zc_sga_intake_runs" &&
+            ["queued", "running", "failed"].includes(copy.state)
+          ) {
+            copy.state = "failed";
+            copy.attempts = 3;
+            copy.message =
+              "Coleta recuperada de backup. Revise a configuração e inicie uma nova consulta.";
+          }
           if (
             table === "zc_jobs" &&
             ["pending", "running"].includes(copy.state)

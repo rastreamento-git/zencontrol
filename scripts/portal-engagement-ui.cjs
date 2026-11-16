@@ -948,6 +948,9 @@ async function main() {
     },
   );
   await staff.getByRole("button", { name: "Importação", exact: true }).click();
+  await staff
+    .getByRole("button", { name: "Planilha de controle", exact: true })
+    .click();
   const importPanel = staff.getByRole("region", {
     name: "Importação de planilha",
   });
