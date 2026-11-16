@@ -30,6 +30,31 @@ async function http(
         mutation && response.status >= 500,
       );
       error.upstreamStatus = response.status;
+      // Only recognize an explicitly documented empty-result message, never
+      // expose arbitrary upstream bodies (which may contain personal data).
+      if (response.status === 406 && !mutation) {
+        try {
+          const reader = response.body?.getReader();
+          const chunks = [];
+          let bytes = 0;
+          if (reader) {
+            try {
+              for (;;) {
+                const { value, done } = await reader.read();
+                if (done) {
+                  const body = JSON.parse(Buffer.concat(chunks).toString());
+                  const messages = [body.error, body.erro, body.errors, body.mensagem].flat().filter(v => typeof v === "string");
+                  error.noRecords = messages.some(v => /^(nenhum registro encontrado(?: para o filtro informado)?|nenhuma movimenta[cç][aã]o encontrada)[.!]?$/i.test(v.trim()));
+                  break;
+                }
+                bytes += value.length;
+                if (bytes > 16384) { await reader.cancel(); break; }
+                chunks.push(Buffer.from(value));
+              }
+            } finally { reader.releaseLock(); }
+          }
+        } catch { /* unknown 406 remains a failure */ }
+      }
       throw error;
     }
     let size = 0;
@@ -523,6 +548,7 @@ class SGAClient {
       for (let attempt = 0; attempt < 3; attempt++) {
         try { result = await query(); break; } catch (error) {
           signal?.throwIfAborted();
+          if (error.upstreamStatus === 406 && error.noRecords) return all;
           if (attempt === 2 || !(error.retryable || error.upstreamStatus === 429 || error.upstreamStatus >= 500)) throw error;
           await abortable(new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1))), signal);
         }

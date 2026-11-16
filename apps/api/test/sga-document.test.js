@@ -273,3 +273,13 @@ test("SGA não aceita código alternativo que retorna outro veículo", async (t)
   });
   await assert.rejects(new SGAClient(cfg).lookup({ sga_id: "42" }), error => error.reasonCode === "vehicle_not_found");
 });
+
+test("histórico SGA distingue 406 sem registros de 406 com erro desconhecido", async (t) => {
+  let empty = true;
+  mock(t, path => path === "/usuario/autenticar" ? { token_usuario: "test-token" } :
+    { status: 406, data: { error: [empty ? "Nenhum registro encontrado para o filtro informado" : "Filtro inválido"] } });
+  const client = new SGAClient(cfg);
+  assert.deepEqual(await client.pendingMovements("2026-11-15", "classifications", "42"), []);
+  empty = false;
+  await assert.rejects(client.pendingMovements("2026-11-15", "classifications", "42"), error => error.upstreamStatus === 406 && !error.noRecords);
+});
