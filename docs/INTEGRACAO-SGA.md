@@ -35,6 +35,8 @@ Os PDFs são referências históricas. A aplicação consulta classificações d
 
 O arquivo chamado “lista produtos” fornecido contém tipos de veículo. Produtos comerciais exigem filtros próprios de regional, cooperativa, tipo, FIPE e cilindrada; não são tratados como o catálogo de tipos de veículo.
 
+Os produtos já vinculados ao veículo são consultados separadamente em `produto-vinculado-veiculo/listar/:codigoOuPlaca`. A tela mostra nome, código e situação, destacando o Perfurado 2371 ativo. A entrada diária de instalações pendentes, preservação bruta e geração de OS apenas na atribuição são descritas em [Importação SGA de pendentes](IMPORTACAO-SGA-PENDENTES.md).
+
 Alterações externas existentes continuam exigindo `INTEGRATIONS_ENABLED=true` e os respectivos controles do fluxo (`SGA_SYNC_ENABLED`, quando aplicável). Os mapeamentos `SGA_SCHEDULED_CODE`, `SGA_COMPLETED_CODE` e `SGA_PHOTO_TYPE_CODE` precisam ser configurados explicitamente usando códigos ativos consultados no SGA. Não há mais valores numéricos antigos presumidos por padrão.
 
 ## Verificação

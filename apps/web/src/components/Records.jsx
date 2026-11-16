@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import SgaProducts from "./SgaProducts";
+import SgaIntake from "./SgaIntake";
 import { classifyFipe, fipeRegions } from "@zen/domain/fipe.mjs";
 import {
   addressFields,
@@ -42,6 +44,7 @@ export function Orders({
   openOrder,
   globalQuery,
   onChangeView,
+  refresh,
 }) {
   const [q, setQ] = useState(globalQuery || ""),
     [term, setTerm] = useState(q),
@@ -87,6 +90,13 @@ export function Orders({
           Nova ordem de serviço
         </button>
       </Intro>
+      {!agenda && (
+        <SgaIntake
+          revision={revision}
+          openOrder={openOrder}
+          refresh={refresh}
+        />
+      )}
       <Panel>
         <nav className="zc-filters" aria-label="Visualização dos serviços">
           <button
@@ -773,6 +783,9 @@ export function OrderEditor({
             </div>
           )}
 
+          <SgaProducts
+            value={values.sga_products || values.sga_check?.products}
+          />
           <div className="zc-form-grid">
             {field("Placa ou chassi", "vehicle", { required: true })}
             <div className="zc-lookup">

@@ -1,0 +1,99 @@
+.sga-intake {
+  display: grid;
+  gap: 14px;
+  margin: 20px 0;
+  padding: 20px;
+  border: 1px solid var(--ep-line);
+  border-radius: 14px;
+  background: var(--ep-surface);
+  min-width: 0;
+}
+.sga-intake h2,
+.sga-intake p {
+  margin: 0;
+}
+.sga-intake h2 {
+  font-size: 18px;
+}
+.sga-intake-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.sga-intake label {
+  display: grid;
+  gap: 6px;
+}
+.sga-intake input,
+.sga-intake select {
+  padding: 10px;
+  border: 1px solid var(--ep-line);
+  border-radius: 8px;
+  color: var(--ep-text);
+  background: var(--ep-canvas);
+  max-width: 100%;
+}
+.sga-intake-settings,
+.sga-intake-manual {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--ep-line);
+  border-radius: 10px;
+}
+.sga-intake-settings > button,
+.sga-intake-manual > button {
+  justify-self: start;
+}
+.sga-intake .sga-intake-check {
+  display: flex;
+  flex-direction: row;
+  gap: 10px;
+  align-items: center;
+}
+.sga-intake-detail {
+  padding: 20px 24px 0;
+  display: grid;
+  gap: 12px;
+}
+.sga-intake-check input {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  margin: 0;
+}
+.sga-products-list {
+  padding-left: 20px;
+  display: grid;
+  gap: 6px;
+}
+.sga-raw-data {
+  max-height: 280px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 12px;
+  font-size: 12px;
+  background: var(--ep-canvas);
+  border-radius: 8px;
+}
+.sga-import-tabs {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+.sga-import-tabs [aria-pressed="true"] {
+  background: var(--ep-primary-soft);
+  color: var(--ep-primary);
+}
+@media (max-width: 600px) {
+  .sga-intake {
+    padding: 12px;
+  }
+  .sga-intake td {
+    min-width: 130px;
+  }
+}

@@ -117,6 +117,7 @@ function createApp(pool, env = process.env) {
         order_numbering_version: 1,
         sga_import_control_version: 1,
         sga_eligibility_version: 1,
+        sga_intake_version: 1,
       });
     } catch {
       res.status(503).json({ status: "unavailable" });
@@ -146,6 +147,7 @@ function createApp(pool, env = process.env) {
   require("./ecosystem-routes").configureEcosystem(app, pool, cfg, auth);
   configurePortal(app, pool, cfg, auth);
   const sgaClient = new SGAClient(cfg);
+  require("./sga-intake-routes").configureSgaIntake(app, pool, cfg, sgaClient);
   require("./spreadsheet-import").configureSpreadsheetImport(
     app,
     pool,

@@ -218,7 +218,7 @@ class SGAClient {
       throw new IntegrationError("O SGA recusou a operação.", mutation);
     return p;
   }
-  async lookup(input, { signal } = {}) {
+  async lookup(input, { signal, includeRaw = false } = {}) {
     signal?.throwIfAborted();
     const query = typeof input === "string" ? { term: input } : input || {};
     const d = require("./domain"),
@@ -348,6 +348,9 @@ class SGAClient {
           "Os identificadores consultados não correspondem ao mesmo veículo no SGA.",
         );
     }
+    const sourceVehicle = includeRaw
+      ? require("./sga-products").businessPayload(vehicle)
+      : null;
     const volunteer = String(vehicle.codigo_voluntario || "");
     if (/^\d{1,20}$/.test(volunteer)) {
       try {
@@ -387,6 +390,36 @@ class SGAClient {
     vehicle.tipo =
       vehicle.tipo || label("vehicle_types", vehicle.codigo_tipo_veiculo);
     const mapped = mapSgaVehicle(vehicle);
+    mapped.sga_source = {
+      classification_code: String(vehicle.codigo_classificacao || ""),
+      status_code: String(
+        vehicle.codigo_situacao_veiculo || vehicle.codigo_situacao || "",
+      ),
+    };
+    try {
+      const raw = await this.request(
+        "/produto-vinculado-veiculo/listar/" + encodeURIComponent(code),
+        undefined,
+        false,
+        token,
+        signal,
+      );
+      mapped.sga_products = require("./sga-products").productsSnapshot(
+        raw,
+        code,
+      );
+      if (includeRaw)
+        mapped.raw_products = require("./sga-products").businessPayload(raw);
+    } catch (error) {
+      signal?.throwIfAborted();
+      mapped.sga_products = {
+        state: "unavailable",
+        checked_at: d.now(),
+        items: [],
+        perfurado: null,
+      };
+    }
+    if (includeRaw) mapped.raw_vehicle = sourceVehicle;
     if (this.cfg.SGA_SCHEDULING_GUARD) {
       const { records } = require("./sga-reference");
       const cpf = String(
@@ -450,6 +483,67 @@ class SGAClient {
       });
     }
     return mapped;
+  }
+  async pendingMovements(day, kind, pendingCode, { signal } = {}) {
+    const { records } = require("./sga-reference");
+    const field =
+      kind === "statuses" ? "codigo_situacao" : "codigo_classificacao";
+    const date = day.split("-").reverse().join("/");
+    const all = [],
+      seen = new Set();
+    for (let page = 0; page < 100; page++) {
+      const result = await this.request(
+        "/listar/alteracao-veiculos",
+        {
+          data_inicial: date,
+          data_final: date,
+          ultima_alteracao: "N",
+          campos: [field],
+          valor_posterior: [Number(pendingCode)],
+          inicio_paginacao: page,
+          quantidade_por_pagina: 500,
+        },
+        false,
+        undefined,
+        signal,
+      );
+      const rows = Array.isArray(result)
+        ? result
+        : Array.isArray(result?.resultado)
+          ? result.resultado
+          : records(result);
+      if (
+        !Array.isArray(result) &&
+        !Array.isArray(result?.resultado) &&
+        !Array.isArray(result?.dados) &&
+        !Array.isArray(result?.data)
+      )
+        throw new IntegrationError(
+          "O SGA retornou um histórico de movimentações em formato desconhecido.",
+        );
+      let added = 0;
+      for (const row of rows) {
+        const key = JSON.stringify(row);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        all.push(row);
+        added++;
+      }
+      if (rows.length < 500 && !Number(result?.numero_paginas)) return all;
+      if (
+        Number(result?.numero_paginas) &&
+        page + 1 >= Number(result.numero_paginas)
+      )
+        return all;
+      if (rows.length && page && !added)
+        throw new IntegrationError(
+          "O SGA repetiu a paginação. A coleta precisa ser revisada.",
+        );
+      if (!rows.length) return all;
+    }
+    throw new IntegrationError(
+      "Histórico acima do limite seguro de coleta. Nenhum registro desta consulta foi presumido.",
+    );
   }
   async classification(id, code) {
     if (!this.cfg.INTEGRATIONS_ENABLED)

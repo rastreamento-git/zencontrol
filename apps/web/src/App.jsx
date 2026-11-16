@@ -1,4 +1,4 @@
-import SpreadsheetImport from "./components/SpreadsheetImport";
+import ImportPage from "./components/ImportPage";
 import ThemeControl from "@zen/ui/components/ThemeControl";
 import ZenMark from "@zen/ui/components/ZenMark";
 import {
@@ -420,7 +420,7 @@ export default function App() {
             ) : tab === "history" ? (
               <HistoryPage {...props} />
             ) : tab === "imports" && user.papel === "admin" ? (
-              <SpreadsheetImport />
+              <ImportPage {...props} />
             ) : tab === "settings" ? (
               <SettingsPage {...props} />
             ) : (
