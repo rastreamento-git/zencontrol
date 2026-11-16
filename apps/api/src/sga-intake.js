@@ -81,6 +81,29 @@ async function saveDraft(pool, id, input, actor) {
     return { ...entry, data: preparedData({...entry,data}) };
   });
 }
+async function clearEntries(pool, input, actor) {
+  const reasons = ["incomplete", "status_changed", "reimport", "other"];
+  if (input?.confirmed !== true || !reasons.includes(input.reason) ||
+      !Array.isArray(input.ids) || !input.ids.length || input.ids.length > 100 ||
+      input.ids.some(id => typeof id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)))
+    fail(400, "Selecione até 100 pendências, informe o motivo e confirme a limpeza.");
+  const ids = [...new Set(input.ids)].sort();
+  return transaction(pool, async db => {
+    // Serialize with the worker's claim transaction so a running collection
+    // cannot recreate a just-removed draft during this operation.
+    await db.query("LOCK TABLE zc_sga_intake_runs IN SHARE MODE");
+    if (await d.one(db, "SELECT id FROM zc_sga_intake_runs WHERE state IN ('running','queued') LIMIT 1"))
+      fail(409, "Há uma coleta em andamento ou na fila. Conclua a coleta antes de limpar pendências.");
+    const entries = await d.rows(db, "SELECT id,sga_vehicle_id,run_id,order_id FROM zc_sga_intake WHERE id=ANY($1::text[]) ORDER BY id FOR UPDATE", [ids]);
+    if (entries.length !== ids.length || entries.some(entry => entry.order_id))
+      fail(409, "A seleção mudou ou contém uma OS já atribuída. Atualize a fila e selecione novamente.");
+    const result = await db.query("DELETE FROM zc_sga_intake WHERE id=ANY($1::text[]) AND order_id IS NULL", [ids]);
+    if (result.rowCount !== ids.length) fail(409, "A seleção mudou. Nenhum cadastro foi removido.");
+    for (const entry of entries)
+      await d.audit(db, actor, "sga_intake_cleared", "sga_intake", entry.id, { reason: input.reason, sga_vehicle_id: entry.sga_vehicle_id, run_id: entry.run_id });
+    return { removed: result.rowCount };
+  });
+}
 async function schedulingData(client, entry, data) {
   const check = eligibility.snapshot(data);
   // A timestamp must come from the stored assessment, not snapshot's fallback.
@@ -582,6 +605,7 @@ async function assign(pool, cfg, client, id, input, actor) {
       "SELECT * FROM zc_sga_intake WHERE id=$1 FOR UPDATE",
       [id],
     );
+    if (!locked) fail(409, "Pendência removida da fila. Atualize antes de atribuir.");
     if (locked.order_id) return o.get(db, locked.order_id);
     if (await existingOrder(db, locked.data))
       fail(
@@ -650,5 +674,6 @@ module.exports = {
   equipmentForIntake,
   preparedData,
   saveDraft,
+  clearEntries,
   schedulingData,
 };
