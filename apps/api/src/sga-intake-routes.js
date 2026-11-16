@@ -55,7 +55,7 @@ function configureSgaIntake(app, pool, cfg, client) {
     res.json({
       items: await d.rows(
         pool,
-        "SELECT id,day,state,actor,attempts,created_at,finished_at,summary,message,COALESCE(config->>'period_start',day) AS period_start,COALESCE(config->>'period_end',day) AS period_end FROM zc_sga_intake_runs ORDER BY created_at DESC,id DESC LIMIT 15",
+        "SELECT id,day,state,actor,attempts,created_at,finished_at,summary,message,CASE WHEN run_key LIKE 'daily:%' THEN 'automatic' ELSE 'manual' END AS origin,COALESCE(config->>'period_start',day) AS period_start,COALESCE(config->>'period_end',day) AS period_end FROM zc_sga_intake_runs ORDER BY created_at DESC,id DESC LIMIT 15",
       ),
     }),
   );
@@ -63,14 +63,19 @@ function configureSgaIntake(app, pool, cfg, client) {
     const limit = Math.min(100, integer(req.query.limit || 25, "Limite"));
     const page = integer(req.query.page || 1, "Página");
     const query = d.string(req.query.q || "", "Busca", 150);
+    const origin = String(req.query.origin || "");
+    const runId = d.string(req.query.run_id || "", "Lote", 80);
+    if (!["", "automatic", "manual"].includes(origin)) fail(400, "Origem da coleta inválida.");
     const condition =
-      "order_id IS NULL AND (customer_name ILIKE $1 OR vehicle ILIKE $1)";
+      "e.order_id IS NULL AND (e.customer_name ILIKE $1 OR e.vehicle ILIKE $1 OR e.chassis ILIKE $1 OR e.sga_vehicle_id ILIKE $1) AND ($2='' OR ($2='automatic' AND r.run_key LIKE 'daily:%') OR ($2='manual' AND r.run_key NOT LIKE 'daily:%')) AND ($3='' OR e.run_id=$3)";
+    const args = ["%" + query + "%", origin, runId];
+    const from = " FROM zc_sga_intake e JOIN zc_sga_intake_runs r ON r.id=e.run_id WHERE ";
     const total = Number(
       (
         await d.one(
           pool,
-          "SELECT count(*)::int n FROM zc_sga_intake WHERE " + condition,
-          ["%" + query + "%"],
+          "SELECT count(*)::int n" + from + condition,
+          args,
         )
       ).n,
     );
@@ -80,10 +85,10 @@ function configureSgaIntake(app, pool, cfg, client) {
       limit,
       items: await d.rows(
         pool,
-        "SELECT id,customer_name,vehicle,chassis,movement_at,received_at,data FROM zc_sga_intake WHERE " +
+        "SELECT e.id,e.customer_name,e.vehicle,e.chassis,e.movement_at,e.received_at,e.data,e.run_id,CASE WHEN r.run_key LIKE 'daily:%' THEN 'automatic' ELSE 'manual' END AS origin,COALESCE(r.config->>'period_start',r.day) AS period_start,COALESCE(r.config->>'period_end',r.day) AS period_end" + from +
           condition +
-          " ORDER BY received_at DESC,id LIMIT $2 OFFSET $3",
-        ["%" + query + "%", limit, (page - 1) * limit],
+          " ORDER BY e.received_at DESC,e.id LIMIT $4 OFFSET $5",
+        [...args, limit, (page - 1) * limit],
       ),
     });
   });

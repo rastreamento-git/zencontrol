@@ -9,13 +9,17 @@ export default function SgaIntake({
   revision,
   openOrder,
   refresh,
+  initialRunId = "",
+  onOpenQueue,
 }) {
   const [config, setConfig] = useState(null),
     [choices, setChoices] = useState([]),
     [runs, setRuns] = useState([]);
   const [queue, setQueue] = useState({ items: [], total: 0 }),
     [page, setPage] = useState(1),
-    [query, setQuery] = useState("");
+    [query, setQuery] = useState(""),
+    [origin, setOrigin] = useState(settings ? "manual" : ""),
+    [runId, setRunId] = useState(initialRunId);
   const [selected, setSelected] = useState(null),
     [techs, setTechs] = useState([]),
     [assignment, setAssignment] = useState({});
@@ -24,14 +28,14 @@ export default function SgaIntake({
     [loading, setLoading] = useState(true),
     [configured, setConfigured] = useState(false);
   const [confirmed, setConfirmed] = useState(false),
-    [expanded, setExpanded] = useState(settings),
+    [expanded, setExpanded] = useState(true),
     [showSettings, setShowSettings] = useState(false);
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
   const [start, setStart] = useState(today), [end, setEnd] = useState(today), [complementary, setComplementary] = useState(false);
   const activeRuns = runs.filter(r => ["running","queued"].includes(r.state));
   const reload = async () => {
     const [{ data: entries }, { data: history }] = await Promise.all([
-      api.get("/sga-intake/entries", { params: { page, q: query } }),
+      api.get("/sga-intake/entries", { params: { page, q: query, origin, run_id: runId } }),
       api.get("/sga-intake/runs"),
     ]);
     setQueue(entries);
@@ -43,7 +47,7 @@ export default function SgaIntake({
     async function poll() {
       try {
         const [{ data: entries }, { data: history }] = await Promise.all([
-          api.get("/sga-intake/entries", { params: { page, q: query } }),
+          api.get("/sga-intake/entries", { params: { page, q: query, origin, run_id: runId } }),
           api.get("/sga-intake/runs"),
         ]);
         if (active) {
@@ -64,7 +68,7 @@ export default function SgaIntake({
       active = false;
       clearTimeout(timer);
     };
-  }, [page, query, revision]);
+  }, [page, query, revision, origin, runId]);
   useEffect(() => {
     if (!settings) return;
     let active = true;
@@ -129,24 +133,16 @@ export default function SgaIntake({
           <p>
             {loading
               ? "Carregando…"
-              : `${queue.total} cadastro(s) aguardando atribuição · sem número de OS`}
+              : `${queue.total} cadastro(s) nesta lista · sem número de OS`}
           </p>
         </div>
-        {!settings && (
-          <button
-            className="secondary-button"
-            aria-expanded={expanded}
-            onClick={() => setExpanded(!expanded)}
-          >
-            {expanded ? "Recolher lista" : "Ver pendências"}
-          </button>
-        )}
+        {settings && <button className="primary-button" onClick={() => onOpenQueue?.()}>Abrir fila de pendências no Controle de OS</button>}
       </div>
       {settings && (
         <p>
-          Receba as mudanças para Instalação pendente feitas hoje, pelo horário
-          de Brasília. Os dados originais são preservados; a coleta não altera
-          cadastros existentes nem gera OS.
+          Consulte o período desejado ou configure a coleta automática do dia (Brasília).
+          Os novos cadastros vão diretamente para Ordens de serviço → Pendências SGA · Sem OS.
+          A coleta não sobrescreve cadastros e não gera número de OS.
         </p>
       )}
       {settings && config && (
@@ -281,8 +277,11 @@ export default function SgaIntake({
             }
             onClick={() =>
               action(async () => {
-                await api.post("/sga-intake/runs", { confirmed: true, start, end, complementary });
+                const { data: task } = await api.post("/sga-intake/runs", { confirmed: true, start, end, complementary });
                 setConfirmed(false);
+                setOrigin("manual");
+                setRunId(task.id);
+                setPage(1);
                 await reload();
                 notify("Coleta SGA iniciada. Você pode continuar trabalhando.");
               })
@@ -317,6 +316,9 @@ export default function SgaIntake({
                 {run.summary?.imported !== undefined &&
                   ` · ${run.summary.imported} recebidos · ${run.summary.duplicates} já existentes · ${run.summary.failed} falhas em cadastros${run.summary.failed_days ? " · " + run.summary.failed_days + " datas com erro" : ""}`}
                 <p>{run.message}</p>
+                <small>{run.origin === "automatic" ? "Coleta automática" : "Coleta manual"}</small>
+                <button type="button" className="secondary-button" onClick={() => { setOrigin(run.origin || ""); setRunId(run.id); setPage(1); }}>Ver cadastros deste lote</button>
+                {onOpenQueue && <button type="button" className="secondary-button" onClick={() => onOpenQueue(run.id)}>Abrir lote no Controle de OS</button>}
                 {!!run.summary?.day_results?.length && (
                   <ul className="sga-intake-errors">
                     {run.summary.day_results.map(day => (
@@ -338,6 +340,24 @@ export default function SgaIntake({
       )}
       {expanded && (
         <>
+          <div className="zc-filters">
+            <label>Origem da coleta
+              <select value={origin} onChange={e => { setOrigin(e.target.value); setRunId(""); setPage(1); }}>
+                <option value="">Todas as origens</option>
+                <option value="automatic">Automática diária</option>
+                <option value="manual">Manual por período</option>
+              </select>
+            </label>
+            <label>Lote de coleta
+              <select value={runId} onChange={e => { setRunId(e.target.value); setPage(1); }}>
+                <option value="">Todos os lotes</option>
+                {runId && !runs.some(r => r.id === runId) && <option value={runId}>Lote selecionado</option>}
+                {runs.filter(r => !origin || r.origin === origin || r.id === runId).map(r => <option key={r.id} value={r.id}>{r.period_start} a {r.period_end} · {r.origin === "automatic" ? "Auto" : "Manual"} · {format(r.created_at, true)}</option>)}
+              </select>
+            </label>
+            <button type="button" className="secondary-button" onClick={() => { setOrigin(""); setRunId(""); setQuery(""); setPage(1); }}>Limpar filtros</button>
+          </div>
+          {runId && <p><small>Este filtro mostra os novos cadastros preservados por este lote que ainda não têm OS. Duplicados permanecem no lote original; limpe os filtros para vê-los.</small></p>}
           <label>
             Buscar cadastro recebido
             <input
@@ -347,7 +367,7 @@ export default function SgaIntake({
                 setQuery(e.target.value);
                 setPage(1);
               }}
-              placeholder="Nome ou placa"
+              placeholder="Nome, placa, chassi ou código SGA"
             />
           </label>
           {!loading && !queue.items.length ? (
@@ -359,6 +379,8 @@ export default function SgaIntake({
                   <tr>
                     <th>Associado / veículo</th>
                     <th>Entrada na etapa SGA</th>
+                    <th>Origem / período</th>
+                    <th>FIPE</th>
                     <th>Perfurado 2371</th>
                     <th>Ação</th>
                   </tr>
@@ -376,6 +398,8 @@ export default function SgaIntake({
                         <small>SGA {entry.data.sga_id} · Sem OS</small>
                       </td>
                       <td>{format(entry.movement_at, true)}</td>
+                      <td>{entry.origin === "automatic" ? "Automática" : "Manual"}<br/><small>{entry.period_start} a {entry.period_end}</small></td>
+                      <td>{entry.data.fipe_value || "Não informado"}</td>
                       <td>
                         {entry.data.sga_products?.perfurado === true
                           ? "Ativo"
@@ -387,9 +411,9 @@ export default function SgaIntake({
                         <button
                           className="secondary-button"
                           disabled={busy}
-                          onClick={() => select(entry)}
+                          onClick={() => settings ? onOpenQueue?.(entry.run_id) : select(entry)}
                         >
-                          Revisar e atribuir
+                          {settings ? "Abrir no Controle de OS" : "Revisar e atribuir"}
                         </button>
                       </td>
                     </tr>

@@ -325,6 +325,7 @@ async function collect(pool, client, run, signal) {
         continue;
       }
       stage = "consulta do veículo";
+      await progress(summary, "Consultando veículo " + (summary.processed + 1) + " de " + summary.matching + " no SGA…");
       let data;
       const lookupOptions = { signal, includeRaw: true, includeAssessment: run.config.complementary !== false };
       const chassis = d.vehicle(movement.chassi);
