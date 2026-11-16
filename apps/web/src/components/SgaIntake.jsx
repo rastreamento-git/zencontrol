@@ -159,7 +159,13 @@ export default function SgaIntake({
     const ids = selectedIds.slice();
     if (!ids.length) return;
     await action(async () => {
-      const {data} = await api.post("/sga-intake/entries/clear", {ids,reason:clearReason,confirmed:true});
+      let data;
+      try {
+        ({data} = await api.post("/sga-intake/entries/clear", {ids,reason:clearReason,confirmed:true}));
+      } catch (e) {
+        if (e.response?.status === 404) throw new Error("A rota de limpeza não está disponível na API atual. Confira a versão do backend de homologação e atualize junto com o frontend. Nenhuma nova tentativa automática foi feita.");
+        throw e;
+      }
       setMarked([]);
       setClearDialog(false);
       setSelected(null);

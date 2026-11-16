@@ -982,7 +982,7 @@ export function SettingsPage({ revision, refresh, navigate }) {
     try {
       const params=new URLSearchParams({start:reportStart,end:reportEnd,reference:reportReference});
       await download("/export/orders."+format+"?"+params,"ZenControl-ordens-"+reportStart+"-a-"+reportEnd+"."+format);
-    } catch(e) { notify(errorMessage(e),"error"); } finally { setBusy(false); }
+    } catch(e) { notify(e.response?.status===404?"A rota de relatório não existe na API atual. Confira se frontend e backend estão na mesma publicação.":errorMessage(e),"error"); } finally { setBusy(false); }
   }
   async function call(path, method = "get") {
     setBusy(true);
@@ -1102,7 +1102,7 @@ export function SettingsPage({ revision, refresh, navigate }) {
               <div className="zc-form-grid">
                 <label>Data inicial<input type="date" value={reportStart} onChange={e=>setReportStart(e.target.value)} max={reportEnd}/></label>
                 <label>Data final<input type="date" value={reportEnd} onChange={e=>setReportEnd(e.target.value)} min={reportStart}/></label>
-                <label>Referência do período<select value={reportReference} onChange={e=>setReportReference(e.target.value)}><option value="created">Abertura da OS</option><option value="scheduled">Agendamento</option><option value="completed">Conclusão</option></select></label>
+                <label>Referência do período<select value={reportReference} onChange={e=>setReportReference(e.target.value)}><option value="created">OS emitida</option><option value="scheduled">Agendamento</option><option value="completed">Conclusão</option></select></label>
               </div>
               <p className="zc-muted">Excel para apresentação executiva; CSV para integração ou tratamento de dados. O histórico permanece disponível sem intervenção manual.</p>
               <div className="zc-actions">

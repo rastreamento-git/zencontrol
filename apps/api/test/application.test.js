@@ -1025,7 +1025,7 @@ test("exportação CSV neutraliza fórmulas e backup não contém contas ou segr
 
 test("relatório executivo XLSX e CSV respeitam período, estilo e acesso",async()=>{
   const row=await create({vehicle:"EXE1A23",customer_name:"Exemplo executivo",fipe_value:"R$ 30.000,00"});
-  await pool.query("UPDATE zc_orders SET created_date='2026-01-15',imei='000007260510340' WHERE id=$1",[row.id]);
+  await pool.query("UPDATE zc_orders SET created_date='2026-01-15',imei='000007260510340',notes=$2 WHERE id=$1",[row.id,"P: Observação inicial\nQ: Outra observação\nR: Retorno\nS: Último registro"]);
   const query="?start=2026-01-15&end=2026-01-15&reference=created";
   // Preserve the existing central access contract: administrator and operator.
   // Anonymous requests must never obtain a report.
@@ -1046,11 +1046,12 @@ test("relatório executivo XLSX e CSV respeitam período, estilo e acesso",async
   await workbook.xlsx.load(result.bytes);
   const sheet=workbook.getWorksheet("Ordens de serviço");
   assert.ok(sheet);
-  assert.equal(sheet.getRow(3).getCell(1).value,"Número da OS");
+  assert.deepEqual(sheet.getRow(3).values.slice(1,20),["NÚMERO DA OS","SERVIÇOS","NOME DO ASSOCIADO","PLACA / CHASSI","IMEI","OS EMITIDA","DATA DE CONCLUSÃO","TÉCNICO","REGIÃO","VOLUNTÁRIO","VALOR FIPE","CLASSIFICAÇÃO FIPE","INCLUÍDO POR","CONCLUÍDO POR","SITUAÇÃO","OBSERVAÇÃO 1","OBSERVAÇÃO 2","OBSERVAÇÃO 3","OBSERVAÇÃO 4"]);
   const record=sheet.getRows(4,sheet.rowCount-3).find(r=>r.getCell(1).value===row.id);
   assert.ok(record);
-  assert.equal(record.getCell(15).value,"000007260510340");
-  assert.equal(record.getCell(13).value,30000);
+  assert.equal(record.getCell(5).value,"000007260510340");
+  assert.equal(record.getCell(11).value,30000);
+  assert.deepEqual([16,17,18,19].map(i=>record.getCell(i).value),["Observação inicial","Outra observação","Retorno","Último registro"]);
   assert.ok(sheet.getRow(3).getCell(1).fill.fgColor);
   assert.ok(workbook.getWorksheet("Resumo"));
   await pool.query("UPDATE zc_orders SET status='CONCLUÍDO',completed_at='2026-01-15' WHERE id=$1",[row.id]);
