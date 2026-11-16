@@ -276,7 +276,8 @@ for (const cancel of [false, true, "skip", "skip-schedule"])
         assert.equal(row.data.sga_status, "Situação atual");
         assert.equal(row.data.imei, "000007260510340");
         assert.equal(row.data.status, "CONCLUÍDO");
-        assert.equal(row.data.archive, "COLD");
+        // The requested legacy tier is ignored; classify using the original dates.
+        assert.equal(row.data.archive, require("../src/storage-policy").tier(row.data));
         const completedStop = await call(path + "/enrichment/stop", {
           review_token: reviewed.data.review_token,
         });

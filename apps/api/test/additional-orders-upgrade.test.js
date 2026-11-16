@@ -61,7 +61,9 @@ test("existing additional OS gain a parent link without changing completed servi
       assert.deepEqual(sga_check, {});
       assert.equal(proposed_scheduled_at, "");
       assert.equal(sticker_discount_opt_in, false);
-      assert.deepEqual(original, before[i]);
+      // The new storage migration changes only the internal tier of old closed OS.
+      assert.equal(original.archive, "COLD");
+      assert.deepEqual(original, { ...before[i], archive: "COLD" });
     }
     assert.equal(after[1].parent_order_id, "OS-LEGACY");
     assert.equal(after[1].additional_equipment, "RASTREADOR");

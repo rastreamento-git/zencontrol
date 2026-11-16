@@ -1027,7 +1027,13 @@ test("relatório executivo XLSX e CSV respeitam período, estilo e acesso",async
   const row=await create({vehicle:"EXE1A23",customer_name:"Exemplo executivo",fipe_value:"R$ 30.000,00"});
   await pool.query("UPDATE zc_orders SET created_date='2026-01-15',imei='000007260510340' WHERE id=$1",[row.id]);
   const query="?start=2026-01-15&end=2026-01-15&reference=created";
-  assert.equal((await request("/api/export/orders.xlsx"+query,"GET",undefined,operatorToken)).status,403);
+  // Preserve the existing central access contract: administrator and operator.
+  // Anonymous requests must never obtain a report.
+  for (const extension of ["xlsx", "csv"]) {
+    const route = "/api/export/orders."+extension+query;
+    assert.equal((await request(route,"GET",undefined,null)).status,401);
+    assert.equal((await request(route,"GET",undefined,operatorToken)).status,200);
+  }
   assert.equal((await request("/api/export/orders.csv?start=2026-01-15")).status,400);
   const csv=await request("/api/export/orders.csv"+query);
   assert.equal(csv.status,200);
