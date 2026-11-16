@@ -323,13 +323,13 @@ function mapSgaVehicle(v) {
     v.situacao,
   );
   return {
-    vehicle: scalar(v.placa, v.chassi),
+    vehicle: /^(SEM[\s-]*PLACA|N[AÃ]O[\s-]*INFORMAD[AO]|0+)$/i.test(scalar(v.placa)) ? scalar(v.chassi) : scalar(v.placa, v.chassi),
     chassis: scalar(v.chassi),
     sga_id: scalar(v.codigo_veiculo),
-    customer_name: scalar(v.nome),
+    customer_name: scalar(v.nome, v.nome_associado, v.nome_cliente, v.associado?.nome),
     contact,
     volunteer: scalar(v.voluntario_real, v.nome_voluntario, v.nome_usuario),
-    fipe_value: money(scalar(v.valor_fipe, v.fipe_valor, v.valor_mercado)),
+    fipe_value: money(scalar(v.valor_fipe, v.valor_fipe_veiculo, v.fipe_valor, v.valor_mercado)),
     fipe_risk: "",
     sga_classification: displaySga(
       scalar(

@@ -308,6 +308,8 @@ test("falha parcial pode ser repetida sem perder ou duplicar cadastros recebidos
   assert.equal(result.state, "failed");
   assert.equal(result.summary.failed, 1);
   assert.equal(result.summary.imported, 1);
+  assert.equal(result.summary.errors[0].sga_id, "913");
+  assert.equal(result.summary.errors[0].stage, "consulta do veículo");
   failFirst = false;
   await db.pool.query(
     "UPDATE zc_sga_intake_runs SET available_at=0 WHERE id=$1",
@@ -330,7 +332,12 @@ test("falha parcial pode ser repetida sem perder ou duplicar cadastros recebidos
     2,
   );
 });
-test("agendamento diário usa Brasília, não executa antes do horário e é único por dia", async () => {
+test("agendamento diário usa Brasília, não executa antes do horário e é único por dia", async (t) => {
+  const previousConfig = await intake.configuration(db.pool);
+  t.after(async () => {
+    const current = await intake.configuration(db.pool);
+    config = await intake.saveConfiguration(db.pool, client, { ...previousConfig, version: current.version }, "Administrador");
+  });
   config = await intake.saveConfiguration(
     db.pool,
     client,
@@ -592,11 +599,18 @@ test("coleta manual retroativa ignora duplicidade e preserva as entradas", async
   const previous = new Date(Date.parse(day + "T12:00:00Z") - 86400000).toISOString().slice(0,10);
   const historical = { ...client, pendingMovements: async (date) => date === previous ? [movement("998", {data_alteracao: previous + "T10:00:00-0300"})] : [] };
   const task = await intake.enqueue(db.pool,historical,"Administrador",{start:previous,end:day,complementary:false});
-  await intake.runCycle(db.pool,cfg,{client:historical});
+  assert.equal(await intake.runCycle(db.pool,cfg,{client:historical}), true);
   const row = (await db.pool.query("SELECT * FROM zc_sga_intake_runs WHERE id=$1",[task.id])).rows[0];
+  assert.equal(row.state, "completed", row.message || "A coleta manual precisa ter sido executada.");
   assert.equal(row.summary.imported,1);
+  const original = await d.one(db.pool, "SELECT * FROM zc_sga_intake WHERE sga_vehicle_id=$1", ["998"]);
+  assert.ok(original);
+  assert.equal(original.order_id, null);
   const second = await intake.enqueue(db.pool,historical,"Administrador",{start:previous,end:day});
-  await intake.runCycle(db.pool,cfg,{client:historical});
+  assert.equal(await intake.runCycle(db.pool,cfg,{client:historical}), true);
   const dup = (await db.pool.query("SELECT * FROM zc_sga_intake_runs WHERE id=$1",[second.id])).rows[0];
+  assert.equal(dup.state, "completed", dup.message || "A segunda coleta precisa ter sido executada.");
   assert.equal(dup.summary.duplicates,1);
+  assert.equal(dup.summary.imported,0);
+  assert.deepEqual(await d.one(db.pool, "SELECT * FROM zc_sga_intake WHERE sga_vehicle_id=$1", ["998"]), original);
 });

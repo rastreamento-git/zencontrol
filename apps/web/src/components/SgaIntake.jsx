@@ -318,11 +318,11 @@ export default function SgaIntake({
                   ` · ${run.summary.imported} recebidos · ${run.summary.duplicates} já existentes · ${run.summary.failed} falhas`}
                 <p>{run.message}</p>
                 {!!run.summary?.errors?.length && (
-                  <p>
-                    {run.summary.errors
-                      .map((x) => "SGA " + x.sga_id)
-                      .join(", ")}
-                  </p>
+                  <ul className="sga-intake-errors">
+                    {run.summary.errors.map((x) => (
+                      <li key={x.sga_id}><strong>SGA {x.sga_id}</strong>{x.stage ? " · " + x.stage : ""}: {x.message || "Motivo não registrado na versão anterior."}</li>
+                    ))}
+                  </ul>
                 )}
               </li>
             ))}

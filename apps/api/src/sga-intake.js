@@ -3,7 +3,7 @@ const { transaction } = require("./database");
 const d = require("./domain");
 const o = require("./orders");
 const { fail } = require("./errors");
-const { SGAClient } = require("./integrations");
+const { SGAClient, IntegrationError } = require("./integrations");
 const eligibility = require("./sga-eligibility");
 const { businessPayload } = require("./sga-products");
 const { classifyFipe, fipeCents, fipeVehicleType } = require("../../../packages/domain/fipe.mjs");
@@ -190,8 +190,15 @@ async function existingOrder(db, data) {
 async function persistEntry(pool, run, movement, data) {
   const vehicle = d.vehicle(data.vehicle || data.chassis),
     customer = customerKey(data.customer_name);
-  if (!/^\d{1,20}$/.test(data.sga_id) || vehicle.length < 7 || !customer)
-    fail(409, "Cadastro SGA incompleto. Registro não importado.");
+  const missing = [];
+  if (!/^\d{1,20}$/.test(data.sga_id)) missing.push("código SGA");
+  if (vehicle.length < 7) missing.push("placa ou chassi");
+  if (!customer) missing.push("nome do associado");
+  if (missing.length) {
+    const error = new Error("Cadastro incompleto: " + missing.join(", ") + ".");
+    error.reasonCode = "incomplete_vehicle";
+    throw error;
+  }
   const { raw_vehicle, raw_products, ...mapped } = data;
   return transaction(pool, async (db) => {
     const identities = [
@@ -285,6 +292,7 @@ async function collect(pool, client, run, signal) {
   await progress(summary, "Importando cadastros sem gerar OS…");
   for (const [id, movement] of selected) {
     signal?.throwIfAborted();
+    let stage = "duplicidade";
     try {
       const exists = await d.one(
         pool,
@@ -295,31 +303,50 @@ async function collect(pool, client, run, signal) {
         summary.duplicates++;
         continue;
       }
-      const data = await client.lookup(
+      stage = "consulta do veículo";
+      let data;
+      try {
+        data = await client.lookup(
         { sga_id: id },
         { signal, includeRaw: true, includeAssessment: run.config.complementary !== false },
-      );
-      if (
-        data.sga_source?.[
-          run.config.pending_kind === "statuses"
-            ? "status_code"
-            : "classification_code"
-        ] !== run.config.pending_code
-      ) {
+        );
+      } catch (error) {
+        signal?.throwIfAborted();
+        const chassis = d.vehicle(movement.chassi);
+        const plate = d.vehicle(movement.placa);
+        if (error.reasonCode !== "vehicle_not_found" || !(chassis.length === 17 || plate.length === 7)) throw error;
+        data = await client.lookup(chassis.length === 17 ? { chassis } : { term: plate }, { signal, includeRaw: true, includeAssessment: run.config.complementary !== false });
+      }
+      if (String(data.sga_id) !== id) {
+        const error = new Error("Código do veículo divergente.");
+        error.reasonCode = "identity_mismatch";
+        throw error;
+      }
+      stage = "validação da classificação";
+      const current = data.sga_source?.[run.config.pending_kind === "statuses" ? "status_code" : "classification_code"];
+      if (!current) {
+        const error = new Error("A resposta do SGA não informou o código da situação/classificação atual.");
+        error.reasonCode = "missing_classification";
+        throw error;
+      }
+      if (String(current) !== run.config.pending_code) {
         summary.no_longer_pending++;
         continue;
       }
+      stage = "gravação no banco";
       if (await persistEntry(pool, run, movement, data)) summary.imported++;
       else summary.duplicates++;
     } catch (error) {
       signal?.throwIfAborted();
       summary.failed++;
-      if (summary.errors.length < 20)
-        summary.errors.push({
-          sga_id: id,
-          message:
-            "Não foi possível consultar ou preservar este cadastro. Tente novamente.",
-        });
+      const sqlState = /^[0-9A-Z]{5}$/.test(String(error.code || "")) ? error.code : null;
+      const httpStatus = Number.isInteger(error.upstreamStatus) ? error.upstreamStatus : null;
+      const known = ["vehicle_not_found","incomplete_vehicle","identity_mismatch","missing_classification"].includes(error.reasonCode);
+      const message = known ? error.message : httpStatus ? "SGA respondeu HTTP " + httpStatus + "." : error instanceof IntegrationError ? error.message : sqlState ? "Banco de dados recusou a operação (SQLSTATE " + sqlState + ")." : "Falha interna; consulte o log do servidor.";
+      const detail = { sga_id: id, stage, message, ...(sqlState ? { sqlstate: sqlState } : {}), ...(httpStatus ? { http_status: httpStatus } : {}) };
+      if (summary.errors.length < 20) summary.errors.push(detail);
+      // Do not log names, documents, API payloads, credentials or raw SQL error detail.
+      console.warn("sga_intake_record_failed", JSON.stringify({ run_id: run.id, ...detail }));
     } finally {
       summary.processed++;
       if (!signal?.aborted && (summary.processed % 5 === 0 || summary.processed === summary.matching)) await progress(summary, "Importando cadastros: " + summary.processed + " de " + summary.matching);
@@ -382,7 +409,7 @@ async function runCycle(
         d.now(),
         Date.now() + 600000,
         summary.failed
-          ? "Alguns cadastros não foram recebidos. Os demais foram preservados; a coleta será repetida."
+          ? (run.attempts + 1 < 3 ? "Alguns cadastros não foram recebidos. Veja os motivos por veículo; a coleta será repetida." : "Limite de tentativas atingido. Veja os motivos por veículo e inicie nova coleta após corrigir a causa.")
           : summary.received === 0 ? "Consulta concluída: nenhuma movimentação retornada pelo SGA." : summary.matching === 0 ? "Consulta concluída: nenhuma movimentação corresponde à etapa configurada." : "Coleta concluída. Nenhuma OS foi numerada.",
       ],
     );
