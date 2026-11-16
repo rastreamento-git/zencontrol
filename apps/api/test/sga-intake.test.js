@@ -642,5 +642,5 @@ test("HTTP 406 na busca por código permite fallback por chassi e placa, sem ace
   assert.match(result.summary.errors[0].message, /divergente/);
   assert.deepEqual(attempts, [{ sga_id: "996" }, { chassis }, { term: plate }, { sga_id: "997" }, { term: "QAT1A24" }]);
   assert.equal((await d.one(db.pool, "SELECT * FROM zc_sga_intake WHERE sga_vehicle_id=$1", ["996"])).order_id, null);
-  assert.equal(await d.one(db.pool, "SELECT * FROM zc_sga_intake WHERE sga_vehicle_id=$1", ["995"]), undefined);
+  assert.equal(await d.one(db.pool, "SELECT * FROM zc_sga_intake WHERE sga_vehicle_id=$1", ["995"]), null);
 });
