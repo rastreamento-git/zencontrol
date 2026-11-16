@@ -201,7 +201,7 @@ class SGAClient {
       throw new IntegrationError("Alterações no SGA estão desativadas.");
     signal?.throwIfAborted();
     const authToken = token || (await abortable(this.token(), signal));
-    const send = (value) => http(this.cfg.HINOVA_API_URL + endpoint, payload, { Authorization: "Bearer " + value }, mutation, false, signal, endpoint === "/listar/alteracao-veiculos" ? 90000 : 40000);
+    const send = (value) => http(this.cfg.HINOVA_API_URL + endpoint, payload, { Authorization: "Bearer " + value, Accept: "application/json" }, mutation, false, signal, endpoint === "/listar/alteracao-veiculos" ? 90000 : 40000);
     let p;
     try { p = await send(authToken); } catch (error) {
       signal?.throwIfAborted();
@@ -226,15 +226,17 @@ class SGAClient {
     const id = String(query.sga_id || "").trim(),
       term = String(query.term || "").trim();
     const routes = [];
+    const codeRoutes = (code) => ["/veiculo/buscar/" + code + "/id", "/veiculo/buscar/" + code + "/codigo"];
+    const isCodeRoute = (route) => /\/(id|codigo)$/.test(route);
     if (id) {
       if (!/^\d{1,20}$/.test(id))
         throw new IntegrationError("Código SGA inválido.");
-      routes.push("/veiculo/buscar/" + id + "/id");
+      routes.push(...codeRoutes(id));
     }
     if (term) {
       const key = d.vehicle(term);
       if (/^\d{1,20}$/.test(term))
-        routes.push("/veiculo/buscar/" + term + "/id");
+        routes.push(...codeRoutes(term));
       else if (key.length >= 7 && key.length <= 30)
         routes.push(
           "/veiculo/buscar/" +
@@ -269,7 +271,7 @@ class SGAClient {
         expected = decodeURIComponent(parts.at(-2)),
         kind = parts.at(-1);
       const key =
-        kind === "id"
+        isCodeRoute(route)
           ? "codigo_veiculo"
           : kind === "chassi"
             ? "chassi"
@@ -311,28 +313,33 @@ class SGAClient {
       }
     }
     if (!vehicle) {
-      if (lookupError) throw lookupError;
+      if (lookupError) {
+        if ([404, 406].includes(lookupError.upstreamStatus)) lookupError.reasonCode = "vehicle_not_found";
+        throw lookupError;
+      }
       const error = new IntegrationError("Veículo não encontrado na resposta SGA. Confira o identificador e o formato retornado.");
       error.reasonCode = "vehicle_not_found";
       throw error;
     }
     const code = String(vehicle.codigo_veiculo || "");
-    if (/^\d{1,20}$/.test(code) && used !== "/veiculo/buscar/" + code + "/id") {
-      try {
-        const full = record(
-          await this.request(
-            "/veiculo/buscar/" + code + "/id",
-            undefined,
-            false,
-            token,
-            signal,
-          ),
-          "/veiculo/buscar/" + code + "/id",
-        );
-        if (full) vehicle = { ...vehicle, ...full };
-      } catch (error) {
-        signal?.throwIfAborted();
-        if (!(error instanceof IntegrationError)) throw error;
+    if (/^\d{1,20}$/.test(code) && !isCodeRoute(used)) {
+      for (const route of codeRoutes(code)) {
+        // Do not repeat a code query that was already tried before the plate/chassis result.
+        if (routes.includes(route)) continue;
+        try {
+          const full = record(
+            await this.request(route, undefined, false, token, signal),
+            route,
+          );
+          if (full) {
+            vehicle = { ...vehicle, ...full };
+            break;
+          }
+        } catch (error) {
+          signal?.throwIfAborted();
+          if (!(error instanceof IntegrationError) || error.message.startsWith("Mais de um")) throw error;
+          if (![404, 406].includes(error.upstreamStatus)) break;
+        }
       }
     }
     // Validate every supplied identity after loading the full record.
@@ -341,7 +348,7 @@ class SGAClient {
         expected = parts.at(-2),
         kind = parts.at(-1),
         field =
-          kind === "id"
+          isCodeRoute(route)
             ? "codigo_veiculo"
             : kind === "chassi"
               ? "chassi"
