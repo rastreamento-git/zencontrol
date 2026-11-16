@@ -614,3 +614,33 @@ test("coleta manual retroativa ignora duplicidade e preserva as entradas", async
   assert.equal(dup.summary.imported,0);
   assert.deepEqual(await d.one(db.pool, "SELECT * FROM zc_sga_intake WHERE sga_vehicle_id=$1", ["998"]), original);
 });
+
+test("HTTP 406 na busca por código permite fallback por chassi e placa, sem aceitar outro código", async () => {
+  const chassis = "9BWZZZ377VT004251", plate = "QAT1A23";
+  const attempts = [];
+  const fallback = {
+    ...client,
+    pendingMovements: async () => [
+      movement("996", { chassi: chassis, placa: plate }),
+      movement("997", { placa: "QAT1A24" }),
+    ],
+    lookup: async (query) => {
+      attempts.push(query);
+      if (query.sga_id || query.chassis) {
+        const error = new Error("Filtro não aceito");
+        error.upstreamStatus = 406;
+        throw error;
+      }
+      return { ...data(query.term === plate ? "996" : "995"), vehicle: query.term };
+    },
+  };
+  const task = await intake.enqueue(db.pool, fallback, "Administrador", { complementary: false });
+  assert.equal(await intake.runCycle(db.pool, cfg, { client: fallback }), true);
+  const result = await d.one(db.pool, "SELECT * FROM zc_sga_intake_runs WHERE id=$1", [task.id]);
+  assert.equal(result.summary.imported, 1);
+  assert.equal(result.summary.failed, 1);
+  assert.match(result.summary.errors[0].message, /divergente/);
+  assert.deepEqual(attempts, [{ sga_id: "996" }, { chassis }, { term: plate }, { sga_id: "997" }, { term: "QAT1A24" }]);
+  assert.equal((await d.one(db.pool, "SELECT * FROM zc_sga_intake WHERE sga_vehicle_id=$1", ["996"])).order_id, null);
+  assert.equal(await d.one(db.pool, "SELECT * FROM zc_sga_intake WHERE sga_vehicle_id=$1", ["995"]), null);
+});

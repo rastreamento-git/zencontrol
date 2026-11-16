@@ -305,17 +305,28 @@ async function collect(pool, client, run, signal) {
       }
       stage = "consulta do veículo";
       let data;
-      try {
-        data = await client.lookup(
-        { sga_id: id },
-        { signal, includeRaw: true, includeAssessment: run.config.complementary !== false },
-        );
-      } catch (error) {
-        signal?.throwIfAborted();
-        const chassis = d.vehicle(movement.chassi);
-        const plate = d.vehicle(movement.placa);
-        if (error.reasonCode !== "vehicle_not_found" || !(chassis.length === 17 || plate.length === 7)) throw error;
-        data = await client.lookup(chassis.length === 17 ? { chassis } : { term: plate }, { signal, includeRaw: true, includeAssessment: run.config.complementary !== false });
+      const lookupOptions = { signal, includeRaw: true, includeAssessment: run.config.complementary !== false };
+      const chassis = d.vehicle(movement.chassi);
+      const plate = d.vehicle(movement.placa);
+      const searches = [{ sga_id: id }];
+      if (chassis.length === 17) searches.push({ chassis });
+      if (plate.length === 7 && /^[A-Z]{3}[0-9][A-Z0-9][0-9]{2}$/.test(plate)) searches.push({ term: plate });
+      let lastError;
+      for (const search of searches) {
+        try {
+          data = await client.lookup(search, lookupOptions);
+          break;
+        } catch (error) {
+          signal?.throwIfAborted();
+          if (error.reasonCode !== "vehicle_not_found" && ![404, 406].includes(error.upstreamStatus)) throw error;
+          lastError = error;
+        }
+      }
+      if (!data) {
+        const error = new Error("SGA não retornou o cadastro por código" + (searches.some(x => x.chassis) ? ", chassi" : "") + (searches.some(x => x.term) ? ", placa" : "") + ". " + (lastError?.upstreamStatus ? "HTTP " + lastError.upstreamStatus + ". " : "") + "Confira o acesso de consulta ao veículo no SGA.");
+        error.reasonCode = "vehicle_not_found";
+        error.upstreamStatus = lastError?.upstreamStatus;
+        throw error;
       }
       if (String(data.sga_id) !== id) {
         const error = new Error("Código do veículo divergente.");

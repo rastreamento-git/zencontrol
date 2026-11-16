@@ -250,3 +250,26 @@ test("SGA aceita envelope resultado com cadastro sem placa e mantém identidade 
   assert.equal(found.sga_products.perfurado,true);
   assert.equal(found.raw_vehicle.placa,"SEM PLACA");
 });
+
+test("SGA tenta codigo quando id é recusado com HTTP 406", async (t) => {
+  const calls = mock(t, (path) => {
+    if (path === "/usuario/autenticar") return { token_usuario: "test-token" };
+    if (path === "/veiculo/buscar/42/id") return { status: 406, data: { error: ["Filtro não aceito"] } };
+    if (path === "/veiculo/buscar/42/codigo") return [{ codigo_veiculo: "42", placa: "QAT1A23", nome: "Associado fictício", codigo_classificacao: 21 }];
+    return [];
+  });
+  const result = await new SGAClient(cfg).lookup({ sga_id: "42" });
+  assert.equal(result.sga_id, "42");
+  assert.equal(result.sga_source.classification_code, "21");
+  assert.equal(calls.filter(x => x.url.includes("/veiculo/buscar/")).length, 2);
+  assert.equal(calls.find(x => x.url.endsWith("/42/codigo")).options.headers.Accept, "application/json");
+});
+test("SGA não aceita código alternativo que retorna outro veículo", async (t) => {
+  mock(t, (path) => {
+    if (path === "/usuario/autenticar") return { token_usuario: "test-token" };
+    if (path.endsWith("/42/id")) return { status: 406, data: {} };
+    if (path.endsWith("/42/codigo")) return [{ codigo_veiculo: "43", placa: "QAT1A23" }];
+    return [];
+  });
+  await assert.rejects(new SGAClient(cfg).lookup({ sga_id: "42" }), error => error.reasonCode === "vehicle_not_found");
+});
