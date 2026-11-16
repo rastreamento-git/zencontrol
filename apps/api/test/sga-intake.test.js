@@ -644,3 +644,21 @@ test("HTTP 406 na busca por código permite fallback por chassi e placa, sem ace
   assert.equal((await d.one(db.pool, "SELECT * FROM zc_sga_intake WHERE sga_vehicle_id=$1", ["996"])).order_id, null);
   assert.equal(await d.one(db.pool, "SELECT * FROM zc_sga_intake WHERE sga_vehicle_id=$1", ["995"]), null);
 });
+
+test("falha em uma data não impede importar os veículos dos outros dias", async () => {
+  const previous = new Date(Date.parse(day + "T12:00:00Z") - 86400000).toISOString().slice(0,10);
+  const partial = { ...client, pendingMovements: async date => {
+    if (date === previous) { const error = new Error("Falha"); error.upstreamStatus = 406; throw error; }
+    return [movement("994")];
+  }};
+  const task = await intake.enqueue(db.pool, partial, "Administrador", {start:previous,end:day});
+  assert.equal(await intake.runCycle(db.pool,cfg,{client:partial}),true);
+  const result = await d.one(db.pool,"SELECT * FROM zc_sga_intake_runs WHERE id=$1",[task.id]);
+  assert.equal(result.state,"failed");
+  assert.equal(result.summary.failed_days,1);
+  assert.equal(result.summary.day_errors[0].day,previous);
+  assert.equal(result.summary.processed_days,2);
+  assert.equal(result.summary.imported,1);
+  assert.equal(result.summary.failed,0);
+  assert.ok(await d.one(db.pool,"SELECT * FROM zc_sga_intake WHERE sga_vehicle_id=$1",["994"]));
+});

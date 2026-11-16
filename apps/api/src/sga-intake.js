@@ -256,6 +256,10 @@ async function collect(pool, client, run, signal) {
     phase: "movements",
     total_days: days.length,
     processed_days: 0,
+    empty_days: 0,
+    failed_days: 0,
+    day_errors: [],
+    day_results: [],
     processed: 0,
     received: 0,
     matching: 0,
@@ -268,7 +272,24 @@ async function collect(pool, client, run, signal) {
   for (const day of days) {
     signal?.throwIfAborted();
     await progress({ ...summary, current_day: day }, "Consultando movimentações de " + day + "…");
-    const movements = await client.pendingMovements(day, run.config.pending_kind, run.config.pending_code, { signal });
+    let movements;
+    try {
+      movements = await client.pendingMovements(day, run.config.pending_kind, run.config.pending_code, { signal });
+    } catch (error) {
+      signal?.throwIfAborted();
+      const status = Number.isInteger(error.upstreamStatus) ? error.upstreamStatus : null;
+      const message = status ? "Consulta de movimentações: SGA respondeu HTTP " + status + "." : "Não foi possível consultar as movimentações desta data.";
+      const detail = { day, stage: "movimentações", message, ...(status ? { http_status: status } : {}) };
+      summary.failed_days++;
+      summary.processed_days++;
+      summary.day_errors.push(detail);
+      summary.day_results.push({ day, state: "failed" });
+      console.warn("sga_intake_day_failed", JSON.stringify({ run_id: run.id, ...detail }));
+      await progress(summary, "Falha nesta data; continuando as demais datas…");
+      continue;
+    }
+    if (movements.length === 0) summary.empty_days++;
+    summary.day_results.push({ day, state: movements.length ? "received" : "empty", movements: movements.length });
     summary.received += movements.length;
     for (const row of movements) {
     if (
@@ -410,7 +431,7 @@ async function runCycle(
     : AbortSignal.timeout(1800000);
   try {
     const summary = await collect(pool, client, run, deadline);
-    const state = summary.failed ? "failed" : "completed";
+    const state = summary.failed || summary.failed_days ? "failed" : "completed";
     await pool.query(
       "UPDATE zc_sga_intake_runs SET state=$2,summary=$3,finished_at=$4,available_at=$5,message=$6 WHERE id=$1",
       [
@@ -419,7 +440,9 @@ async function runCycle(
         JSON.stringify(summary),
         d.now(),
         Date.now() + 600000,
-        summary.failed
+        summary.failed_days
+          ? ("Falha na consulta de " + summary.failed_days + " dia(s). As outras datas foram processadas; confira os motivos por data." + (run.attempts + 1 < 3 ? " A coleta será repetida." : " Limite de tentativas atingido."))
+          : summary.failed
           ? (run.attempts + 1 < 3 ? "Alguns cadastros não foram recebidos. Veja os motivos por veículo; a coleta será repetida." : "Limite de tentativas atingido. Veja os motivos por veículo e inicie nova coleta após corrigir a causa.")
           : summary.received === 0 ? "Consulta concluída: nenhuma movimentação retornada pelo SGA." : summary.matching === 0 ? "Consulta concluída: nenhuma movimentação corresponde à etapa configurada." : "Coleta concluída. Nenhuma OS foi numerada.",
       ],

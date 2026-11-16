@@ -315,8 +315,15 @@ export default function SgaIntake({
                   }[run.state]
                 }
                 {run.summary?.imported !== undefined &&
-                  ` · ${run.summary.imported} recebidos · ${run.summary.duplicates} já existentes · ${run.summary.failed} falhas`}
+                  ` · ${run.summary.imported} recebidos · ${run.summary.duplicates} já existentes · ${run.summary.failed} falhas em cadastros${run.summary.failed_days ? " · " + run.summary.failed_days + " datas com erro" : ""}`}
                 <p>{run.message}</p>
+                {!!run.summary?.day_results?.length && (
+                  <ul className="sga-intake-errors">
+                    {run.summary.day_results.map(day => (
+                      <li key={day.day}><strong>{day.day}</strong>: {day.state === "failed" ? (run.summary.day_errors?.find(x => x.day === day.day)?.message || "Falha de consulta") : day.state === "empty" ? "Nenhuma movimentação" : day.movements + " movimentação(ões) recebida(s)"}</li>
+                    ))}
+                  </ul>
+                )}
                 {!!run.summary?.errors?.length && (
                   <ul className="sga-intake-errors">
                     {run.summary.errors.map((x) => (
