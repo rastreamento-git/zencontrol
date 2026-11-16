@@ -42,7 +42,8 @@ async function main() {
             data_alteracao: day + "T10:00:00-0300",
           },
         ];
-      if (req.url === "/veiculo/buscar/901/id")
+      if (req.url === "/veiculo/buscar/901/id") {
+        await new Promise(resolve => setTimeout(resolve, 900));
         result = {
           codigo_veiculo: "901",
           placa: "SGA0901",
@@ -56,6 +57,7 @@ async function main() {
           codigo_classificacao: "42",
           futuro: { original: "não descartar" },
         };
+      }
       if (req.url === "/produto-vinculado-veiculo/listar/901")
         result = {
           codigo_veiculo: "901",
@@ -159,7 +161,11 @@ async function main() {
   await region
     .getByRole("button", { name: "Buscar pendências do período" })
     .click();
-  await region.getByText("João de Teste", { exact: true }).waitFor();
+  await region.getByRole("progressbar").waitFor();
+  await region.getByText("Importação concluída.", { exact: true }).waitFor();
+  assert.equal(await region.getByText("João de Teste", { exact: true }).count(), 0);
+  assert.equal(await region.getByRole("table").count(), 0);
+  assert.equal(await region.getByText("Histórico de coletas e diagnósticos").count(), 0);
   assert.equal(
     (await db.pool.query("SELECT count(*)::int n FROM zc_orders")).rows[0].n,
     0,
@@ -173,7 +179,7 @@ async function main() {
     path: path.join(directory, "sga-importacao-desktop.png"),
     fullPage: true,
   });
-  await region.getByRole("button", { name: "Abrir no Controle de OS", exact: true }).click();
+  await region.getByRole("button", { name: "Abrir lote no Controle de OS", exact: true }).click();
   await page.getByRole("button", { name: "Pendências SGA · Sem OS", exact: true }).waitFor();
   await page.getByRole("region", { name: "Instalações pendentes do SGA" }).getByText("João de Teste", { exact: true }).waitFor();
   await page.getByRole("region", { name: "Instalações pendentes do SGA" }).getByRole("button", { name: "Revisar e atribuir" }).click();
