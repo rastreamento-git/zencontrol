@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { ArrowRight, CheckCircle2, AlertCircle, Download, Settings2, Trash2 } from "lucide-react";
 import Modal from "@zen/ui/components/Modal";
 import { api, errorMessage, format } from "./common";
-import { notify, confirmAction } from "@zen/ui/lib/feedback";
+import { notify } from "@zen/ui/lib/feedback";
 import SgaProducts from "./SgaProducts";
 import { classifyFipe, fipeRegions, fipeCents, fipeVehicleType } from "@zen/domain/fipe.mjs";
 import { brazilStates, addressFields } from "@zen/domain/order-fields.mjs";
@@ -159,8 +159,6 @@ export default function SgaIntake({
   async function clearMarked() {
     const ids = selectedIds.slice();
     if (!ids.length) return;
-    const ok = await confirmAction("Remover "+ids.length+" cadastro(s) sem OS e seus preenchimentos locais? O histórico da coleta será preservado. Uma nova coleta ou repetição poderá recebê-los novamente se ainda estiverem pendentes no SGA.", {title:"Limpar pendências",confirmLabel:"Remover selecionados",danger:true});
-    if (!ok) return;
     await action(async () => {
       const {data} = await api.post("/sga-intake/entries/clear", {ids,reason:clearReason,confirmed:true});
       setMarked([]);
@@ -507,7 +505,7 @@ export default function SgaIntake({
           <div className="sga-clear-dialog">
             <p><strong>{selectedIds.length} cadastro(s) sem OS</strong> serão removidos da fila, incluindo preenchimentos locais. O histórico e as OS existentes serão preservados.</p>
             <label>Motivo da limpeza<select disabled={busy} value={clearReason} onChange={e=>setClearReason(e.target.value)}><option value="reimport">Importar novamente</option><option value="incomplete">Dados incompletos</option><option value="status_changed">Situação alterada no SGA</option><option value="other">Outro motivo</option></select></label>
-            <small>Uma nova coleta do período original pode recuperar o cadastro se ele continuar com instalação pendente. Falhas em consulta não são consideradas confirmação de mudança de situação.</small>
+            <small>Uma nova coleta do período original, inclusive uma repetição automática, pode recuperar o cadastro se ele continuar com instalação pendente. Falhas em consulta não são consideradas confirmação de mudança de situação.</small>
             {error && <p className="form-error" role="alert">{error}</p>}
             <div className="dialog-actions"><button type="button" className="secondary-button" disabled={busy} onClick={()=>setClearDialog(false)}>Cancelar</button><button type="button" className="primary-button" disabled={busy || collecting || !selectedIds.length} onClick={clearMarked}>Confirmar limpeza</button></div>
           </div>
