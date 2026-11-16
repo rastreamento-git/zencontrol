@@ -49,4 +49,6 @@ A API consulta a situação financeira do veículo, a situação do associado po
 
 A consulta emite uma comprovação assinada pelo servidor, vinculada ao nome, placa/chassi e horário. A OS guarda o resumo consultado. Informações editadas no navegador não comprovam situação. Trocar nome/veículo invalida a consulta anterior. Novas consultas e reagendamentos reavaliam as restrições. O rascunho pode ser salvo mesmo com restrição, para regularização.
 
+A edição parcial também considera o agendamento já salvo: trocar técnico, serviço, associado ou veículo de uma OS agendada exige comprovação atual. Alterações apenas nas notas operacionais continuam permitidas sem uma nova consulta.
+
 OS abertas importadas com agendamento não validado são gravadas como pendentes. A data original fica em `proposed_scheduled_at`, visível como proposta; o conteúdo original continua preservado. Concluídos históricos mantêm sua etapa. API e telas apresentam classificação/situação do veículo, classificação/situação do associado e regularidade financeira.

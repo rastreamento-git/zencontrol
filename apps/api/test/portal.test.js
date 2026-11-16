@@ -15,6 +15,12 @@ const {
   migrate: stockMigrate,
 } = require("../../../integrations/estoque-pro/scripts/migrate");
 const { move } = require("../../../integrations/estoque-pro/src/inventory");
+const {
+  movement: stickerMovement,
+} = require("../../../integrations/estoque-pro/src/adesivos");
+const {
+  transaction: stockTransaction,
+} = require("../../../integrations/estoque-pro/src/database");
 const { createApp } = require("../src/app"),
   {
     createApp: stockApp,
@@ -571,6 +577,91 @@ test("central approval stays pending until the genuine stock receipt and uses th
     ).status,
     409,
   );
+});
+test("adesivo sinalizado ao técnico é baixado pela OS uma única vez, inclusive sem IMEI", async () => {
+  await stockTransaction(spool, async (db) => {
+    await stickerMovement(
+      db,
+      { type: "ENTRADA", quantity: 2 },
+      "portal-sticker-entry",
+      "Teste",
+    );
+    await stickerMovement(
+      db,
+      { type: "TRANSFERENCIA", quantity: 2, technician_id: stockA },
+      "portal-sticker-transfer",
+      "Teste",
+    );
+  });
+  let remaining = 2;
+  for (const service of ["Instalação", "Manutenção"]) {
+    const installing = service === "Instalação";
+    const codes = installing ? ["123456789012381"] : [];
+    if (installing) await serials(codes);
+    const created = await order(service);
+    const a = await ok("/api/orders/" + created.id, "PATCH", {
+      version: created.version,
+      sticker_discount_opt_in: true,
+    });
+    const visible = await ok(
+      "/api/technician/orders/" + a.id,
+      "GET",
+      undefined,
+      ta,
+    );
+    assert.equal(visible.order.sticker_discount_opt_in, true);
+    const b = await submission(a, codes, installing ? "install" : "none");
+    await approve(b);
+    assert.equal(
+      (await ok("/api/orders/" + a.id)).status,
+      "AGUARDANDO ESTOQUE",
+    );
+    const client = new StockClient(cfg);
+    await runOne(pool, cfg, {
+      stock: {
+        install: async (payload, key) => {
+          await client.install(payload, key);
+          throw new StockError(
+            "Resposta perdida após a baixa do adesivo.",
+            true,
+          );
+        },
+      },
+    });
+    assert.equal(
+      (await ok("/api/orders/" + a.id)).status,
+      "AGUARDANDO ESTOQUE",
+    );
+    await pool.query(
+      "UPDATE zc_jobs SET available_at=0 WHERE order_id=$1 AND kind='stock_installation'",
+      [a.id],
+    );
+    await runOne(pool, cfg);
+    const done = await ok("/api/orders/" + a.id);
+    assert.equal(done.status, "CONCLUÍDO");
+    assert.equal(done.stock_sync_state, "confirmed");
+    assert.deepEqual(done.stock_receipt.consumables, [
+      { sga_product_code: "2371", quantity: 1 },
+    ]);
+    assert.equal(
+      (
+        await spool.query(
+          "SELECT count(*)::integer n FROM adesivo_movimentos WHERE order_id=$1 AND tipo='APLICACAO'",
+          [a.id],
+        )
+      ).rows[0].n,
+      1,
+    );
+    assert.equal(
+      (
+        await spool.query(
+          "SELECT quantidade FROM adesivo_saldos WHERE tecnico_id=$1",
+          [stockA],
+        )
+      ).rows[0].quantidade,
+      --remaining,
+    );
+  }
 });
 test("wrong technician load causes an atomic refusal and correction remains possible", async () => {
   const code = "123456789012347";
