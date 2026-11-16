@@ -96,6 +96,9 @@ function configureSgaIntake(app, pool, cfg, client) {
       }),
     });
   });
+  app.post("/api/sga-intake/entries/clear", staff, async (req, res) =>
+    res.json(await intake.clearEntries(pool, req.body, actor(req))),
+  );
   app.get("/api/sga-intake/entries/:id", staff, async (req, res) => {
     const entry = await d.one(pool, "SELECT * FROM zc_sga_intake WHERE id=$1", [
       req.params.id,

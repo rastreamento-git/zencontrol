@@ -569,6 +569,8 @@ test("rotas reservam configuração e coleta ao administrador e impedem acesso t
       403,
     );
     assert.equal((await get("/api/sga-intake/entries", "tecnico")).status, 403);
+    assert.equal((await get("/api/sga-intake/entries/clear", "tecnico", "POST", {})).status, 403);
+    assert.equal((await get("/api/sga-intake/entries/clear", "operador", "POST", {})).status, 400);
     const manualResponse = await get("/api/sga-intake/entries?origin=manual", "operador");
     assert.equal(manualResponse.status, 200);
     const manual = await manualResponse.json();
@@ -698,4 +700,34 @@ test("validação SGA recente é reaproveitada sem consultar os dados novamente"
   const old={...stored,sga_assessment:{...stored.sga_assessment,checked_at:new Date(Date.now()-16*60000).toISOString()}};
   await intake.schedulingData({lookup:async()=>{calls++;return stored;}},{sga_vehicle_id:"990"},old);
   assert.equal(calls,1);
+});
+
+test("limpeza em lote remove somente pendências, permite reimportar e preserva OS", async () => {
+  movements = [movement("981"), movement("982"), movement("983")];
+  await run();
+  const a = await d.one(db.pool,"SELECT * FROM zc_sga_intake WHERE sga_vehicle_id=$1",["981"]);
+  const b = await d.one(db.pool,"SELECT * FROM zc_sga_intake WHERE sga_vehicle_id=$1",["982"]);
+  const keep = await d.one(db.pool,"SELECT * FROM zc_sga_intake WHERE sga_vehicle_id=$1",["983"]);
+  const assigned = await d.one(db.pool,"SELECT * FROM zc_sga_intake WHERE sga_vehicle_id=$1",["901"]);
+  assert.ok(assigned.order_id);
+  const order = await o.get(db.pool,assigned.order_id);
+  await assert.rejects(intake.clearEntries(db.pool,{ids:[a.id,assigned.id],reason:"reimport",confirmed:true},"Operação"),/seleção mudou|atribuída/i);
+  assert.ok(await d.one(db.pool,"SELECT * FROM zc_sga_intake WHERE id=$1",[a.id]));
+  await assert.rejects(intake.clearEntries(db.pool,{ids:[a.id],reason:"reimport",confirmed:false},"Operação"),/confirme/i);
+  const pendingRun = await intake.enqueue(db.pool,client,"Administrador");
+  await assert.rejects(intake.clearEntries(db.pool,{ids:[a.id],reason:"reimport",confirmed:true},"Operação"),/coleta em andamento|fila/i);
+  await db.pool.query("UPDATE zc_sga_intake_runs SET state='completed' WHERE id=$1",[pendingRun.id]);
+  const result = await intake.clearEntries(db.pool,{ids:[a.id,b.id],reason:"incomplete",confirmed:true},"Operação");
+  assert.equal(result.removed,2);
+  assert.equal(await d.one(db.pool,"SELECT * FROM zc_sga_intake WHERE id=$1",[a.id]),null);
+  assert.deepEqual(await d.one(db.pool,"SELECT * FROM zc_sga_intake WHERE id=$1",[keep.id]),keep);
+  assert.deepEqual(await d.one(db.pool,"SELECT * FROM zc_sga_intake WHERE id=$1",[assigned.id]),assigned);
+  assert.equal((await o.get(db.pool,assigned.order_id)).version,order.version);
+  assert.ok(await d.one(db.pool,"SELECT * FROM zc_sga_intake_runs WHERE id=$1",[a.run_id]));
+  movements = [movement("981"),movement("982")];
+  const imported = await run();
+  assert.equal(imported.summary.imported,2);
+  const received = await d.one(db.pool,"SELECT * FROM zc_sga_intake WHERE sga_vehicle_id=$1",["981"]);
+  assert.notEqual(received.id,a.id);
+  assert.equal(received.order_id,null);
 });

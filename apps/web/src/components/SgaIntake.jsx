@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { ArrowRight, CheckCircle2, AlertCircle, Download, Settings2 } from "lucide-react";
+import { ArrowRight, CheckCircle2, AlertCircle, Download, Settings2, Trash2 } from "lucide-react";
 import Modal from "@zen/ui/components/Modal";
 import { api, errorMessage, format } from "./common";
-import { notify } from "@zen/ui/lib/feedback";
+import { notify, confirmAction } from "@zen/ui/lib/feedback";
 import SgaProducts from "./SgaProducts";
 import { classifyFipe, fipeRegions, fipeCents, fipeVehicleType } from "@zen/domain/fipe.mjs";
 import { brazilStates, addressFields } from "@zen/domain/order-fields.mjs";
@@ -41,6 +41,9 @@ export default function SgaIntake({
     [query, setQuery] = useState(""),
     [origin, setOrigin] = useState(settings ? "manual" : ""),
     [runId, setRunId] = useState(initialRunId);
+  const [marked, setMarked] = useState([]);
+  const [clearReason, setClearReason] = useState("reimport");
+  const [clearDialog, setClearDialog] = useState(false);
   const [selected, setSelected] = useState(null),
     [techs, setTechs] = useState([]),
     [assignment, setAssignment] = useState({});
@@ -91,6 +94,7 @@ export default function SgaIntake({
       clearTimeout(timer);
     };
   }, [page, query, revision, origin, runId, settings]);
+  useEffect(() => { setMarked([]); }, [page, query, origin, runId]);
   useEffect(() => {
     if (!settings) return;
     let active = true;
@@ -145,6 +149,27 @@ export default function SgaIntake({
         fipe_value: "", vehicle_type: "", fipe_region: "", contact: "", volunteer: "", document_data: {},
         sticker_discount_opt_in: data.data.sga_products?.perfurado === true,
       });
+    });
+  }
+  const pageIds = queue.items.map(entry => entry.id);
+  const selectedIds = marked.filter(id => pageIds.includes(id));
+  const allMarked = pageIds.length > 0 && pageIds.every(id => marked.includes(id));
+  const incomplete = entry => !entry.data.contact || !entry.data.document_data?.model || !entry.data.document_data?.customer_street || !entry.data.document_data?.customer_city || !entry.data.document_data?.customer_state || !entry.data.fipe_risk || entry.data.sga_products?.perfurado == null;
+  const toggleMarked = id => setMarked(old => old.includes(id) ? old.filter(x => x !== id) : [...old,id]);
+  async function clearMarked() {
+    const ids = selectedIds.slice();
+    if (!ids.length) return;
+    const ok = await confirmAction("Remover "+ids.length+" cadastro(s) sem OS e seus preenchimentos locais? O histórico da coleta será preservado. Uma nova coleta ou repetição poderá recebê-los novamente se ainda estiverem pendentes no SGA.", {title:"Limpar pendências",confirmLabel:"Remover selecionados",danger:true});
+    if (!ok) return;
+    await action(async () => {
+      const {data} = await api.post("/sga-intake/entries/clear", {ids,reason:clearReason,confirmed:true});
+      setMarked([]);
+      setClearDialog(false);
+      setSelected(null);
+      if (page > 1 && queue.items.length === data.removed) setPage(page-1);
+      else await reload();
+      refresh?.();
+      notify(data.removed+" cadastro(s) retirado(s) da fila. Nenhuma OS ou dado do SGA foi alterado.");
     });
   }
   const doc = selected?.data.document_data || {};
@@ -387,6 +412,16 @@ export default function SgaIntake({
               placeholder="Nome, placa, chassi ou código SGA"
             />
           </label>
+          {queue.items.length > 0 && (
+            <div className="sga-bulk-toolbar">
+              <label className="sga-intake-check"><input type="checkbox" checked={allMarked} disabled={busy} onChange={e=>setMarked(e.target.checked ? pageIds : [])}/> Selecionar página</label>
+              <button type="button" className="secondary-button" disabled={busy || !queue.items.some(incomplete)} onClick={()=>setMarked(queue.items.filter(incomplete).map(e=>e.id))}>Selecionar incompletos</button>
+              <small aria-live="polite">{selectedIds.length} selecionado(s)</small>
+              {selectedIds.length > 0 && <button type="button" className="secondary-button" disabled={busy} onClick={()=>setMarked([])}>Desmarcar</button>}
+              <button type="button" className="secondary-button sga-bulk-remove" disabled={busy || collecting || !selectedIds.length} onClick={()=>{setClearReason("reimport");setClearDialog(true);}}><Trash2 size={16}/> Limpar selecionados</button>
+              {collecting && <small>Limpeza disponível após a coleta.</small>}
+            </div>
+          )}
           {!loading && !queue.items.length ? (
             <p>Nenhuma instalação pendente recebida nesta lista.</p>
           ) : (
@@ -394,6 +429,7 @@ export default function SgaIntake({
               <table className="zc-table zc-responsive-table">
                 <thead>
                   <tr>
+                    <th className="sga-select-cell" scope="col">Seleção</th>
                     <th>Associado / veículo</th>
                     <th>Entrada na etapa SGA</th>
                     <th>Origem / período</th>
@@ -404,7 +440,8 @@ export default function SgaIntake({
                 </thead>
                 <tbody>
                   {queue.items.map((entry) => (
-                    <tr key={entry.id}>
+                    <tr key={entry.id} className={marked.includes(entry.id) ? "sga-row-selected" : ""}>
+                      <td data-label="Seleção" className="sga-select-cell"><input type="checkbox" aria-label={"Selecionar cadastro SGA "+entry.data.sga_id} checked={marked.includes(entry.id)} disabled={busy} onChange={()=>toggleMarked(entry.id)}/></td>
                       <td data-label="Associado / veículo">
                         <strong>{entry.customer_name}</strong>
                         <br />
@@ -413,6 +450,7 @@ export default function SgaIntake({
                           "Modelo não informado"}
                         <br />
                         <small>SGA {entry.data.sga_id} · Sem OS</small>
+                        {incomplete(entry) && <small className="sga-incomplete">Dados a conferir</small>}
                         <small>{[entry.data.contact,entry.data.document_data?.customer_city,entry.data.document_data?.customer_state].filter(Boolean).join(" · ") || "Contato ou endereço não informado"}</small>
                       </td>
                       <td data-label="Entrada SGA">{format(entry.movement_at, true)}</td>
@@ -463,6 +501,17 @@ export default function SgaIntake({
             </nav>
           )}
         </>
+      )}
+      {!settings && clearDialog && (
+        <Modal title="Limpar pendências selecionadas" busy={busy} onClose={()=>setClearDialog(false)}>
+          <div className="sga-clear-dialog">
+            <p><strong>{selectedIds.length} cadastro(s) sem OS</strong> serão removidos da fila, incluindo preenchimentos locais. O histórico e as OS existentes serão preservados.</p>
+            <label>Motivo da limpeza<select disabled={busy} value={clearReason} onChange={e=>setClearReason(e.target.value)}><option value="reimport">Importar novamente</option><option value="incomplete">Dados incompletos</option><option value="status_changed">Situação alterada no SGA</option><option value="other">Outro motivo</option></select></label>
+            <small>Uma nova coleta do período original pode recuperar o cadastro se ele continuar com instalação pendente. Falhas em consulta não são consideradas confirmação de mudança de situação.</small>
+            {error && <p className="form-error" role="alert">{error}</p>}
+            <div className="dialog-actions"><button type="button" className="secondary-button" disabled={busy} onClick={()=>setClearDialog(false)}>Cancelar</button><button type="button" className="primary-button" disabled={busy || collecting || !selectedIds.length} onClick={clearMarked}>Confirmar limpeza</button></div>
+          </div>
+        </Modal>
       )}
       {!settings && selected && (
         <Modal
