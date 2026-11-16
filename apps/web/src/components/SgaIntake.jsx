@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ArrowRight, CheckCircle2, AlertCircle, Download, Settings2 } from "lucide-react";
 import Modal from "@zen/ui/components/Modal";
 import { api, errorMessage, format } from "./common";
 import { notify } from "@zen/ui/lib/feedback";
@@ -6,6 +7,24 @@ import SgaProducts from "./SgaProducts";
 import { classifyFipe, fipeRegions, fipeCents, fipeVehicleType } from "@zen/domain/fipe.mjs";
 import { brazilStates, addressFields } from "@zen/domain/order-fields.mjs";
 import "./sga-intake.css";
+function ImportProgress({ run }) {
+  const summary = run.summary || {};
+  const records = summary.phase === "records";
+  const movements = summary.phase === "movements";
+  const total = records ? Number(summary.matching) : movements ? Number(summary.total_days) : 0;
+  const done = records ? Number(summary.processed || 0) : Number(summary.processed_days || 0);
+  const determinate = run.state === "running" && total > 0;
+  const percent = determinate ? Math.max(0, Math.min(100, Math.round(done / total * 100))) : 0;
+  const stage = run.state === "queued" ? "Aguardando início…" : records ? "Importando cadastros…" : movements ? "Consultando movimentações…" : "Preparando consulta…";
+  return (
+    <div className="sga-progress" role="status" aria-live="polite">
+      <div className="sga-progress-heading"><strong>{stage}</strong><small>{determinate ? `${done} de ${total} ${records ? "cadastros" : "dias"}` : ""}</small></div>
+      <div className={"sga-progress-track" + (determinate && percent === 0 ? " is-starting" : "")} role="progressbar" aria-label={stage} aria-valuemin={0} aria-valuemax={100} aria-valuenow={determinate ? percent : undefined}>
+        <div className={determinate ? "sga-progress-fill" : "sga-progress-fill is-indeterminate"} style={determinate ? {width: percent + "%"} : undefined} />
+      </div>
+    </div>
+  );
+}
 export default function SgaIntake({
   settings = false,
   revision,
@@ -30,31 +49,32 @@ export default function SgaIntake({
     [loading, setLoading] = useState(true),
     [configured, setConfigured] = useState(false);
   const [confirmed, setConfirmed] = useState(false),
-    [expanded, setExpanded] = useState(true),
     [showSettings, setShowSettings] = useState(false);
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
   const [start, setStart] = useState(today), [end, setEnd] = useState(today), [complementary, setComplementary] = useState(true);
   const activeRuns = runs.filter(r => ["running","queued"].includes(r.state));
+  const collecting = activeRuns.length > 0;
+  const latest = runs[0];
+  const loadData = async () => {
+    const history = api.get("/sga-intake/runs");
+    const entries = settings ? Promise.resolve(null) : api.get("/sga-intake/entries", { params: { page, q: query, origin, run_id: runId } });
+    const [h, e] = await Promise.all([history,entries]);
+    return { history: h.data.items, entries: e?.data };
+  };
   const reload = async () => {
-    const [{ data: entries }, { data: history }] = await Promise.all([
-      api.get("/sga-intake/entries", { params: { page, q: query, origin, run_id: runId } }),
-      api.get("/sga-intake/runs"),
-    ]);
-    setQueue(entries);
-    setRuns(history.items);
+    const result = await loadData();
+    if (result.entries) setQueue(result.entries);
+    setRuns(result.history);
   };
   useEffect(() => {
     let active = true,
       timer;
     async function poll() {
       try {
-        const [{ data: entries }, { data: history }] = await Promise.all([
-          api.get("/sga-intake/entries", { params: { page, q: query, origin, run_id: runId } }),
-          api.get("/sga-intake/runs"),
-        ]);
+        const result = await loadData();
         if (active) {
-          setQueue(entries);
-          setRuns(history.items);
+          if (result.entries) setQueue(result.entries);
+          setRuns(result.history);
           setLoading(false);
         }
       } catch (e) {
@@ -63,14 +83,14 @@ export default function SgaIntake({
           setLoading(false);
         }
       }
-      if (active) timer = setTimeout(poll, 10000);
+      if (active) timer = setTimeout(poll, settings ? 2000 : 10000);
     }
     poll();
     return () => {
       active = false;
       clearTimeout(timer);
     };
-  }, [page, query, revision, origin, runId]);
+  }, [page, query, revision, origin, runId, settings]);
   useEffect(() => {
     if (!settings) return;
     let active = true;
@@ -139,35 +159,23 @@ export default function SgaIntake({
     return <label key={key}>{label}{key === "customer_state" ? <select disabled={!!stored || busy} value={value} onChange={e => setAssignment(a => ({...a,document_data:{...a.document_data,[key]:e.target.value}}))}><option value="">Selecione a UF</option>{brazilStates.map(uf => <option key={uf}>{uf}</option>)}</select> : <input readOnly={!!stored} disabled={busy} value={value} placeholder="Não informado" onChange={e => setAssignment(a => document ? {...a,document_data:{...a.document_data,[key]:e.target.value}} : {...a,[key]:e.target.value})}/>}</label>;
   };
   return (
-    <section className="sga-intake" aria-label="Instalações pendentes do SGA">
+    <section className={"sga-intake" + (settings ? " sga-import-view" : "")} aria-label="Instalações pendentes do SGA">
       <div className="sga-intake-heading">
         <div>
           <h2>Instalações pendentes do SGA</h2>
-          <p>
-            {loading
-              ? "Carregando…"
-              : `${queue.total} cadastro(s) nesta lista · sem número de OS`}
-          </p>
+          <p className="sga-intake-subtitle">{settings ? "Importação automática ou por período." : loading ? "Carregando…" : `${queue.total} cadastro(s) aguardando atribuição · sem número de OS`}</p>
         </div>
-        {settings && <button className="primary-button" onClick={() => onOpenQueue?.()}>Abrir fila de pendências no Controle de OS</button>}
+        {settings && <button className="secondary-button" onClick={() => onOpenQueue?.()}><ArrowRight size={16}/> Abrir Controle de OS</button>}
       </div>
-      {settings && (
-        <p>
-          Consulte o período desejado ou configure a coleta automática do dia (Brasília).
-          Os novos cadastros vão diretamente para Ordens de serviço → Pendências SGA · Sem OS.
-          A coleta não sobrescreve cadastros e não gera número de OS.
-        </p>
-      )}
+
       {settings && config && (
         <details
+          className="sga-config-details"
           open={showSettings}
           onToggle={(e) => setShowSettings(e.currentTarget.open)}
         >
           <summary>
-            Configurar coleta diária ·{" "}
-            {config.enabled
-              ? config.daily_time + " (Brasília)"
-              : "Automação desativada"}
+            <Settings2 size={17} aria-hidden="true"/> <span>Coleta automática</span><small>{config.enabled ? config.daily_time + " · Brasília" : "Desativada"}</small>
           </summary>
           <form
             className="sga-intake-settings"
@@ -237,15 +245,7 @@ export default function SgaIntake({
               />
               Ativar coleta automática diária
             </label>
-            <p>
-              Importação bruta, sem sobrescrever e sem duplicar. O administrador
-              autoriza as próximas coletas ao salvar esta configuração.
-            </p>
-            <small>
-              A coleta depende do servidor ativo no horário escolhido. Registros
-              que entrarem depois desse horário podem ser buscados por uma nova
-              coleta manual no mesmo dia.
-            </small>
+            <small>A coleta depende do servidor ativo no horário configurado.</small>
             {!choices.length && (
               <p role="status">
                 Nenhum código de Instalação pendente foi encontrado no catálogo.
@@ -263,26 +263,26 @@ export default function SgaIntake({
       )}
       {settings && config && (
         <div className="sga-intake-manual">
+          <h3><Download size={17} aria-hidden="true"/> Importação manual</h3>
           <div className="zc-form-grid">
-            <label>Data inicial<input type="date" required value={start} max={end || today} disabled={busy} onChange={e => { setStart(e.target.value); setConfirmed(false); }} /></label>
-            <label>Data final<input type="date" required value={end} min={start} max={today} disabled={busy} onChange={e => { setEnd(e.target.value); setConfirmed(false); }} /></label>
+            <label>Data inicial<input type="date" required value={start} max={end || today} disabled={busy || collecting} onChange={e => { setStart(e.target.value); setConfirmed(false); }} /></label>
+            <label>Data final<input type="date" required value={end} min={start} max={today} disabled={busy || collecting} onChange={e => { setEnd(e.target.value); setConfirmed(false); }} /></label>
           </div>
           <small>Até 31 dias por coleta. Cadastros existentes serão ignorados.</small>
-          <label className="sga-intake-check"><input type="checkbox" checked={complementary} disabled={busy} onChange={e => setComplementary(e.target.checked)} /> Consultar também situação financeira e cadastral durante a coleta (mais lento; obrigatória ao agendar).</label>
+          <label className="sga-intake-check"><input type="checkbox" checked={complementary} disabled={busy || collecting} onChange={e => setComplementary(e.target.checked)} /> Consultar também situação financeira e cadastral durante a coleta (mais lento; obrigatória ao agendar).</label>
           <label className="sga-intake-check">
             <input
               type="checkbox"
               checked={confirmed}
               onChange={(e) => setConfirmed(e.target.checked)}
-              disabled={busy}
+              disabled={busy || collecting}
             />
-            Confirmo a coleta dos cadastros que passaram para Instalação
-            pendente no período selecionado.
+            Confirmo a coleta do período selecionado.
           </label>
           <button
-            className="secondary-button"
+            className="primary-button"
             disabled={
-              busy ||
+              busy || loading ||
               !confirmed || !start || !end || start > end || end > today ||
               !configured ||
               !config.pending_code ||
@@ -292,28 +292,32 @@ export default function SgaIntake({
               action(async () => {
                 const { data: task } = await api.post("/sga-intake/runs", { confirmed: true, start, end, complementary });
                 setConfirmed(false);
-                setOrigin("manual");
-                setRunId(task.id);
-                setPage(1);
+                setRuns(previous => [{ ...task, state: task.state || "queued" }, ...previous.filter(r => r.id !== task.id)]);
                 await reload();
                 notify("Coleta SGA iniciada. Você pode continuar trabalhando.");
               })
             }
           >
-            {busy ? "Iniciando…" : "Buscar pendências do período"}
+            {busy ? "Iniciando…" : collecting ? "Importação em andamento" : "Buscar pendências do período"}
           </button>
         </div>
       )}
-      {settings && activeRuns.map(run => <div key={run.id} role="status" className="sga-intake-manual"><strong>{run.state === "queued" ? "Na fila do servidor" : "Importação em andamento"} · {run.period_start} a {run.period_end}</strong><p>{run.message || "Aguardando o worker de integração…"}</p>{run.summary?.phase === "records" ? <progress max={Math.max(1, run.summary.matching)} value={run.summary.processed || 0} /> : run.summary?.total_days ? <progress max={run.summary.total_days} value={run.summary.processed_days || 0} /> : <progress />}<p>{run.summary?.received || 0} movimentações · {run.summary?.imported || 0} novos · {run.summary?.duplicates || 0} duplicados · {run.summary?.failed || 0} falhas</p></div>)}
-      {settings && !activeRuns.length && runs[0] && <p role="status"><strong>Última coleta:</strong> {runs[0].message} · {runs[0].summary?.imported || 0} novos · {runs[0].summary?.duplicates || 0} duplicados · {runs[0].summary?.failed || 0} falhas</p>}
+      {settings && activeRuns.map(run => <ImportProgress key={run.id} run={run}/>)}
+      {settings && !collecting && latest && (
+        <div className="sga-import-result" role="status">
+          {latest.state === "completed" ? <CheckCircle2 size={18} aria-hidden="true"/> : <AlertCircle size={18} aria-hidden="true"/>}
+          <span>{latest.state === "completed" ? "Importação concluída." : "Coleta requer atenção."}</span>
+          <button type="button" className="secondary-button" onClick={() => onOpenQueue?.(latest.id)}>Abrir lote no Controle de OS <ArrowRight size={15}/></button>
+        </div>
+      )}
       {error && (
         <p className="form-error" role="alert">
           {error}
         </p>
       )}
-      {settings && !!runs.length && (
-        <details>
-          <summary>Histórico de coletas</summary>
+      {!settings && !!runs.length && (
+        <details className="sga-config-details">
+          <summary>Histórico de coletas e diagnósticos</summary>
           <ul>
             {runs.map((run) => (
               <li key={run.id}>
@@ -351,7 +355,7 @@ export default function SgaIntake({
           </ul>
         </details>
       )}
-      {expanded && (
+      {!settings && (
         <>
           <div className="zc-filters">
             <label>Origem da coleta
@@ -425,9 +429,9 @@ export default function SgaIntake({
                         <button
                           className="secondary-button"
                           disabled={busy}
-                          onClick={() => settings ? onOpenQueue?.(entry.run_id) : select(entry)}
+                          onClick={() => select(entry)}
                         >
-                          {settings ? "Abrir no Controle de OS" : "Revisar e atribuir"}
+                          Revisar e atribuir
                         </button>
                       </td>
                     </tr>
@@ -460,7 +464,7 @@ export default function SgaIntake({
           )}
         </>
       )}
-      {selected && (
+      {!settings && selected && (
         <Modal
           title="Revisar cadastro e atribuir ao técnico"
           wide

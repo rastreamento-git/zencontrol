@@ -100,3 +100,36 @@
 
 .sga-prepared-header{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:16px;padding:18px;border:1px solid var(--ep-line);border-radius:12px;background:var(--ep-primary-soft)}
 .sga-prepared-header h2{margin:5px 0;font-size:21px}.sga-prepared-header small,.sga-prepared-status small,.sga-prepared-metrics small{display:block;font-size:12px;opacity:.8}.sga-prepared-status{display:grid;gap:5px}.sga-prepared-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.sga-prepared-metrics>div{display:grid;gap:7px;border:1px solid var(--ep-line);border-radius:10px;padding:13px;background:var(--ep-surface)}.sga-prepared-metrics strong{font-size:15px;overflow-wrap:anywhere}.sga-intake-detail input[readonly]{opacity:.83;background:var(--ep-canvas)}.sga-assignment-section{margin:16px 0;display:grid;gap:13px}.sga-intake-detail .zc-fieldset{min-width:0}.sga-intake-detail .zc-fieldset label{display:grid;gap:6px}.sga-intake-detail .zc-form-grid input,.sga-intake-detail .zc-form-grid select{min-width:0;width:100%}.sga-intake-detail .zc-fieldset input[readonly]{cursor:default}.sga-intake .zc-table td small{display:block;margin-top:4px}@media(max-width:600px){.sga-prepared-metrics{grid-template-columns:1fr}.sga-intake-detail{padding:14px 12px 0}.sga-prepared-header h2{font-size:18px}}
+
+/* Match existing ZenControl surfaces, spacing and buttons. */
+.sga-import-view { gap: 16px; }
+.sga-intake-subtitle { margin-top: 5px !important; font-size: 13px; opacity: .78; }
+.sga-config-details { border: 1px solid var(--ep-line); border-radius: 10px; min-width: 0; }
+.sga-config-details > summary { cursor: pointer; padding: 14px; font-weight: 600; }
+.sga-config-details > summary > svg { vertical-align: middle; margin-right: 7px; }
+.sga-config-details > summary > small { margin-left: 10px; font-weight: 400; opacity: .75; }
+.sga-config-details > .sga-intake-settings { border: 0; border-top: 1px solid var(--ep-line); border-radius: 0; }
+.sga-config-details > ul { margin: 0; padding: 12px 24px 16px 32px; }
+.sga-import-view .sga-intake-manual { background: var(--ep-surface); }
+.sga-import-view .sga-intake-manual > h3 { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 15px; }
+.sga-progress { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--ep-line); border-radius: 10px; }
+.sga-progress-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.sga-progress-heading small { opacity: .8; font-variant-numeric: tabular-nums; }
+.sga-progress-track { position: relative; height: 10px; border-radius: 999px; overflow: hidden; background: var(--ep-primary-soft); border: 1px solid var(--ep-line); }
+.sga-progress-fill { position: relative; height: 100%; min-width: 0; background: var(--ep-primary); border-radius: inherit; transition: width .45s ease; overflow: hidden; }
+.sga-progress-fill:not(.is-indeterminate)::after { content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 20%, rgba(255,255,255,.3) 50%, transparent 80%); transform: translateX(-100%); animation: sga-shimmer 1.5s linear infinite; }
+.sga-progress-fill.is-indeterminate { width: 35%; animation: sga-slide 1.35s ease-in-out infinite; }
+@keyframes sga-shimmer { to { transform: translateX(100%); } }
+@keyframes sga-slide { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
+.sga-import-result { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 12px 0; }
+.sga-import-result > span { flex: 1; min-width: 150px; }
+@media (prefers-reduced-motion: reduce) {
+  .sga-progress-fill, .sga-progress-fill::after, .sga-progress-fill.is-indeterminate { animation: none; transition: none; }
+}
+@media(max-width:600px) {
+  .sga-config-details > summary > small { display: block; margin: 5px 0 0; }
+  .sga-import-result > button { width: 100%; }
+}
+
+.sga-progress-track.is-starting::before { content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 25%, var(--ep-primary) 50%, transparent 75%); opacity: .22; animation: sga-shimmer 1.6s linear infinite; }
+@media(prefers-reduced-motion:reduce){.sga-progress-track.is-starting::before{animation:none;}}

@@ -7,14 +7,14 @@ export default function ImportPage(props) {
     <>
       <nav className="sga-import-tabs" aria-label="Origem da importação">
         <button
-          className="secondary-button"
+          className={tab === "sga" ? "primary-button" : "secondary-button"}
           aria-pressed={tab === "sga"}
           onClick={() => setTab("sga")}
         >
           SGA · Instalações pendentes
         </button>
         <button
-          className="secondary-button"
+          className={tab === "spreadsheet" ? "primary-button" : "secondary-button"}
           aria-pressed={tab === "spreadsheet"}
           onClick={() => setTab("spreadsheet")}
         >
