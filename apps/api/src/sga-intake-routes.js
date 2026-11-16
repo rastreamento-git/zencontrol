@@ -83,13 +83,17 @@ function configureSgaIntake(app, pool, cfg, client) {
       total,
       page,
       limit,
-      items: await d.rows(
+      items: (await d.rows(
         pool,
-        "SELECT e.id,e.customer_name,e.vehicle,e.chassis,e.movement_at,e.received_at,e.data,e.run_id,CASE WHEN r.run_key LIKE 'daily:%' THEN 'automatic' ELSE 'manual' END AS origin,COALESCE(r.config->>'period_start',r.day) AS period_start,COALESCE(r.config->>'period_end',r.day) AS period_end" + from +
+        "SELECT e.id,e.customer_name,e.vehicle,e.chassis,e.movement_at,e.received_at,e.data,e.run_id,e.sga_vehicle_id,e.raw_source,CASE WHEN r.run_key LIKE 'daily:%' THEN 'automatic' ELSE 'manual' END AS origin,COALESCE(r.config->>'period_start',r.day) AS period_start,COALESCE(r.config->>'period_end',r.day) AS period_end" + from +
           condition +
           " ORDER BY e.received_at DESC,e.id LIMIT $4 OFFSET $5",
         [...args, limit, (page - 1) * limit],
-      ),
+      )).map(entry => {
+        const data = intake.preparedData(entry);
+        const { raw_source, ...publicEntry } = entry;
+        return { ...publicEntry, data };
+      }),
     });
   });
   app.get("/api/sga-intake/entries/:id", staff, async (req, res) => {
@@ -97,8 +101,11 @@ function configureSgaIntake(app, pool, cfg, client) {
       req.params.id,
     ]);
     if (!entry) fail(404, "Pendência não encontrada.");
-    res.json(entry);
+    res.json({ ...entry, data: intake.preparedData(entry) });
   });
+  app.patch("/api/sga-intake/entries/:id/draft", staff, async (req,res) =>
+    res.json(await intake.saveDraft(pool, req.params.id, req.body, actor(req))),
+  );
   app.post("/api/sga-intake/entries/:id/assign", staff, async (req, res) =>
     res.json(
       await intake.assign(

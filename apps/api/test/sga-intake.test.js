@@ -670,3 +670,32 @@ test("falha em uma data não impede importar os veículos dos outros dias", asyn
   assert.equal(result.summary.failed,0);
   assert.ok(await d.one(db.pool,"SELECT * FROM zc_sga_intake WHERE sga_vehicle_id=$1",["994"]));
 });
+
+test("ficha SGA recupera dados brutos sem rede e salva somente campos ausentes", async () => {
+  const entry = {sga_vehicle_id:"42",data:{sga_id:"42",customer_name:"Nome original",vehicle:"QAT1A23",document_data:{model:"Modelo preservado"}},raw_source:{vehicle:{codigo_veiculo:"42",nome:"Nome não substitui",modelo:"Outro",telefone_celular:"21999999999",estado:"RIO DE JANEIRO",descricao_tipo:"AUTOMÓVEL",valor_fipe:"95000.00",logradouro:"Rua fictícia",numero:"50"}}};
+  const result = intake.preparedData(entry);
+  assert.equal(result.customer_name,"Nome original");
+  assert.equal(result.document_data.model,"Modelo preservado");
+  assert.equal(result.document_data.customer_state,"RJ");
+  assert.equal(result.document_data.fipe_region,"RJ");
+  assert.equal(result.fipe_risk,"Alta");
+  assert.equal(result.contact,"21999999999");
+  movements = [movement("990")];
+  await run();
+  const stored = await d.one(db.pool,"SELECT * FROM zc_sga_intake WHERE sga_vehicle_id=$1",["990"]);
+  const saved = await intake.saveDraft(db.pool,stored.id,{contact:"21999999999",document_data:{model:"Não substituir",customer_street:"Rua fictícia"}},"Operação");
+  assert.equal(saved.data.contact,"21999999999");
+  assert.equal(saved.data.document_data.model,stored.data.document_data.model);
+  assert.equal(saved.data.document_data.customer_street,"Rua fictícia");
+  assert.equal(saved.order_id,null);
+  assert.deepEqual(saved.raw_source,stored.raw_source);
+});
+test("validação SGA recente é reaproveitada sem consultar os dados novamente", async () => {
+  const stored = {...data("990"),sga_assessment:{...data("990").sga_assessment,checked_at:new Date().toISOString()}};
+  const result = await intake.schedulingData({lookup:async()=>{throw Error("não deve consultar");}},{sga_vehicle_id:"990"},stored);
+  assert.equal(result,stored);
+  let calls=0;
+  const old={...stored,sga_assessment:{...stored.sga_assessment,checked_at:new Date(Date.now()-16*60000).toISOString()}};
+  await intake.schedulingData({lookup:async()=>{calls++;return stored;}},{sga_vehicle_id:"990"},old);
+  assert.equal(calls,1);
+});
