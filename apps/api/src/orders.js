@@ -294,11 +294,15 @@ async function validate(db, input, old = null, cfg = {}) {
     fail(400, "Defina técnico e agendamento.");
   if (
     cfg.SGA_SCHEDULING_GUARD &&
-    (out.scheduled_at || ["AGENDADO", "EM EXECUÇÃO"].includes(out.status)) &&
+    (merged.scheduled_at ||
+      ["AGENDADO", "EM EXECUÇÃO"].includes(merged.status)) &&
     (!old ||
       (out.scheduled_at !== undefined &&
         out.scheduled_at !== old.scheduled_at) ||
       (out.status !== undefined && out.status !== old.status) ||
+      (out.technician_id !== undefined &&
+        out.technician_id !== old.technician_id) ||
+      (out.service !== undefined && out.service !== old.service) ||
       (out.vehicle !== undefined && out.vehicle !== old.vehicle) ||
       (out.customer_name !== undefined &&
         out.customer_name !== old.customer_name) ||

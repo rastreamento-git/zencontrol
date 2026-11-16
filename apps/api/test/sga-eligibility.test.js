@@ -161,3 +161,67 @@ test("nova consulta indisponível remove comprovação anterior da revisão impo
   assert.equal(updated.data.sga_check, undefined);
   assert.equal(updated.data.customer_name, row.data.customer_name);
 });
+
+test("edição parcial revalida mudanças do agendamento sem bloquear notas operacionais", async () => {
+  const otherTech = (
+    await db.pool.query(
+      "INSERT INTO zc_technicians(name) VALUES('Outro técnico fictício') RETURNING id",
+    )
+  ).rows[0].id;
+  const saved = await o.create(
+    db.pool,
+    { ...input(), sga_verification: policy.sign(check(), cfg.SESSION_SECRET) },
+    "Teste",
+    cfg,
+  );
+  await db.pool.query("UPDATE zc_orders SET sga_check=$2 WHERE id=$1", [
+    saved.id,
+    JSON.stringify({
+      ...check(),
+      verified_at: new Date(Date.now() - 16 * 60 * 1000).toISOString(),
+    }),
+  ]);
+  for (const change of [
+    { technician_id: otherTech },
+    { customer_name: "Outro associado" },
+    { vehicle: "OUT1A23" },
+    { service: "Manutenção" },
+    {
+      sga_verification: policy.sign(
+        check({ financial_status: "INADIMPLENTE" }),
+        cfg.SESSION_SECRET,
+      ),
+    },
+  ]) {
+    await assert.rejects(
+      o.edit(
+        db.pool,
+        saved.id,
+        { version: saved.version, ...change },
+        "Teste",
+        cfg,
+      ),
+      /Consulte|Agendamento bloqueado/,
+    );
+  }
+  const noted = await o.edit(
+    db.pool,
+    saved.id,
+    { version: saved.version, notes: "Ligar antes da visita" },
+    "Teste",
+    cfg,
+  );
+  assert.equal(noted.notes, "Ligar antes da visita");
+  const reassigned = await o.edit(
+    db.pool,
+    saved.id,
+    {
+      version: noted.version,
+      technician_id: otherTech,
+      sga_verification: policy.sign(check(), cfg.SESSION_SECRET),
+    },
+    "Teste",
+    cfg,
+  );
+  assert.equal(reassigned.technician_id, otherTech);
+});
