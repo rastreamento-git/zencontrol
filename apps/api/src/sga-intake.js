@@ -63,8 +63,11 @@ function completeDraft(data, input) {
   if (!fipeVehicleType(result.document_data.vehicle_type) && ["Automóvel","Motocicleta"].includes(input.vehicle_type)) result.document_data.vehicle_type = input.vehicle_type;
   if (!result.document_data.fipe_region && ["GERAL","SP","RJ"].includes(input.fipe_region)) result.document_data.fipe_region = input.fipe_region;
   const { formatAddress } = require("../../../packages/domain/order-fields.mjs");
+  const originalAddress = result.document_data.customer_address;
+  if (!result.document_data.fipe_region && result.document_data.customer_state) result.document_data.fipe_region = ["SP","RJ"].includes(result.document_data.customer_state) ? result.document_data.customer_state : "GERAL";
   result.document_data = require("./order-document").normalizeDocumentData(result.document_data);
-  result.location = formatAddress(result.document_data) || result.location || "";
+  if (!result.document_data.customer_street && originalAddress) result.document_data.customer_address = originalAddress;
+  result.location = result.document_data.customer_street ? (formatAddress(result.document_data) || result.location || "") : (result.location || result.document_data.customer_address || formatAddress(result.document_data));
   return result;
 }
 async function saveDraft(pool, id, input, actor) {
