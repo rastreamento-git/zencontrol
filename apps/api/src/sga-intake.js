@@ -6,7 +6,7 @@ const { fail } = require("./errors");
 const { SGAClient } = require("./integrations");
 const eligibility = require("./sga-eligibility");
 const { businessPayload } = require("./sga-products");
-const { classifyFipe } = require("../../../packages/domain/fipe.mjs");
+const { classifyFipe, fipeCents, fipeVehicleType } = require("../../../packages/domain/fipe.mjs");
 function periodDays(start, end, today) {
   if (!start || !end || d.date(start) !== start || d.date(end) !== end || start > end || end > today) fail(400, "Informe um período válido, sem datas futuras.");
   const first = Date.parse(start + "T00:00:00Z"), last = Date.parse(end + "T00:00:00Z");
@@ -383,7 +383,7 @@ async function runCycle(
         Date.now() + 600000,
         summary.failed
           ? "Alguns cadastros não foram recebidos. Os demais foram preservados; a coleta será repetida."
-          : "Coleta concluída. Nenhuma OS foi numerada.",
+          : summary.received === 0 ? "Consulta concluída: nenhuma movimentação retornada pelo SGA." : summary.matching === 0 ? "Consulta concluída: nenhuma movimentação corresponde à etapa configurada." : "Coleta concluída. Nenhuma OS foi numerada.",
       ],
     );
   } catch (error) {
@@ -449,6 +449,10 @@ async function assign(pool, cfg, client, id, input, actor) {
         "Já existe uma OS para este cadastro. Nenhum dado foi sobrescrito.",
       );
     const data = { ...locked.data, fipe_value: fresh.fipe_value || locked.data.fipe_value, document_data: { ...locked.data.document_data, ...Object.fromEntries(Object.entries(fresh.document_data || {}).filter(([,v]) => v !== "" && v != null)) } };
+    // Permit completing absent values, never replace a valid live SGA value with a browser value.
+    if (!fipeCents(data.fipe_value) && input.fipe_value) data.fipe_value = d.string(input.fipe_value, "FIPE", 40);
+    if (!fipeVehicleType(data.document_data.vehicle_type) && ["Automóvel","Motocicleta"].includes(input.vehicle_type)) data.document_data.vehicle_type = input.vehicle_type;
+    if (!data.document_data.customer_state && ["GERAL","SP","RJ"].includes(input.fipe_region)) data.document_data.fipe_region = input.fipe_region;
     const document = equipmentForIntake(data, input);
     const order = await o.createInTransaction(
       db,

@@ -587,3 +587,16 @@ test("FIPE alta requer dois equipamentos; elétrico exige consulta", () => {
  assert.throws(() => intake.equipmentForIntake(vehicle,{electric:"yes"}), /Consulte o cliente/);
  assert.deepEqual(intake.equipmentForIntake(vehicle,{electric:"yes",customer_choice:"tag_only"}).equipment_counts,{tracker:0,tag:1});
 });
+
+test("coleta manual retroativa ignora duplicidade e preserva as entradas", async () => {
+  const previous = new Date(Date.parse(day + "T12:00:00Z") - 86400000).toISOString().slice(0,10);
+  const historical = { ...client, pendingMovements: async (date) => date === previous ? [movement("998", {data_alteracao: previous + "T10:00:00-0300"})] : [] };
+  const task = await intake.enqueue(db.pool,historical,"Administrador",{start:previous,end:day,complementary:false});
+  await intake.runCycle(db.pool,cfg,{client:historical});
+  const row = (await db.pool.query("SELECT * FROM zc_sga_intake_runs WHERE id=$1",[task.id])).rows[0];
+  assert.equal(row.summary.imported,1);
+  const second = await intake.enqueue(db.pool,historical,"Administrador",{start:previous,end:day});
+  await intake.runCycle(db.pool,cfg,{client:historical});
+  const dup = (await db.pool.query("SELECT * FROM zc_sga_intake_runs WHERE id=$1",[second.id])).rows[0];
+  assert.equal(dup.summary.duplicates,1);
+});

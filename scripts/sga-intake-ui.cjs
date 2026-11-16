@@ -48,6 +48,7 @@ async function main() {
           placa: "SGA0901",
           nome: "João de Teste",
           modelo: "Fiat Uno",
+          valor_fipe: "35000.00", tipo: "Automóvel", estado: "RJ",
           cpf: "00000000000",
           codigo_associado: "1",
           codigo_situacao: "1",
@@ -156,7 +157,7 @@ async function main() {
   await page.getByText("Configuração da coleta SGA salva.").waitFor();
   await region.getByLabel(/Confirmo a coleta/).check();
   await region
-    .getByRole("button", { name: "Buscar pendências de hoje" })
+    .getByRole("button", { name: "Buscar pendências do período" })
     .click();
   await region.getByText("João de Teste", { exact: true }).waitFor();
   assert.equal(
@@ -183,6 +184,7 @@ async function main() {
     .selectOption({ label: "Técnico de teste" });
   await dialog.getByLabel("Data e horário do atendimento").fill(day + "T15:00");
   await dialog.getByLabel("Base da OS").selectOption("HOT");
+  await dialog.getByLabel("Veículo elétrico").selectOption("no");
   await page.screenshot({
     path: path.join(directory, "sga-atribuir-desktop.png"),
     fullPage: true,

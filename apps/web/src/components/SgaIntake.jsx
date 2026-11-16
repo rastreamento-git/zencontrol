@@ -116,6 +116,7 @@ export default function SgaIntake({
         archive: "",
         electric: "",
         customer_choice: "",
+        fipe_value: "", vehicle_type: "", fipe_region: "",
         sticker_discount_opt_in: data.data.sga_products?.perfurado === true,
       });
     });
@@ -292,6 +293,7 @@ export default function SgaIntake({
         </div>
       )}
       {settings && activeRuns.map(run => <div key={run.id} role="status" className="sga-intake-manual"><strong>{run.state === "queued" ? "Na fila do servidor" : "Importação em andamento"} · {run.period_start} a {run.period_end}</strong><p>{run.message || "Aguardando o worker de integração…"}</p>{run.summary?.phase === "records" ? <progress max={Math.max(1, run.summary.matching)} value={run.summary.processed || 0} /> : run.summary?.total_days ? <progress max={run.summary.total_days} value={run.summary.processed_days || 0} /> : <progress />}<p>{run.summary?.received || 0} movimentações · {run.summary?.imported || 0} novos · {run.summary?.duplicates || 0} duplicados · {run.summary?.failed || 0} falhas</p></div>)}
+      {settings && !activeRuns.length && runs[0] && <p role="status"><strong>Última coleta:</strong> {runs[0].message} · {runs[0].summary?.imported || 0} novos · {runs[0].summary?.duplicates || 0} duplicados · {runs[0].summary?.failed || 0} falhas</p>}
       {error && (
         <p className="form-error" role="alert">
           {error}
@@ -512,6 +514,7 @@ export default function SgaIntake({
                 </select>
               </label>
             </div>
+            <details><summary>Completar FIPE ou tipo de veículo ausentes no SGA</summary><div className="zc-form-grid"><label>Valor FIPE (se ausente)<input value={assignment.fipe_value} onChange={e => setAssignment({...assignment,fipe_value:e.target.value})} placeholder="R$ 80.000,00" /></label><label>Tipo (se ausente)<select value={assignment.vehicle_type} onChange={e => setAssignment({...assignment,vehicle_type:e.target.value})}><option value="">Usar SGA</option><option>Automóvel</option><option>Motocicleta</option></select></label><label>Região FIPE (se UF ausente)<select value={assignment.fipe_region} onChange={e => setAssignment({...assignment,fipe_region:e.target.value})}><option value="">Usar SGA</option><option value="GERAL">Demais UFs</option><option>SP</option><option>RJ</option></select></label></div></details>
             <label>Veículo elétrico<select required value={assignment.electric} onChange={e => setAssignment({ ...assignment, electric: e.target.value, customer_choice: "" })} disabled={busy}><option value="">Confirme o tipo</option><option value="no">Não</option><option value="yes">Sim</option></select></label>
             {assignment.electric === "yes" && <label>Autorização após contato com o cliente<select required value={assignment.customer_choice} disabled={busy} onChange={e => setAssignment({ ...assignment, customer_choice: e.target.value })}><option value="">Aguardando consulta</option><option value="tracker">Cliente autorizou rastreador</option><option value="tag_only">Cliente autorizou somente TAG</option></select></label>}
             <label className="sga-intake-check">
