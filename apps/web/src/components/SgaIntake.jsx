@@ -19,7 +19,7 @@ function ImportProgress({ run }) {
   return (
     <div className="sga-progress" role="status" aria-live="polite">
       <div className="sga-progress-heading"><strong>{stage}</strong><small>{determinate ? `${done} de ${total} ${records ? "cadastros" : "dias"}` : ""}</small></div>
-      <div className="sga-progress-track" role="progressbar" aria-label={stage} aria-valuemin={0} aria-valuemax={100} aria-valuenow={determinate ? percent : undefined}>
+      <div className={"sga-progress-track" + (determinate && percent === 0 ? " is-starting" : "")} role="progressbar" aria-label={stage} aria-valuemin={0} aria-valuemax={100} aria-valuenow={determinate ? percent : undefined}>
         <div className={determinate ? "sga-progress-fill" : "sga-progress-fill is-indeterminate"} style={determinate ? {width: percent + "%"} : undefined} />
       </div>
     </div>
