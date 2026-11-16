@@ -23,7 +23,7 @@ async function exportReview(batch, res) {
   summary.commit();
   const mapped = book.addWorksheet("Revisão completa");
   const fields = [
-    ...new Set(batch.rows.flatMap((row) => Object.keys(row.data || {}))),
+    ...new Set(batch.rows.flatMap((row) => Object.keys(row.data || {}).filter(key => key !== "archive"))),
   ];
   mapped
     .addRow([

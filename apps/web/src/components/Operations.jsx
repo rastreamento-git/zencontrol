@@ -974,8 +974,8 @@ export function SettingsPage({ revision, refresh, navigate }) {
     [qr, setQr] = useState(""),
     [result, setResult] = useState(null),
     [busy, setBusy] = useState(false),
-    [reportStart, setReportStart] = useState(new Date().toISOString().slice(0, 7)+"-01"),
-    [reportEnd, setReportEnd] = useState(new Date().toISOString().slice(0,10)),
+    [reportStart, setReportStart] = useState(() => new Intl.DateTimeFormat("en-CA",{timeZone:"America/Sao_Paulo",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date()).slice(0,7)+"-01"),
+    [reportEnd, setReportEnd] = useState(() => new Intl.DateTimeFormat("en-CA",{timeZone:"America/Sao_Paulo",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date())),
     [reportReference, setReportReference] = useState("created");
   async function exportReport(format) {
     setBusy(true);

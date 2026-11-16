@@ -1263,6 +1263,7 @@ function createApp(pool, env = process.env) {
       req.body.dry_run === undefined
         ? true
         : d.boolean(req.body.dry_run, "Simulação");
+    if (!dry && month !== d.today().slice(0,7)) fail(400,"A política só pode ser aplicada no mês vigente.");
     const result = await require("./storage-policy").reconcile(pool,month,dry,actor(req));
     res.json(result);
   });
