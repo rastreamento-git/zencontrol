@@ -35,11 +35,14 @@ const definitions = {
     labels: ["descricao", "descricao_tipo"],
   },
 };
-function records(value) {
+function records(value, depth = 0) {
   if (Array.isArray(value)) return value;
-  for (const key of ["items", "dados", "data", "retorno", "veiculos"])
-    if (Array.isArray(value?.[key])) return value[key];
-  return value && typeof value === "object" ? [value] : [];
+  if (!value || typeof value !== "object") return [];
+  if (depth < 5 && !Object.hasOwn(value, "codigo_veiculo") && !Object.hasOwn(value, "codigo_associado")) {
+    for (const key of ["items", "dados", "data", "resultado", "retorno", "veiculos", "veiculo"])
+      if (value[key] && typeof value[key] === "object") return records(value[key], depth + 1);
+  }
+  return [value];
 }
 const scalar = (record, keys) => {
   for (const key of keys)

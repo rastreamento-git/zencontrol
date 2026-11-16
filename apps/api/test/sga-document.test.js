@@ -230,3 +230,23 @@ test("consulta situações do associado e financeira, usa classificações atuai
   finance = null;
   assert.equal((await client.lookup("SGA1A23")).sga_assessment.eligible, false);
 });
+
+test("SGA aceita envelope resultado com cadastro sem placa e mantém identidade exata", async (t) => {
+  const original = global.fetch;
+  global.fetch = async (url) => {
+    const path = new URL(url).pathname;
+    let data = [];
+    if (path === "/usuario/autenticar") data = {token_usuario:"fake"};
+    if (path === "/veiculo/buscar/42/id") data = {resultado:{dados:[{codigo_veiculo:"42",placa:"SEM PLACA",chassi:"9BWZZZ377VT004251",nome_associado:"Associado fictício",codigo_classificacao_veiculo:42,valor_fipe_veiculo:"150000.00"}]}};
+    if (path === "/produto-vinculado-veiculo/listar/42") data = {resultado:{codigo_veiculo:42,produtos:[{codigo_produto:2371,situacao:"ATIVO"}]}};
+    return new Response(JSON.stringify(data), {status:200});
+  };
+  t.after(() => {global.fetch=original;});
+  const found = await new SGAClient(cfg).lookup({sga_id:"42"}, {includeRaw:true});
+  assert.equal(found.sga_id,"42");
+  assert.equal(found.vehicle,"9BWZZZ377VT004251");
+  assert.equal(found.customer_name,"Associado fictício");
+  assert.equal(found.sga_source.classification_code,"42");
+  assert.equal(found.sga_products.perfurado,true);
+  assert.equal(found.raw_vehicle.placa,"SEM PLACA");
+});

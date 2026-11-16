@@ -289,7 +289,7 @@ class SGAClient {
       return found.length ? nonempty(found[0]) : null;
     };
     let vehicle = null,
-      used = "";
+      used = "", lookupError = null;
     for (const route of new Set(routes)) {
       try {
         vehicle = record(
@@ -307,12 +307,15 @@ class SGAClient {
           error.message.startsWith("Mais de um")
         )
           throw error;
+        lookupError = error;
       }
     }
-    if (!vehicle)
-      throw new IntegrationError(
-        "Veículo não encontrado ou consulta indisponível.",
-      );
+    if (!vehicle) {
+      if (lookupError) throw lookupError;
+      const error = new IntegrationError("Veículo não encontrado na resposta SGA. Confira o identificador e o formato retornado.");
+      error.reasonCode = "vehicle_not_found";
+      throw error;
+    }
     const code = String(vehicle.codigo_veiculo || "");
     if (/^\d{1,20}$/.test(code) && used !== "/veiculo/buscar/" + code + "/id") {
       try {
@@ -378,7 +381,7 @@ class SGAClient {
     const label = (kind, code) =>
       catalogs.items[kind]?.find((r) => r.code === String(code))?.label;
     vehicle.classificacao_real =
-      label("classifications", vehicle.codigo_classificacao) ||
+      label("classifications", vehicle.codigo_classificacao || vehicle.codigo_classificacao_veiculo || vehicle.id_classificacao) ||
       vehicle.descricao_classificacao;
     vehicle.situacao_real =
       label(
@@ -391,7 +394,7 @@ class SGAClient {
       vehicle.tipo || label("vehicle_types", vehicle.codigo_tipo_veiculo);
     const mapped = mapSgaVehicle(vehicle);
     mapped.sga_source = {
-      classification_code: String(vehicle.codigo_classificacao || ""),
+      classification_code: String(vehicle.codigo_classificacao || vehicle.codigo_classificacao_veiculo || vehicle.id_classificacao || ""),
       status_code: String(
         vehicle.codigo_situacao_veiculo || vehicle.codigo_situacao || "",
       ),
@@ -404,8 +407,10 @@ class SGAClient {
         token,
         signal,
       );
+      const { records } = require("./sga-reference");
+      const matching = records(raw).filter(row => String(row?.codigo_veiculo) === code && Array.isArray(row.produtos));
       mapped.sga_products = require("./sga-products").productsSnapshot(
-        raw,
+        matching.length === 1 ? matching[0] : raw,
         code,
       );
       if (includeRaw)

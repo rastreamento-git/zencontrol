@@ -308,6 +308,8 @@ test("falha parcial pode ser repetida sem perder ou duplicar cadastros recebidos
   assert.equal(result.state, "failed");
   assert.equal(result.summary.failed, 1);
   assert.equal(result.summary.imported, 1);
+  assert.equal(result.summary.errors[0].sga_id, "913");
+  assert.equal(result.summary.errors[0].stage, "consulta do veículo");
   failFirst = false;
   await db.pool.query(
     "UPDATE zc_sga_intake_runs SET available_at=0 WHERE id=$1",
