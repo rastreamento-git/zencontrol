@@ -6,6 +6,25 @@ const { fail } = require("./errors");
 const { SGAClient } = require("./integrations");
 const eligibility = require("./sga-eligibility");
 const { businessPayload } = require("./sga-products");
+const { classifyFipe, fipeCents, fipeVehicleType } = require("../../../packages/domain/fipe.mjs");
+function periodDays(start, end, today) {
+  if (!start || !end || d.date(start) !== start || d.date(end) !== end || start > end || end > today) fail(400, "Informe um período válido, sem datas futuras.");
+  const first = Date.parse(start + "T00:00:00Z"), last = Date.parse(end + "T00:00:00Z");
+  if (last - first > 30 * 86400000) fail(400, "Selecione até 31 dias por coleta.");
+  return Array.from({ length: (last - first) / 86400000 + 1 }, (_, i) => new Date(first + i * 86400000).toISOString().slice(0,10));
+}
+function equipmentForIntake(data, input) {
+  const document = { ...data.document_data };
+  const region = document.fipe_region || (document.customer_state ? (["SP","RJ"].includes(document.customer_state) ? document.customer_state : "GERAL") : "");
+  const fipe = classifyFipe({ value: data.fipe_value, vehicleType: document.vehicle_type, region });
+  if (region) document.fipe_region = region;
+  if (fipe.status !== "classified") fail(409, "FIPE ou categoria não confirmada no SGA. Complete o cadastro antes de gerar a OS.");
+  if (!["yes","no"].includes(input.electric)) fail(400, "Confirme se o veículo é elétrico.");
+  document.vehicle_electric = input.electric === "yes";
+  if (document.vehicle_electric && !["tracker","tag_only"].includes(input.customer_choice)) fail(400, "Consulte o cliente e registre a autorização para instalar o rastreador ou somente TAG.");
+  document.equipment_counts = { tracker: document.vehicle_electric && input.customer_choice === "tag_only" ? 0 : 1, tag: fipe.label === "Alta" || (document.vehicle_electric && input.customer_choice === "tag_only") ? 1 : 0 };
+  return document;
+}
 const customerKey = (value) => d.normalized(value).replace(/[^A-Z0-9]/g, "");
 const localTime = (date = new Date()) =>
   new Intl.DateTimeFormat("en-GB", {
@@ -15,7 +34,8 @@ const localTime = (date = new Date()) =>
     hourCycle: "h23",
   }).format(date);
 function movementDay(value) {
-  const text = String(value || "");
+  const text = String(value || "").trim();
+  if (/^\d{2}\/\d{2}\/\d{4}(?:[ T]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?$/.test(text)) return d.date(text.slice(0,10));
   if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return d.date(text);
   // SGA local timestamps without offset belong to the association's Brasília day.
   if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$/.test(text))
@@ -104,7 +124,7 @@ async function enqueue(
   pool,
   client,
   actor,
-  { automatic = false, now = new Date() } = {},
+  { automatic = false, now = new Date(), start, end, complementary = true } = {},
 ) {
   const config = await configuration(pool);
   const day = new Intl.DateTimeFormat("en-CA", {
@@ -119,7 +139,10 @@ async function enqueue(
     if (automatic) return null;
     fail(409, "Configure a consulta SGA antes de coletar pendências.");
   }
-  if (!automatic) await verifyPending(client, config);
+  const first = automatic ? day : (start ?? day), last = automatic ? day : (end ?? day);
+  periodDays(first, last, day);
+  if (!config.pending_code) { if (automatic) return null; fail(409, "Configure a etapa Instalação pendente antes de iniciar."); }
+  const snapshot = { ...config, period_start: first, period_end: last, complementary: automatic ? true : d.boolean(complementary, "Consulta complementar") };
   return transaction(pool, async (db) => {
     const row = await d.one(
       db,
@@ -129,7 +152,7 @@ async function enqueue(
         randomUUID(),
         automatic ? "daily:" + day : randomUUID(),
         day,
-        JSON.stringify(config),
+        JSON.stringify(snapshot),
         actor,
         d.now(),
       ],
@@ -213,20 +236,21 @@ async function persistEntry(pool, run, movement, data) {
   });
 }
 async function collect(pool, client, run, signal) {
+  const days = periodDays(run.config.period_start || run.day, run.config.period_end || run.day, run.day);
+  const progress = async (summary, message) => pool.query("UPDATE zc_sga_intake_runs SET summary=$2,message=$3 WHERE id=$1 AND state='running'", [run.id, JSON.stringify(summary), message]);
+  await progress({ phase: "catalog", total_days: days.length }, "Validando etapa no catálogo SGA…");
   await verifyPending(client, run.config);
   const field =
     run.config.pending_kind === "statuses"
       ? "codigo_situacao"
       : "codigo_classificacao";
-  const movements = await client.pendingMovements(
-    run.day,
-    run.config.pending_kind,
-    run.config.pending_code,
-    { signal },
-  );
   const selected = new Map();
   const summary = {
-    received: movements.length,
+    phase: "movements",
+    total_days: days.length,
+    processed_days: 0,
+    processed: 0,
+    received: 0,
     matching: 0,
     imported: 0,
     duplicates: 0,
@@ -234,20 +258,31 @@ async function collect(pool, client, run, signal) {
     failed: 0,
     errors: [],
   };
-  for (const row of movements) {
+  for (const day of days) {
+    signal?.throwIfAborted();
+    await progress({ ...summary, current_day: day }, "Consultando movimentações de " + day + "…");
+    const movements = await client.pendingMovements(day, run.config.pending_kind, run.config.pending_code, { signal });
+    summary.received += movements.length;
+    for (const row of movements) {
     if (
       row.nome_campo_tabela !== field ||
       String(row.valor_posterior) !== run.config.pending_code ||
       String(row.valor_anterior) === run.config.pending_code ||
-      movementDay(row.data_alteracao) !== run.day ||
+      movementDay(row.data_alteracao) !== day ||
       !/^\d{1,20}$/.test(String(row.codigo_veiculo))
     )
       continue;
     const old = selected.get(String(row.codigo_veiculo));
-    if (!old || String(row.data_alteracao) > String(old.data_alteracao))
+    if (!old || movementDay(row.data_alteracao) > movementDay(old.data_alteracao) || (movementDay(row.data_alteracao) === movementDay(old.data_alteracao) && String(row.data_alteracao) > String(old.data_alteracao)))
       selected.set(String(row.codigo_veiculo), row);
+    }
+    summary.processed_days++;
+    summary.matching = selected.size;
+    await progress(summary, "Movimentações recebidas; preparando cadastros…");
   }
   summary.matching = selected.size;
+  summary.phase = "records";
+  await progress(summary, "Importando cadastros sem gerar OS…");
   for (const [id, movement] of selected) {
     signal?.throwIfAborted();
     try {
@@ -262,7 +297,7 @@ async function collect(pool, client, run, signal) {
       }
       const data = await client.lookup(
         { sga_id: id },
-        { signal, includeRaw: true },
+        { signal, includeRaw: true, includeAssessment: run.config.complementary !== false },
       );
       if (
         data.sga_source?.[
@@ -285,8 +320,12 @@ async function collect(pool, client, run, signal) {
           message:
             "Não foi possível consultar ou preservar este cadastro. Tente novamente.",
         });
+    } finally {
+      summary.processed++;
+      if (!signal?.aborted && (summary.processed % 5 === 0 || summary.processed === summary.matching)) await progress(summary, "Importando cadastros: " + summary.processed + " de " + summary.matching);
     }
   }
+  summary.phase = "finished";
   return summary;
 }
 async function runCycle(
@@ -308,16 +347,16 @@ async function runCycle(
       day: "2-digit",
     }).format(now);
     await db.query(
-      "UPDATE zc_sga_intake_runs SET state='failed',attempts=3,message='A janela deste dia terminou. A coleta automática não importa movimentações de dias anteriores.' WHERE day<>$1 AND state IN ('queued','failed')",
+      "UPDATE zc_sga_intake_runs SET state='failed',attempts=3,message='A janela deste dia terminou. A coleta automática não importa movimentações de dias anteriores.' WHERE run_key LIKE 'daily:%' AND day<>$1 AND state IN ('queued','failed')",
       [currentDay],
     );
     await db.query(
       "UPDATE zc_sga_intake_runs SET state='failed',available_at=$1,message='Coleta interrompida. A repetição preserva registros recebidos.' WHERE state='running' AND started_at<$2",
-      [Date.now(), Date.now() - 900000],
+      [Date.now(), Date.now() - 2400000],
     );
     const row = await d.one(
       db,
-      "SELECT * FROM zc_sga_intake_runs WHERE (state='queued' OR (state='failed' AND attempts<3)) AND available_at<=$1 AND day=$2 ORDER BY created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED",
+      "SELECT * FROM zc_sga_intake_runs WHERE (state='queued' OR (state='failed' AND attempts<3)) AND available_at<=$1 AND (run_key NOT LIKE 'daily:%' OR day=$2) ORDER BY created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED",
       [Date.now(), currentDay],
     );
     if (row)
@@ -329,8 +368,8 @@ async function runCycle(
   });
   if (!run) return false;
   const deadline = signal
-    ? AbortSignal.any([signal, AbortSignal.timeout(600000)])
-    : AbortSignal.timeout(600000);
+    ? AbortSignal.any([signal, AbortSignal.timeout(1800000)])
+    : AbortSignal.timeout(1800000);
   try {
     const summary = await collect(pool, client, run, deadline);
     const state = summary.failed ? "failed" : "completed";
@@ -344,17 +383,18 @@ async function runCycle(
         Date.now() + 600000,
         summary.failed
           ? "Alguns cadastros não foram recebidos. Os demais foram preservados; a coleta será repetida."
-          : "Coleta concluída. Nenhuma OS foi numerada.",
+          : summary.received === 0 ? "Consulta concluída: nenhuma movimentação retornada pelo SGA." : summary.matching === 0 ? "Consulta concluída: nenhuma movimentação corresponde à etapa configurada." : "Coleta concluída. Nenhuma OS foi numerada.",
       ],
     );
-  } catch {
+  } catch (error) {
+    const detail = deadline.aborted ? "Tempo limite da coleta atingido ou worker interrompido." : error.name === "IntegrationError" ? error.message : error.status === 409 ? "Configuração da etapa pendente inválida ou indisponível." : "Falha ao processar a coleta.";
     await pool.query(
       "UPDATE zc_sga_intake_runs SET state='failed',finished_at=$2,available_at=$3,message=$4 WHERE id=$1",
       [
         run.id,
         d.now(),
         Date.now() + 600000,
-        "Não foi possível concluir a coleta SGA. Os dados já recebidos permanecem preservados.",
+        detail + " Os dados já recebidos permanecem preservados.",
       ],
     );
   }
@@ -408,10 +448,18 @@ async function assign(pool, cfg, client, id, input, actor) {
         409,
         "Já existe uma OS para este cadastro. Nenhum dado foi sobrescrito.",
       );
+    const data = { ...locked.data, fipe_value: fresh.fipe_value || locked.data.fipe_value, document_data: { ...locked.data.document_data, ...Object.fromEntries(Object.entries(fresh.document_data || {}).filter(([,v]) => v !== "" && v != null)) } };
+    // Permit completing absent values, never replace a valid live SGA value with a browser value.
+    if (!fipeCents(data.fipe_value) && input.fipe_value) data.fipe_value = d.string(input.fipe_value, "FIPE", 40);
+    if (!fipeVehicleType(data.document_data.vehicle_type) && ["Automóvel","Motocicleta"].includes(input.vehicle_type)) data.document_data.vehicle_type = input.vehicle_type;
+    if (!data.document_data.customer_state && ["GERAL","SP","RJ"].includes(input.fipe_region)) data.document_data.fipe_region = input.fipe_region;
+    const document = equipmentForIntake(data, input);
     const order = await o.createInTransaction(
       db,
       {
-        ...locked.data,
+        ...data,
+        document_data: document,
+        notes: [data.notes, document.vehicle_electric ? "Consulta ao cliente: " + (input.customer_choice === "tag_only" ? "somente TAG autorizada" : "rastreador autorizado") : ""].filter(Boolean).join("\n"),
         technician_id: Number(input.technician_id),
         scheduled_at: input.scheduled_at,
         service: "Instalação",
@@ -461,4 +509,6 @@ module.exports = {
   movementDay,
   localTime,
   existingOrder,
+  periodDays,
+  equipmentForIntake,
 };

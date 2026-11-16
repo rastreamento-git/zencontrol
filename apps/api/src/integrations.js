@@ -13,6 +13,7 @@ async function http(
   mutation = false,
   raw = false,
   signal,
+  timeoutMs = 40000,
 ) {
   try {
     const response = await fetch(url, {
@@ -20,8 +21,8 @@ async function http(
       headers: { "Content-Type": "application/json", ...headers },
       body: payload === undefined ? undefined : JSON.stringify(payload),
       signal: signal
-        ? AbortSignal.any([signal, AbortSignal.timeout(40000)])
-        : AbortSignal.timeout(40000),
+        ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+        : AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) {
       const error = new IntegrationError(
@@ -51,10 +52,9 @@ async function http(
     }
   } catch (e) {
     if (e instanceof IntegrationError) throw e;
-    throw new IntegrationError(
-      "Não foi possível confirmar a resposta do serviço externo.",
-      mutation,
-    );
+    const error = new IntegrationError(e.name === "TimeoutError" || e.name === "AbortError" ? "Tempo limite ou interrupção na requisição externa." : "Não foi possível confirmar a resposta do serviço externo.", mutation);
+    error.retryable = true;
+    throw error;
   }
 }
 class WPPClient {
@@ -199,16 +199,16 @@ class SGAClient {
   async request(endpoint, payload, mutation = false, token, signal) {
     if (mutation && !this.cfg.INTEGRATIONS_ENABLED)
       throw new IntegrationError("Alterações no SGA estão desativadas.");
-    const authToken = token || (await this.token());
     signal?.throwIfAborted();
-    const p = await http(
-      this.cfg.HINOVA_API_URL + endpoint,
-      payload,
-      { Authorization: "Bearer " + authToken },
-      mutation,
-      false,
-      signal,
-    );
+    const authToken = token || (await abortable(this.token(), signal));
+    const send = (value) => http(this.cfg.HINOVA_API_URL + endpoint, payload, { Authorization: "Bearer " + value }, mutation, false, signal, endpoint === "/listar/alteracao-veiculos" ? 90000 : 40000);
+    let p;
+    try { p = await send(authToken); } catch (error) {
+      signal?.throwIfAborted();
+      if (mutation || error.upstreamStatus !== 401) throw error;
+      if (this.cachedToken?.value === authToken) this.cachedToken = null;
+      p = await send(await abortable(this.token(), signal));
+    }
     if (
       p?.erro ||
       p?.errors ||
@@ -218,7 +218,7 @@ class SGAClient {
       throw new IntegrationError("O SGA recusou a operação.", mutation);
     return p;
   }
-  async lookup(input, { signal, includeRaw = false } = {}) {
+  async lookup(input, { signal, includeRaw = false, includeAssessment = true } = {}) {
     signal?.throwIfAborted();
     const query = typeof input === "string" ? { term: input } : input || {};
     const d = require("./domain"),
@@ -420,7 +420,7 @@ class SGAClient {
       };
     }
     if (includeRaw) mapped.raw_vehicle = sourceVehicle;
-    if (this.cfg.SGA_SCHEDULING_GUARD) {
+    if (includeAssessment && this.cfg.SGA_SCHEDULING_GUARD) {
       const { records } = require("./sga-reference");
       const cpf = String(
         vehicle.cpf || vehicle.cnpj || vehicle.cpf_cnpj || "",
@@ -492,7 +492,7 @@ class SGAClient {
     const all = [],
       seen = new Set();
     for (let page = 0; page < 100; page++) {
-      const result = await this.request(
+      const query = () => this.request(
         "/listar/alteracao-veiculos",
         {
           data_inicial: date,
@@ -501,12 +501,20 @@ class SGAClient {
           campos: [field],
           valor_posterior: [Number(pendingCode)],
           inicio_paginacao: page,
-          quantidade_por_pagina: 500,
+          quantidade_por_pagina: 100,
         },
         false,
         undefined,
         signal,
       );
+      let result;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try { result = await query(); break; } catch (error) {
+          signal?.throwIfAborted();
+          if (attempt === 2 || !(error.retryable || error.upstreamStatus === 429 || error.upstreamStatus >= 500)) throw error;
+          await abortable(new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1))), signal);
+        }
+      }
       const rows = Array.isArray(result)
         ? result
         : Array.isArray(result?.resultado)
@@ -529,7 +537,7 @@ class SGAClient {
         all.push(row);
         added++;
       }
-      if (rows.length < 500 && !Number(result?.numero_paginas)) return all;
+      if (rows.length < 100 && !Number(result?.numero_paginas)) return all;
       if (
         Number(result?.numero_paginas) &&
         page + 1 >= Number(result.numero_paginas)

@@ -72,7 +72,8 @@ function data(id) {
       },
       id,
     ),
-    document_data: { model: "Fiat Uno", scheduled_service: "Instalação" },
+    fipe_value: "R$ 35.000,00",
+    document_data: { model: "Fiat Uno", scheduled_service: "Instalação", vehicle_type: "Automóvel", customer_state: "RJ" },
     raw_vehicle: {
       codigo_veiculo: id,
       campo_futuro: { integral: ["não descartar", 42] },
@@ -204,6 +205,7 @@ test("atribuição exige técnico, base, agendamento e consulta regular; número
     technician_id: tech,
     scheduled_at: day + "T15:00",
     archive: "WARM",
+    electric: "no",
     sticker_discount_opt_in: true,
   };
   const before = (await db.pool.query("SELECT count(*)::int n FROM zc_orders"))
@@ -571,4 +573,30 @@ test("rotas reservam configuração e coleta ao administrador e impedem acesso t
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
+});
+
+test("período inclusivo, limite e datas futuras", () => {
+ assert.deepEqual(intake.periodDays("2026-11-14", "2026-11-16", "2026-11-16"), ["2026-11-14","2026-11-15","2026-11-16"]);
+ assert.throws(() => intake.periodDays("2026-11-16","2026-11-17","2026-11-16"));
+ assert.throws(() => intake.periodDays("2026-10-01","2026-11-16","2026-11-16"));
+ assert.equal(intake.movementDay("16/11/2026 09:30:00"),"2026-11-16");
+});
+test("FIPE alta requer dois equipamentos; elétrico exige consulta", () => {
+ const vehicle = { ...data("999"), fipe_value: "R$ 95.000,00" };
+ assert.deepEqual(intake.equipmentForIntake(vehicle,{electric:"no"}).equipment_counts,{tracker:1,tag:1});
+ assert.throws(() => intake.equipmentForIntake(vehicle,{electric:"yes"}), /Consulte o cliente/);
+ assert.deepEqual(intake.equipmentForIntake(vehicle,{electric:"yes",customer_choice:"tag_only"}).equipment_counts,{tracker:0,tag:1});
+});
+
+test("coleta manual retroativa ignora duplicidade e preserva as entradas", async () => {
+  const previous = new Date(Date.parse(day + "T12:00:00Z") - 86400000).toISOString().slice(0,10);
+  const historical = { ...client, pendingMovements: async (date) => date === previous ? [movement("998", {data_alteracao: previous + "T10:00:00-0300"})] : [] };
+  const task = await intake.enqueue(db.pool,historical,"Administrador",{start:previous,end:day,complementary:false});
+  await intake.runCycle(db.pool,cfg,{client:historical});
+  const row = (await db.pool.query("SELECT * FROM zc_sga_intake_runs WHERE id=$1",[task.id])).rows[0];
+  assert.equal(row.summary.imported,1);
+  const second = await intake.enqueue(db.pool,historical,"Administrador",{start:previous,end:day});
+  await intake.runCycle(db.pool,cfg,{client:historical});
+  const dup = (await db.pool.query("SELECT * FROM zc_sga_intake_runs WHERE id=$1",[second.id])).rows[0];
+  assert.equal(dup.summary.duplicates,1);
 });

@@ -47,15 +47,15 @@ function configureSgaIntake(app, pool, cfg, client) {
     });
   });
   app.post("/api/sga-intake/runs", admin, async (req, res) => {
-    if (req.body.confirmed !== true)
-      fail(400, "Confirme a coleta das pendências de hoje.");
-    res.status(202).json(await intake.enqueue(pool, client, actor(req)));
+    if (req.body.confirmed !== true || !req.body.start || !req.body.end)
+      fail(400, "Informe e confirme o período da coleta.");
+    res.status(202).json(await intake.enqueue(pool, client, actor(req), { start: req.body.start, end: req.body.end, complementary: req.body.complementary ?? true }));
   });
   app.get("/api/sga-intake/runs", staff, async (req, res) =>
     res.json({
       items: await d.rows(
         pool,
-        "SELECT id,day,state,actor,attempts,created_at,finished_at,summary,message FROM zc_sga_intake_runs ORDER BY created_at DESC,id DESC LIMIT 15",
+        "SELECT id,day,state,actor,attempts,created_at,finished_at,summary,message,COALESCE(config->>'period_start',day) AS period_start,COALESCE(config->>'period_end',day) AS period_end FROM zc_sga_intake_runs ORDER BY created_at DESC,id DESC LIMIT 15",
       ),
     }),
   );
