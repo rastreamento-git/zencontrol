@@ -143,7 +143,6 @@ export default function SgaIntake({
       setAssignment({
         technician_id: "",
         scheduled_at: "",
-        archive: "HOT",
         electric: "",
         customer_choice: "",
         fipe_value: "", vehicle_type: "", fipe_region: "", contact: "", volunteer: "", document_data: {},
@@ -160,7 +159,13 @@ export default function SgaIntake({
     const ids = selectedIds.slice();
     if (!ids.length) return;
     await action(async () => {
-      const {data} = await api.post("/sga-intake/entries/clear", {ids,reason:clearReason,confirmed:true});
+      let data;
+      try {
+        ({data} = await api.post("/sga-intake/entries/clear", {ids,reason:clearReason,confirmed:true}));
+      } catch (e) {
+        if (e.response?.status === 404) throw new Error("A rota de limpeza não está disponível na API atual. Confira a versão do backend de homologação e atualize junto com o frontend. Nenhuma nova tentativa automática foi feita.");
+        throw e;
+      }
       setMarked([]);
       setClearDialog(false);
       setSelected(null);
@@ -596,23 +601,7 @@ export default function SgaIntake({
                   }
                 />
               </label>
-              <label>
-                Base da OS
-                <select
-                  aria-label="Base da OS"
-                  required
-                  value={assignment.archive}
-                  disabled={busy}
-                  onChange={(e) =>
-                    setAssignment({ ...assignment, archive: e.target.value })
-                  }
-                >
-                  <option value="">Selecione a base</option>
-                  {["HOT", "WARM", "COLD"].map((x) => (
-                    <option key={x}>{x}</option>
-                  ))}
-                </select>
-              </label>
+
             </div>
             <label>Veículo elétrico<select required value={assignment.electric} onChange={e => setAssignment({ ...assignment, electric: e.target.value, customer_choice: "" })} disabled={busy}><option value="">Confirme o tipo</option><option value="no">Não</option><option value="yes">Sim</option></select></label>
             {assignment.electric === "yes" && <label>Autorização após contato com o cliente<select required value={assignment.customer_choice} disabled={busy} onChange={e => setAssignment({ ...assignment, customer_choice: e.target.value })}><option value="">Aguardando consulta</option><option value="tracker">Cliente autorizou rastreador</option><option value="tag_only">Cliente autorizou somente TAG</option></select></label>}

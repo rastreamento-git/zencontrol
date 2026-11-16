@@ -192,7 +192,6 @@ async function main() {
     .getByLabel("Técnico", { exact: true })
     .selectOption({ label: "Técnico de teste" });
   await dialog.getByLabel("Data e horário do atendimento").fill(day + "T15:00");
-  await dialog.getByLabel("Base da OS").selectOption("HOT");
   await dialog.getByLabel("Veículo elétrico").selectOption("no");
   await page.screenshot({
     path: path.join(directory, "sga-atribuir-desktop.png"),

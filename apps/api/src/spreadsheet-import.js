@@ -415,8 +415,7 @@ function configureSpreadsheetImport(app, pool, auth, sgaClient) {
     for (const row of rows)
       if (row.data) {
         deferUnverifiedSchedule(row);
-        row.data.archive = archive;
-        row.inference.push("Base escolhida pelo administrador: " + archive);
+        row.data.archive = require("./storage-policy").tier(row.data);
       }
     await resolveTechnicians(db, rows);
     await markExisting(db, rows);
@@ -494,7 +493,7 @@ function configureSpreadsheetImport(app, pool, auth, sgaClient) {
       version: 9,
       sheet_selection: true,
       automatic_equipment_grouping: true,
-      admin_archive: true,
+      admin_archive: false,
       full_export: true,
       daily_hex_numbering: true,
       sga_cancellation: true,
@@ -524,9 +523,8 @@ function configureSpreadsheetImport(app, pool, auth, sgaClient) {
         )
       )
         fail(400, "Escolha uma ou mais abas mensais válidas.");
-      const archive = req.body.archive;
-      if (!["HOT", "WARM", "COLD"].includes(archive))
-        fail(400, "Escolha a base de destino: HOT, WARM ou COLD.");
+      // Legacy clients may still send a tier; it is deliberately ignored.
+      const archive = "AUTOMATICO";
 
       const sgaMode = req.body.sga_mode || "fill_missing";
       if (!["fill_missing", "prefer_sga", "skip"].includes(sgaMode))
@@ -629,7 +627,7 @@ function configureSpreadsheetImport(app, pool, auth, sgaClient) {
       if (
         !b.plan?.reviewed ||
         b.plan.version !== 9 ||
-        !["HOT", "WARM", "COLD"].includes(b.plan.archive)
+        !["AUTOMATICO","HOT", "WARM", "COLD"].includes(b.plan.archive)
       )
         fail(
           409,

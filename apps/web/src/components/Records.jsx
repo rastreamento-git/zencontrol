@@ -52,7 +52,6 @@ export function Orders({
     [term, setTerm] = useState(q),
     [page, setPage] = useState(1),
     [status, setStatus] = useState(""),
-    [archive, setArchive] = useState(""),
     [day, setDay] = useState(meta.today);
   useEffect(() => {
     setQ(globalQuery || "");
@@ -69,7 +68,6 @@ export function Orders({
       page,
       limit: 25,
       status,
-      archive,
       ...(agenda ? { day } : {}),
     });
   const { data, loading, error } = useLoad(path, revision);
@@ -168,19 +166,6 @@ export function Orders({
             >
               <option value="">Todas as situações</option>
               {meta.statuses.map((s) => (
-                <option key={s}>{s}</option>
-              ))}
-            </select>
-            <select
-              aria-label="Base"
-              value={archive}
-              onChange={(e) => {
-                setArchive(e.target.value);
-                setPage(1);
-              }}
-            >
-              <option value="">Todas as bases</option>
-              {["HOT", "WARM", "COLD"].map((s) => (
                 <option key={s}>{s}</option>
               ))}
             </select>

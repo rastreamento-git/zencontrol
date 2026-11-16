@@ -989,9 +989,11 @@ test("fechamento usa centavos, prévia consistente e impede pagamento duplicado"
 test("arquivamento mensal simula antes de aplicar e mantém ordens abertas no HOT", async () => {
   const row = await create({ vehicle: "ARQA123" });
   await pool.query(
-    "UPDATE zc_orders SET created_date='2020-01-01',archive='COLD' WHERE id=$1",
+    "UPDATE zc_orders SET created_date='2020-01-01' WHERE id=$1",
     [row.id],
   );
+  // Simulate a stale storage tier left by an older deployment.
+  await pool.query("UPDATE zc_orders SET archive='COLD' WHERE id=$1",[row.id]);
   const simulated = await request("/api/archive-month", "POST", {
     month: d.today().slice(0, 7),
   });
@@ -1019,6 +1021,43 @@ test("exportação CSV neutraliza fórmulas e backup não contém contas ou segr
   const backup = await request("/api/backup");
   assert.equal(backup.status, 200);
   assert.equal(backup.bytes.subarray(0, 2).toString(), "PK");
+});
+
+test("relatório executivo XLSX e CSV respeitam período, estilo e acesso",async()=>{
+  const row=await create({vehicle:"EXE1A23",customer_name:"Exemplo executivo",fipe_value:"R$ 30.000,00"});
+  await pool.query("UPDATE zc_orders SET created_date='2026-01-15',imei='000007260510340',notes=$2 WHERE id=$1",[row.id,"P: Observação inicial\nQ: Outra observação\nR: Retorno\nS: Último registro"]);
+  const query="?start=2026-01-15&end=2026-01-15&reference=created";
+  // Preserve the existing central access contract: administrator and operator.
+  // Anonymous requests must never obtain a report.
+  for (const extension of ["xlsx", "csv"]) {
+    const route = "/api/export/orders."+extension+query;
+    assert.equal((await request(route,"GET",undefined,null)).status,401);
+    assert.equal((await request(route,"GET",undefined,operatorToken)).status,200);
+  }
+  assert.equal((await request("/api/export/orders.csv?start=2026-01-15")).status,400);
+  const csv=await request("/api/export/orders.csv"+query);
+  assert.equal(csv.status,200);
+  assert.match(csv.bytes.toString(),/Exemplo executivo/);
+  assert.match(csv.bytes.toString(),/000007260510340/);
+  assert.ok(!csv.bytes.toString().includes('"archive"'));
+  const result=await request("/api/export/orders.xlsx"+query);
+  assert.equal(result.status,200);
+  const workbook=new (require("exceljs").Workbook)();
+  await workbook.xlsx.load(result.bytes);
+  const sheet=workbook.getWorksheet("Ordens de serviço");
+  assert.ok(sheet);
+  assert.deepEqual(sheet.getRow(3).values.slice(1,20),["NÚMERO DA OS","SERVIÇOS","NOME DO ASSOCIADO","PLACA / CHASSI","IMEI","OS EMITIDA","DATA DE CONCLUSÃO","TÉCNICO","REGIÃO","VOLUNTÁRIO","VALOR FIPE","CLASSIFICAÇÃO FIPE","INCLUÍDO POR","CONCLUÍDO POR","SITUAÇÃO","OBSERVAÇÃO 1","OBSERVAÇÃO 2","OBSERVAÇÃO 3","OBSERVAÇÃO 4"]);
+  const record=sheet.getRows(4,sheet.rowCount-3).find(r=>r.getCell(1).value===row.id);
+  assert.ok(record);
+  assert.equal(record.getCell(5).value,"000007260510340");
+  assert.equal(record.getCell(11).value,30000);
+  assert.deepEqual([16,17,18,19].map(i=>record.getCell(i).value),["Observação inicial","Outra observação","Retorno","Último registro"]);
+  assert.ok(sheet.getRow(3).getCell(1).fill.fgColor);
+  assert.ok(workbook.getWorksheet("Resumo"));
+  await pool.query("UPDATE zc_orders SET status='CONCLUÍDO',completed_at='2026-01-15' WHERE id=$1",[row.id]);
+  assert.equal((await fresh(row.id)).archive,require("../src/storage-policy").tier({status:"CONCLUÍDO",created_date:"2026-01-15",completed_at:"2026-01-15"}));
+  await pool.query("UPDATE zc_orders SET status='REAGENDAR' WHERE id=$1",[row.id]);
+  assert.equal((await fresh(row.id)).archive,"HOT");
 });
 test("cadastro e troca aceitam oito caracteres completos e recusam cada categoria ausente", async () => {
   const payload = {

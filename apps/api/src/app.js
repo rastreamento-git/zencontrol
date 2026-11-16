@@ -1263,81 +1263,12 @@ function createApp(pool, env = process.env) {
       req.body.dry_run === undefined
         ? true
         : d.boolean(req.body.dry_run, "Simulação");
-    const result = await transaction(pool, async (db) => {
-      const list = await d.rows(
-        db,
-        "SELECT * FROM zc_orders WHERE deleted_at=''",
-      );
-      const changes = [];
-      for (const order of list) {
-        let target = "HOT";
-        if (["CONCLUÍDO", "CANCELADO"].includes(order.status)) {
-          const dates = [d.date(order.completed_at), d.date(order.created_date)]
-            .filter(Boolean)
-            .sort();
-          if (!dates.length) continue;
-          const last = dates.at(-1),
-            age =
-              (Number(month.slice(0, 4)) - Number(last.slice(0, 4))) * 12 +
-              Number(month.slice(5, 7)) -
-              Number(last.slice(5, 7));
-          target = age >= 4 ? "COLD" : age >= 1 ? "WARM" : "HOT";
-        }
-        if (target !== order.archive) {
-          changes.push({ id: order.id, from: order.archive, to: target });
-          if (!dry)
-            await o.update(
-              db,
-              "zc_orders",
-              "id",
-              order.id,
-              { archive: target },
-              true,
-            );
-        }
-      }
-      if (!dry)
-        await d.audit(db, actor(req), "archive_month", "system", month, {
-          count: changes.length,
-        });
-      return { month, count: changes.length, dry_run: dry, changes };
-    });
+    if (!dry && month !== d.today().slice(0,7)) fail(400,"A política só pode ser aplicada no mês vigente.");
+    const result = await require("./storage-policy").reconcile(pool,month,dry,actor(req));
     res.json(result);
   });
-  app.get("/api/export/orders.csv", admin, async (req, res) => {
-    const rows = await d.rows(
-        pool,
-        "SELECT * FROM zc_orders WHERE deleted_at='' ORDER BY created_date,id",
-      ),
-      cols = [
-        "id",
-        "created_date",
-        "service",
-        "vehicle",
-        "customer_name",
-        "contact",
-        "technician_name",
-        "status",
-        "scheduled_at",
-        "completed_at",
-        "archive",
-        "notes",
-      ];
-    const cell = (v) => {
-      let s = String(v ?? "");
-      if (/^[=+@-]/.test(s.trimStart())) s = "'" + s;
-      return '"' + s.replaceAll('"', '""') + '"';
-    };
-    res
-      .type("text/csv; charset=utf-8")
-      .attachment("ZenControl-ordens.csv")
-      .send(
-        "\ufeff" +
-          [cols, ...rows.map((r) => cols.map((c) => r[c]))]
-            .map((row) => row.map(cell).join(";"))
-            .join("\r\n"),
-      );
-  });
+  app.get("/api/export/orders.csv", admin, (req,res) => require("./orders-export").exportOrders(pool,req,res,"csv"));
+  app.get("/api/export/orders.xlsx", admin, (req,res) => require("./orders-export").exportOrders(pool,req,res,"xlsx"));
   app.get("/api/backup", admin, async (req, res) => {
     const { database, manifest, files, cleanup } =
       await require("./backup").prepareBackup(pool, cfg);

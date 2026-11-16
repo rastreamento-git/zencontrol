@@ -574,8 +574,6 @@ async function assign(pool, cfg, client, id, input, actor) {
     !input.scheduled_at
   )
     fail(400, "Selecione o técnico e a data do atendimento para gerar a OS.");
-  if (!["HOT", "WARM", "COLD"].includes(input.archive))
-    fail(400, "Selecione a base da OS.");
   const prepared = preparedData(entry);
   const fresh = await schedulingData(client, entry, prepared);
   const check = eligibility.snapshot(fresh);
@@ -625,7 +623,6 @@ async function assign(pool, cfg, client, id, input, actor) {
         scheduled_at: input.scheduled_at,
         service: "Instalação",
         status: "AGENDADO",
-        archive: input.archive,
         sticker_discount_opt_in: d.boolean(
           input.sticker_discount_opt_in ?? false,
           "Desconto do adesivo",
@@ -636,10 +633,9 @@ async function assign(pool, cfg, client, id, input, actor) {
       { ...cfg, SGA_SCHEDULING_GUARD: true },
     );
     await db.query(
-      "UPDATE zc_orders SET archive=$2,raw_legacy=$3 WHERE id=$1",
+      "UPDATE zc_orders SET raw_legacy=$2 WHERE id=$1",
       [
         order.id,
-        input.archive,
         JSON.stringify([
           {
             source: "sga_intake",

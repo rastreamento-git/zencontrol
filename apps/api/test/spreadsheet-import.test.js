@@ -191,7 +191,7 @@ test("exige administrador, confirmação e prévia persistida; repetições não
   assert.ok(results.every((r) => r.data.imported === 1));
   const saved = (await db.pool.query("SELECT * FROM zc_orders")).rows;
   assert.equal(saved.length, 1);
-  assert.equal(saved[0].archive, "HOT");
+  assert.equal(saved[0].archive, require("../src/storage-policy").tier(saved[0]));
   assert.equal(saved[0].technician_id, null);
   assert.equal(saved[0].created_date, saved[0].term);
   assert.match(
@@ -279,7 +279,7 @@ test("backup restaura lotes e origem das OS sem exigir contas da instalação or
     const orders = (await target.pool.query("SELECT * FROM zc_orders")).rows;
     assert.equal(orders.length, 2);
     assert.equal(orders[0].raw_legacy.source, "spreadsheet");
-    assert.equal(orders[0].archive, "HOT");
+    assert.equal(orders[0].archive, require("../src/storage-policy").tier(orders[0]));
     const counters = (
       await target.pool.query("SELECT * FROM zc_order_counters ORDER BY day")
     ).rows;
@@ -474,7 +474,7 @@ test("converte duas TAGs em instalação com OS adicional sem movimentações au
   assert.equal(saved[1].additional_equipment, "TAG");
   assert.equal(saved[1].raw_legacy.source, "spreadsheet");
   assert.ok(
-    saved.every((o) => o.workflow_mode === "controlled" && o.archive === "HOT"),
+    saved.every((o) => o.workflow_mode === "controlled" && o.archive === require("../src/storage-policy").tier(o)),
   );
   assert.equal(
     (await db.pool.query("SELECT * FROM zc_notifications")).rows.length,
@@ -594,37 +594,18 @@ test("leitura de aba auxiliar extensa cabe em heap de 128 MB", async () => {
   assert.match(stdout, /streaming-memory-ok/);
 });
 
-test("administrador escolhe a base e exporta todos os campos além do resumo", async () => {
+test("armazenamento automático ignora base enviada e exporta todos os campos além do resumo", async () => {
   const source = row("QRS3T45");
   source[19] = "Campo complementar integral";
   const p = await stage(await workbook([source]));
   const endpoint = `/api/spreadsheet-imports/${p.data.id}`;
-  assert.equal(
-    (
-      await call(endpoint + "/review", {
-        sheets: ["NOVEMBRO 2026"],
-        groups: [],
-      })
-    ).status,
-    400,
-  );
-  assert.equal(
-    (
-      await call(endpoint + "/review", {
-        sheets: ["NOVEMBRO 2026"],
-        groups: [],
-        archive: "AUTOMATICO",
-      })
-    ).status,
-    400,
-  );
   const cold = await call(endpoint + "/review", {
     sheets: ["NOVEMBRO 2026"],
     groups: [],
     archive: "COLD",
   });
-  assert.equal(cold.data.archive, "COLD");
-  assert.equal(cold.data.rows[0].data.archive, "COLD");
+  assert.equal(cold.data.archive, "AUTOMATICO");
+  assert.equal(cold.data.rows[0].data.archive, require("../src/storage-policy").tier(cold.data.rows[0].data));
   const forbidden = await fetch(base + endpoint + "/export", {
     headers: { Authorization: "Bearer " + operator },
   });
@@ -660,7 +641,7 @@ test("administrador escolhe a base e exporta todos os campos além do resumo", a
   const saved = (
     await db.pool.query("SELECT * FROM zc_orders WHERE vehicle='QRS3T45'")
   ).rows[0];
-  assert.equal(saved.archive, "COLD");
+  assert.equal(saved.archive, require("../src/storage-policy").tier(saved));
   assert.match(saved.notes, /Campo complementar integral/);
   const pending = row("TUV4W56");
   pending[6] = "";
@@ -671,7 +652,7 @@ test("administrador escolhe a base e exporta todos os campos além do resumo", a
     groups: [],
     archive: "WARM",
   });
-  assert.equal(warm.data.rows[0].data.archive, "WARM");
+  assert.equal(warm.data.rows[0].data.archive, "HOT");
   assert.equal(warm.data.rows[0].data.status, "PENDENTE");
 });
 
