@@ -6,7 +6,7 @@ const { fail } = require("./errors");
 const { SGAClient, IntegrationError } = require("./integrations");
 const eligibility = require("./sga-eligibility");
 const { businessPayload } = require("./sga-products");
-const { classifyFipe, fipeCents, fipeVehicleType } = require("../../../packages/domain/fipe.mjs");
+const { classifyFipe, fipeCents, fipeVehicleType, canonicalVehicleType } = require("../../../packages/domain/fipe.mjs");
 function periodDays(start, end, today) {
   if (!start || !end || d.date(start) !== start || d.date(end) !== end || start > end || end > today) fail(400, "Informe um período válido, sem datas futuras.");
   const first = Date.parse(start + "T00:00:00Z"), last = Date.parse(end + "T00:00:00Z");
@@ -39,6 +39,7 @@ function preparedData(entry) {
   };
   const data = fill(saved, mapped);
   const doc = fill(saved.document_data, mapped.document_data);
+  doc.vehicle_type=canonicalVehicleType(saved.document_data?.vehicle_type) || canonicalVehicleType(mapped.document_data?.vehicle_type);
   const { brazilStates, formatAddress } = require("../../../packages/domain/order-fields.mjs");
   if (!brazilStates.includes(doc.customer_state)) doc.customer_state = mapped.document_data?.customer_state || "";
   if (!doc.fipe_region && doc.customer_state) doc.fipe_region = ["SP","RJ"].includes(doc.customer_state) ? doc.customer_state : "GERAL";
@@ -61,7 +62,7 @@ function completeDraft(data, input) {
     if (!result.document_data[key] && input.document_data?.[key] !== undefined)
       result.document_data[key] = d.string(input.document_data[key], key, documentFields[key]);
   if (!fipeCents(result.fipe_value) && input.fipe_value) result.fipe_value = d.string(input.fipe_value,"FIPE",40);
-  if (input.vehicle_type) result.document_data.vehicle_type=d.string(input.vehicle_type,"Tipo de veículo",120);
+  if (input.vehicle_type !== undefined) result.document_data.vehicle_type=canonicalVehicleType(input.vehicle_type);
   if (input.fipe_region) result.document_data.fipe_region=d.string(input.fipe_region,"Regra regional FIPE",10);
   if (input.fipe_override !== undefined) result.document_data.fipe_override=d.string(input.fipe_override,"Tipo FIPE",20);
   for (const key of ["sga_classification","sga_status"]) if(input[key]!==undefined) result[key]=d.string(input[key],key,200);

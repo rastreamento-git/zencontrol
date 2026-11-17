@@ -2,7 +2,7 @@ const { fail } = require("./errors");
 const d = require("./domain");
 const {
   fipeCategories,
-  fipeRegions, classifyFipe, fipeVehicleType,
+  fipeRegions, classifyFipe, canonicalVehicleType,
 } = require("../../../packages/domain/fipe.mjs");
 const {
   addressFields,
@@ -73,6 +73,7 @@ function normalizeDocumentData(value, previous = {}) {
     !fipeRegions.some(([region]) => region === result.fipe_region)
   )
     fail(400, "Regra regional FIPE inválida. Selecione padrão, SP ou RJ.");
+  if (value.vehicle_type !== undefined) result.vehicle_type=canonicalVehicleType(result.vehicle_type);
   if (value.fipe_override !== undefined && result.fipe_override && !fipeCategories.includes(result.fipe_override)) fail(400,"Classificação FIPE manual inválida.");
   if (value.equipment !== undefined) {
     if (
@@ -327,8 +328,9 @@ function mapSgaVehicle(v) {
     v.situacao_veiculo,
     v.situacao,
   );
-  const rawType=scalar(v.tipo,v.descricao_tipo_veiculo,v.descricao_tipo);
-  const vehicleType=fipeVehicleType(rawType)==="car"?"Automóvel":fipeVehicleType(rawType)==="motorcycle"?"Moto":rawType;
+  // Prefer the actual vehicle type/catalog over the commercial plan label.
+  const explicit=[v.descricao_tipo_veiculo,v.tipo_veiculo,v.tipo_veiculo_catalogo,v.descricao_tipo].map(canonicalVehicleType).filter(Boolean);
+  const vehicleType=explicit.length ? (new Set(explicit).size===1 ? explicit[0] : "") : canonicalVehicleType(v.tipo);
   const region=state?(["SP","RJ"].includes(state)?state:"GERAL"):"";
   const fipeValue=money(scalar(v.valor_fipe,v.valor_fipe_veiculo,v.fipe_valor,v.valor_mercado));
   return {

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import SgaProducts from "./SgaProducts";
 import SgaIntake from "./SgaIntake";
-import { classifyFipe, fipeRegions, fipeCategories } from "@zen/domain/fipe.mjs";
+import { classifyFipe, fipeRegions, fipeCategories, canonicalVehicleType } from "@zen/domain/fipe.mjs";
 import {
   addressFields,
   brazilStates,
@@ -332,6 +332,7 @@ export function OrderEditor({
           if (o.data) {
             setOrder(o.data);
             const doc={...o.data.document_data};
+            doc.vehicle_type=canonicalVehicleType(doc.vehicle_type);
             if (!doc.fipe_region && brazilStates.includes(doc.customer_state)) doc.fipe_region=["SP","RJ"].includes(doc.customer_state)?doc.customer_state:"GERAL";
             setValues({...o.data,document_data:doc});
             if (syncOnOpen) syncSaved(o.data);
@@ -541,6 +542,7 @@ export function OrderEditor({
       const keys=["vehicle","chassis","sga_id","customer_name","contact","volunteer","fipe_value","sga_classification","sga_status","sga_check","sga_verification","sga_products"];
       const mapped=nonempty(Object.fromEntries(keys.map(key=>[key,data[key]])));
       const doc={...base.document_data,...nonempty(data.document_data)};
+      doc.vehicle_type=canonicalVehicleType(doc.vehicle_type);
       if(doc.customer_state&&!doc.fipe_region)doc.fipe_region=["SP","RJ"].includes(doc.customer_state)?doc.customer_state:"GERAL";
       return {...base,...mapped,location:base.location||data.location,document_data:doc,...(!base.parent_order_id&&data.sga_products?.state==="available"&&typeof data.sga_products.perfurado==="boolean"?{sticker_discount_opt_in:data.sga_products.perfurado}:{})};
     });
@@ -862,18 +864,7 @@ export function OrderEditor({
             {documentField("Modelo", "model")}
             {documentField("Ano de fabricação/modelo", "year")}
             {documentField("Tipo de veículo", "vehicle_type", {
-              options: [
-                ["", "Selecione o tipo"],
-                ["Automóvel", "Automóvel"],
-                ["Moto", "Moto"],
-                ["Outro", "Outro tipo de veículo"],
-                ...(documentData.vehicle_type &&
-                !["Automóvel", "Moto", "Outro"].includes(
-                  documentData.vehicle_type,
-                )
-                  ? [[documentData.vehicle_type, documentData.vehicle_type]]
-                  : []),
-              ],
+              options: [["","Selecione o tipo"],["Automóvel","Automóvel"],["Motocicleta","Motocicleta"]],
             })}
             {documentField("Categoria", "category")}
             {field("Código do veículo SGA","sga_id")}

@@ -49,7 +49,7 @@ async function main() {
           placa: "SGA0901",
           nome: "João de Teste",
           modelo: "Fiat Uno",
-          valor_fipe: "35000.00", tipo: "Automóvel", estado: "RJ",
+          valor_fipe: "35000.00", tipo: "AUTOMOVEL GOLD", estado: "RJ",
           cpf: "00000000000",
           codigo_associado: "1",
           codigo_situacao: "1",
@@ -67,6 +67,7 @@ async function main() {
               descricao: "Adesivo Perfurado",
               situacao: "ATIVO",
             },
+            { codigo_produto:"99",descricao:"Rastreador",situacao:"ATIVO" },
             {
               codigo_produto: "88",
               descricao: "Assistência 24 horas",
@@ -200,8 +201,14 @@ async function main() {
   const dialog = page.getByRole("dialog", {
     name: "Revisar cadastro e atribuir ao técnico",
   });
-  await dialog.getByText("Assistência 24 horas", { exact: true }).waitFor();
-  await dialog.getByText("Adesivo Perfurado", { exact: true }).waitFor();
+  const products=dialog.getByRole("region",{name:"Produtos do associado neste veículo"});
+  await products.getByText("Perfurado",{exact:true}).waitFor();
+  await products.locator(".sga-product-highlights").getByText("Rastreador",{exact:true}).waitFor();
+  assert.equal(await products.getByText("Assistência 24 horas",{exact:true}).isVisible(),false);
+  assert.equal(await dialog.getByLabel("Tipo de veículo",{exact:true}).inputValue(),"Automóvel");
+  await products.getByText("Ver todos os produtos (3)",{exact:true}).click();
+  await products.getByText("Assistência 24 horas",{exact:true}).waitFor();
+  await products.getByText("Adesivo Perfurado",{exact:true}).waitFor();
   await dialog
     .getByLabel("Técnico", { exact: true })
     .selectOption({ label: "Técnico de teste" });

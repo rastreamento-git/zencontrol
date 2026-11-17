@@ -4,7 +4,7 @@ import Modal from "@zen/ui/components/Modal";
 import { api, errorMessage, format, Empty, Loading, Pager } from "./common";
 import { notify } from "@zen/ui/lib/feedback";
 import SgaProducts from "./SgaProducts";
-import { classifyFipe, fipeRegions, fipeCents, fipeVehicleType, fipeCategories } from "@zen/domain/fipe.mjs";
+import { classifyFipe, fipeRegions, fipeCents, canonicalVehicleType, fipeCategories } from "@zen/domain/fipe.mjs";
 import { brazilStates, addressFields } from "@zen/domain/order-fields.mjs";
 import "./sga-intake.css";
 function ImportProgress({ run }) {
@@ -157,7 +157,7 @@ export default function SgaIntake({
         scheduled_at: "",
         electric: "",
         customer_choice: "",
-        fipe_value:"",vehicle_type:data.data.document_data?.vehicle_type||"",fipe_region:data.data.document_data?.fipe_region||"",fipe_override:data.data.document_data?.fipe_override||"",sga_classification:data.data.sga_classification||"",sga_status:data.data.sga_status||"",contact:"",volunteer:"",document_data:{},
+        fipe_value:"",vehicle_type:canonicalVehicleType(data.data.document_data?.vehicle_type),fipe_region:data.data.document_data?.fipe_region||"",fipe_override:data.data.document_data?.fipe_override||"",sga_classification:data.data.sga_classification||"",sga_status:data.data.sga_status||"",contact:"",volunteer:"",document_data:{},
         sticker_discount_opt_in:data.data.sticker_discount_opt_in??(data.data.sga_products?.perfurado===true),
       });
     });
@@ -189,7 +189,7 @@ export default function SgaIntake({
   }
   const doc = selected?.data.document_data || {};
   const savedFipe = fipeCents(selected?.data.fipe_value) ? selected.data.fipe_value : "";
-  const savedType = fipeVehicleType(doc.vehicle_type) ? doc.vehicle_type : "";
+  const savedType = canonicalVehicleType(doc.vehicle_type);
   const draftUF = doc.customer_state || assignment.document_data?.customer_state;
   const region = assignment.fipe_region || doc.fipe_region || (draftUF ? (["SP","RJ"].includes(draftUF) ? draftUF : "GERAL") : "");
   const fipe = classifyFipe({ value: savedFipe || assignment.fipe_value, vehicleType: assignment.vehicle_type || savedType, region });
@@ -537,7 +537,7 @@ export default function SgaIntake({
             <fieldset className="zc-fieldset"><legend>02 · Endereço do associado</legend><div className="zc-form-grid">{addressFields.map(([key,label]) => field(label,"customer_"+key,true))}</div></fieldset>
             <fieldset className="zc-fieldset"><legend>03 · FIPE e produtos</legend><div className="zc-form-grid">
               <label>Valor FIPE<input readOnly={!!savedFipe} value={savedFipe || assignment.fipe_value || ""} onChange={e=>setAssignment(a=>({...a,fipe_value:e.target.value}))}/></label>
-              <label>Tipo de veículo<select disabled={busy} value={assignment.vehicle_type || savedType || ""} onChange={e=>setAssignment(a=>({...a,vehicle_type:e.target.value}))}><option value="">Selecione</option>{[...new Set(["Automóvel","Moto",savedType,assignment.vehicle_type].filter(Boolean))].map(v=><option key={v}>{v}</option>)}</select></label>
+              <label>Tipo de veículo<select disabled={busy} value={assignment.vehicle_type || savedType || ""} onChange={e=>setAssignment(a=>({...a,vehicle_type:e.target.value}))}><option value="">Selecione</option>{["Automóvel","Motocicleta"].map(v=><option key={v}>{v}</option>)}</select></label>
               <label>Regra regional<select disabled={busy} value={region} onChange={e=>setAssignment(a=>({...a,fipe_region:e.target.value}))}><option value="">Selecione</option>{fipeRegions.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>
               <label>Tipo FIPE<select disabled={busy} value={assignment.fipe_override||""} onChange={e=>setAssignment(a=>({...a,fipe_override:e.target.value}))}><option value="">Automático · {fipe.label||"Não classificado"}</option>{fipeCategories.map(x=><option key={x}>{x}</option>)}</select></label>
               <label>Classificação SGA<input disabled={busy} value={assignment.sga_classification||""} onChange={e=>setAssignment(a=>({...a,sga_classification:e.target.value}))}/></label>

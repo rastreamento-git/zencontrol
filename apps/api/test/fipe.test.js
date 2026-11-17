@@ -89,3 +89,12 @@ test("SGA preserves vehicle type and derives FIPE region from a confirmed UF", (
   assert.equal(high.document_data.fipe_region, "");
   assert.equal(high.fipe_risk, "Alta");
 });
+
+test("tipo físico não recebe nome do plano comercial",()=>{
+  for(const [tipo,expected] of [["AUTOMOVEL GOLD","Automóvel"],["MOTOCICLETA GOLD","Motocicleta"],["MOTO PREMIUM","Motocicleta"],["GOLD",""],["AUTOMOVEL / MOTO",""],["CAMINHÃO",""]]){
+    const mapped=mapSgaVehicle({tipo,estado:"RJ",valor_fipe:"35000"});
+    assert.equal(mapped.document_data.vehicle_type,expected);
+  }
+  assert.equal(mapSgaVehicle({tipo:"AUTOMOVEL GOLD",descricao_tipo_veiculo:"Motocicleta"}).document_data.vehicle_type,"Motocicleta");
+  assert.equal(mapSgaVehicle({tipo:"GOLD",tipo_veiculo_catalogo:"Automóvel"}).document_data.vehicle_type,"Automóvel");
+});

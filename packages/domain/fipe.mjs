@@ -17,6 +17,17 @@ const lowerLimits = {
   motorcycle: { GERAL: 4_000_000, SP: 2_500_000, RJ: 2_000_000 },
 };
 const upperLimit = 8_000_000;
+// Canonical physical vehicle type. A commercial plan label can provide a
+// prefix, but is never stored as the vehicle type. Ambiguous labels stay empty.
+export function canonicalVehicleType(value) {
+  const text=String(value||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").trim().toUpperCase();
+  const car=/\b(?:AUTOMOVEL|AUTOMOVEIS|CARRO|CARROS)\b/;
+  const motorcycle=/\b(?:MOTO|MOTOS|MOTOCICLETA|MOTOCICLETAS)\b/;
+  if(car.test(text)&&motorcycle.test(text)) return "";
+  if(/^(?:AUTOMOVEL|AUTOMOVEIS|CARRO|CARROS)\b/.test(text))return "Automóvel";
+  if(/^(?:MOTO|MOTOS|MOTOCICLETA|MOTOCICLETAS)\b/.test(text))return "Motocicleta";
+  return "";
+}
 export function fipeVehicleType(value) {
   const text = String(value || "")
     .trim()
