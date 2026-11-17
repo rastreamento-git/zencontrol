@@ -1,4 +1,4 @@
-import { ChevronDown, MapPin, Sticker } from "lucide-react";
+import { ChevronDown, MapPin, Tag } from "lucide-react";
 import { productSummary, isTrackerProduct, isPerfuradoProduct } from "@zen/domain/sga-product-summary.mjs";
 import "./sga-intake.css";
 const statusText=value=>value===true?"Ativo":value===false?"Não encontrado ativo":"Não confirmado";
@@ -9,7 +9,7 @@ export default function SgaProducts({value}) {
     <section className="sga-products-panel" aria-label="Produtos do associado neste veículo">
       <h3>Produtos vinculados ao veículo</h3>
       <div className="sga-product-highlights">
-        {[["Rastreador",tracker,MapPin],["Perfurado",perfurado,Sticker]].map(([name,state,Icon])=>(
+        {[["Rastreador",tracker,MapPin],["Perfurado",perfurado,Tag]].map(([name,state,Icon])=>(
           <div key={name} className="sga-product-highlight" data-state={state===true?"active":state===false?"inactive":"unknown"}>
             <Icon size={19} aria-hidden="true"/>
             <div><strong>{name}</strong><small>{statusText(state)}{name==="Perfurado"?" · 2371":""}</small></div>

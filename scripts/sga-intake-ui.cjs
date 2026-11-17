@@ -203,7 +203,7 @@ async function main() {
   });
   const products=dialog.getByRole("region",{name:"Produtos do associado neste veículo"});
   await products.getByText("Perfurado",{exact:true}).waitFor();
-  await products.getByText("Rastreador",{exact:true}).waitFor();
+  await products.locator(".sga-product-highlights").getByText("Rastreador",{exact:true}).waitFor();
   assert.equal(await products.getByText("Assistência 24 horas",{exact:true}).isVisible(),false);
   assert.equal(await dialog.getByLabel("Tipo de veículo",{exact:true}).inputValue(),"Automóvel");
   await products.getByText("Ver todos os produtos (3)",{exact:true}).click();
