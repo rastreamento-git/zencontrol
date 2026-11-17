@@ -309,6 +309,7 @@ async function validate(db, input, old = null, cfg = {}) {
     fail(400, "Defina técnico e agendamento.");
   if (
     cfg.SGA_SCHEDULING_GUARD &&
+    !require("./demo-rj").isDemoOrder(cfg,old,merged) &&
     (merged.scheduled_at ||
       ["AGENDADO", "EM EXECUÇÃO"].includes(merged.status)) &&
     (!old ||
@@ -717,7 +718,7 @@ async function complete(
 }
 async function dispatch(pool, id, input, actor, cfg) {
   const current = await get(pool, id);
-  if (cfg.SGA_SCHEDULING_GUARD)
+  if (cfg.SGA_SCHEDULING_GUARD&&!require("./demo-rj").isDemoOrder(cfg,current))
     require("./sga-eligibility").assertEligible(current.sga_check, current);
   if (current.workflow_mode === "controlled") {
     if (!current.technician_id) fail(400, "Atribua um técnico ao serviço.");

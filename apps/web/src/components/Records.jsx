@@ -734,7 +734,8 @@ export function OrderEditor({
           )}
         <fieldset className="zc-fieldset">
           <legend>01 · Veículo e associado</legend>
-          {((values.sga_review_required && !values.sga_check?.verified_at) ||
+          {order?.created_by==="Demonstração RJ - FICTÍCIO"&&<p className="zc-notice">Simulação RJ — não realizar atendimento ou consultar SGA real. Escolha o técnico sugerido, confirme o horário e salve a OS.</p>}
+          {order?.created_by!=="Demonstração RJ - FICTÍCIO"&&((values.sga_review_required && !values.sga_check?.verified_at) ||
             (!values.sga_check?.verified_at &&
               meta.sga_scheduling_required)) && (
             <p className="zc-notice amber">
@@ -1006,7 +1007,7 @@ export function OrderEditor({
               orderId={id||""}
               address={Object.fromEntries(["street","number","neighborhood","city","state"].map(k=>[k,documentData[(documentData.service_address_same===false?"service_":"customer_")+k]||""]))}
               required={{RASTREADOR:installation&&!values.tracker_waiver_authorized&&!documentData.reuse_equipment?equipmentCounts.tracker:0,TAG:installation&&!values.tracker_waiver_authorized&&!documentData.reuse_equipment?equipmentCounts.tag:0,PERFURADO:installation&&!values.tracker_waiver_authorized&&values.sticker_discount_opt_in?1:0}}
-              onSelect={technicianId=>setValues(v=>({...v,technician_id:String(technicianId)}))}
+              onSelect={technicianId=>setValues(v=>({...v,technician_id:String(technicianId),...(v.status==="PENDENTE"&&v.scheduled_at?{status:"AGENDADO"}:{})}))}
             />
             {field("Turno", "shift", {
               options: [
