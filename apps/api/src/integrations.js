@@ -422,8 +422,7 @@ class SGAClient {
       ) || vehicle.descricao_situacao;
     vehicle.marca = vehicle.marca || label("brands", vehicle.codigo_marca);
     vehicle.cor = vehicle.cor || label("colors", vehicle.codigo_cor);
-    vehicle.tipo =
-      vehicle.tipo || label("vehicle_types", vehicle.codigo_tipo_veiculo);
+    vehicle.tipo_veiculo_catalogo = label("vehicle_types", vehicle.codigo_tipo_veiculo);
     const mapped = mapSgaVehicle(vehicle);
     mapped.sga_source = {
       classification_code: String(vehicle.codigo_classificacao || vehicle.codigo_classificacao_veiculo || vehicle.id_classificacao || ""),

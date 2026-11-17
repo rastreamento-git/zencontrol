@@ -203,3 +203,19 @@
  .sga-bulk-toolbar .sga-bulk-remove{width:100%}
  .sga-order-actions{justify-content:flex-start}
 }
+
+/* Compact, collapsed product panel with two always-visible key products. */
+.sga-product-highlights{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.sga-product-highlight{display:flex;align-items:center;gap:10px;padding:12px;border:1px solid var(--ep-line);border-radius:8px;min-width:0;background:var(--ep-canvas);color:var(--ep-text)}
+.sga-product-highlight[data-state=active]{background:var(--ep-primary-soft);border-color:var(--ep-primary);color:var(--ep-primary-ink)}
+.sga-product-highlight[data-state=unknown]{background:var(--ep-surface);border-style:dashed}
+.sga-product-highlight>svg{flex-shrink:0}
+.sga-product-highlight strong,.sga-product-highlight small{display:block}
+.sga-product-highlight strong{font-size:13px;font-weight:600}
+.sga-product-highlight small{font-size:11px;overflow-wrap:anywhere}
+.sga-products-details>summary{display:flex;justify-content:space-between;align-items:center;gap:8px;cursor:pointer;list-style:none;font-size:12px;font-weight:600;padding:10px 0;color:var(--ep-text)}
+.sga-products-details>summary::-webkit-details-marker{display:none}
+.sga-products-details[open]>summary>svg{transform:rotate(180deg)}
+.sga-products-details>small{display:block;margin-top:8px}
+.sga-products-list li.sga-product-priority{background:var(--ep-primary-soft);border-radius:6px;padding:10px}
+@media(max-width:480px){.sga-product-highlights{grid-template-columns:minmax(0,1fr)}}
