@@ -68,13 +68,24 @@ test("currency parsing uses exact cents and rejects malformed, zero and negative
   }
   assert.equal(classifyFipe().status, "missing_value");
 });
-test("SGA vehicle type remains distinct from FIPE category and does not assume a regional rule", () => {
-  const result = mapSgaVehicle({
-    tipo: "Automóvel",
-    valor_fipe: "45000",
-    estado: "SP",
-  });
-  assert.equal(result.document_data.vehicle_type, "Automóvel");
-  assert.equal(result.fipe_risk, "");
-  assert.equal(result.document_data.fipe_region, undefined);
+test("SGA preserves vehicle type and derives FIPE region from a confirmed UF", () => {
+  for (const [estado, region, category] of [
+    ["SP", "SP", "Média SP"],
+    ["RIO DE JANEIRO", "RJ", "Média RJ"],
+    ["MG", "GERAL", "Baixa"],
+    ["", "", ""],
+    ["UF desconhecida", "", ""],
+  ]) {
+    const result = mapSgaVehicle({
+      tipo: "Automóvel",
+      valor_fipe: "45000",
+      estado,
+    });
+    assert.equal(result.document_data.vehicle_type, "Automóvel");
+    assert.equal(result.document_data.fipe_region, region);
+    assert.equal(result.fipe_risk, category);
+  }
+  const high = mapSgaVehicle({ tipo: "Automóvel", valor_fipe: "95000" });
+  assert.equal(high.document_data.fipe_region, "");
+  assert.equal(high.fipe_risk, "Alta");
 });

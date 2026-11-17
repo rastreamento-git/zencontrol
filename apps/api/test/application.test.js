@@ -1237,3 +1237,14 @@ test("alteração de senha revoga a sessão anterior e não afeta outras contas"
   );
   assert.equal((await request("/api/meta")).status, 200);
 });
+
+test("classificação FIPE manual explícita é persistida e pode voltar ao cálculo",async()=>{
+ const row=await create({vehicle:"OVR1A23",fipe_value:"40000",document_data:{vehicle_type:"Automóvel",fipe_region:"RJ"}});
+ assert.equal(row.fipe_risk,"Média RJ");
+ const changed=await request("/api/orders/"+row.id,"PATCH",{version:row.version,document_data:{fipe_override:"Alta"},sga_classification:"Revisão manual",sga_status:"Ativo"});
+ assert.equal(changed.status,200,JSON.stringify(changed.data));assert.equal(changed.data.fipe_risk,"Alta");
+ const reverted=await request("/api/orders/"+row.id,"PATCH",{version:changed.data.version,document_data:{fipe_override:""}});
+ assert.equal(reverted.status,200,JSON.stringify(reverted.data));assert.equal(reverted.data.fipe_risk,"Média RJ");
+ const invalid=await request("/api/orders/"+row.id,"PATCH",{version:reverted.data.version,document_data:{fipe_override:"Inexistente"}});
+ assert.equal(invalid.status,400);
+});

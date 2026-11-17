@@ -4,7 +4,7 @@ import Modal from "@zen/ui/components/Modal";
 import { api, errorMessage, format } from "./common";
 import { notify } from "@zen/ui/lib/feedback";
 import SgaProducts from "./SgaProducts";
-import { classifyFipe, fipeRegions, fipeCents, fipeVehicleType } from "@zen/domain/fipe.mjs";
+import { classifyFipe, fipeRegions, fipeCents, fipeVehicleType, fipeCategories } from "@zen/domain/fipe.mjs";
 import { brazilStates, addressFields } from "@zen/domain/order-fields.mjs";
 import "./sga-intake.css";
 function ImportProgress({ run }) {
@@ -145,8 +145,8 @@ export default function SgaIntake({
         scheduled_at: "",
         electric: "",
         customer_choice: "",
-        fipe_value: "", vehicle_type: "", fipe_region: "", contact: "", volunteer: "", document_data: {},
-        sticker_discount_opt_in: data.data.sga_products?.perfurado === true,
+        fipe_value:"",vehicle_type:data.data.document_data?.vehicle_type||"",fipe_region:data.data.document_data?.fipe_region||"",fipe_override:data.data.document_data?.fipe_override||"",sga_classification:data.data.sga_classification||"",sga_status:data.data.sga_status||"",contact:"",volunteer:"",document_data:{},
+        sticker_discount_opt_in:data.data.sticker_discount_opt_in??(data.data.sga_products?.perfurado===true),
       });
     });
   }
@@ -179,8 +179,9 @@ export default function SgaIntake({
   const savedFipe = fipeCents(selected?.data.fipe_value) ? selected.data.fipe_value : "";
   const savedType = fipeVehicleType(doc.vehicle_type) ? doc.vehicle_type : "";
   const draftUF = doc.customer_state || assignment.document_data?.customer_state;
-  const region = doc.fipe_region || assignment.fipe_region || (draftUF ? (["SP","RJ"].includes(draftUF) ? draftUF : "GERAL") : "");
-  const fipe = classifyFipe({ value: savedFipe || assignment.fipe_value, vehicleType: savedType || assignment.vehicle_type, region });
+  const region = assignment.fipe_region || doc.fipe_region || (draftUF ? (["SP","RJ"].includes(draftUF) ? draftUF : "GERAL") : "");
+  const fipe = classifyFipe({ value: savedFipe || assignment.fipe_value, vehicleType: assignment.vehicle_type || savedType, region });
+  const effectiveFipe=assignment.fipe_override||fipe.label;
   const field = (label, key, document = false) => {
     const stored = document ? doc[key] : selected?.data[key];
     const value = stored || (document ? assignment.document_data?.[key] : assignment[key]) || "";
@@ -529,7 +530,7 @@ export default function SgaIntake({
               <div className="sga-prepared-status"><strong>Cadastro importado</strong><small>SGA {selected.data.sga_id} · {format(selected.received_at,true)}</small></div>
             </div>
             <p className="zc-notice">Dados recuperados da importação salva. Complete apenas os campos ausentes. A regularidade precisa estar válida no momento de atribuir.</p>
-            <div className="sga-prepared-metrics"><div><small>Valor FIPE</small><strong>{selected.data.fipe_value || "Não informado"}</strong></div><div><small>Classificação</small><strong>{fipe.label || "A confirmar"}</strong></div><div><small>Equipamentos previstos</small><strong>{assignment.electric === "yes" && !assignment.customer_choice ? "Consultar cliente" : assignment.customer_choice === "tag_only" ? "1 TAG" : fipe.label === "Alta" ? "1 Rastreador + 1 TAG" : fipe.label ? "1 Rastreador" : "A confirmar"}</strong></div></div>
+            <div className="sga-prepared-metrics"><div><small>Valor FIPE</small><strong>{selected.data.fipe_value || "Não informado"}</strong></div><div><small>Classificação</small><strong>{effectiveFipe || "A confirmar"}</strong></div><div><small>Equipamentos previstos</small><strong>{assignment.electric === "yes" && !assignment.customer_choice ? "Consultar cliente" : assignment.customer_choice === "tag_only" ? "1 TAG" : (effectiveFipe === "Alta" || fipe.label === "Alta") ? "1 Rastreador + 1 TAG" : effectiveFipe ? "1 Rastreador" : "A confirmar"}</strong></div></div>
             <fieldset className="zc-fieldset"><legend>01 · Veículo e associado</legend><div className="zc-form-grid">
               <label>Associado<input readOnly value={selected.customer_name}/></label>
               {field("Contato","contact")}{field("CPF / CNPJ","cpf_cnpj",true)}{field("RG","rg",true)}
@@ -539,8 +540,11 @@ export default function SgaIntake({
             <fieldset className="zc-fieldset"><legend>02 · Endereço do associado</legend><div className="zc-form-grid">{addressFields.map(([key,label]) => field(label,"customer_"+key,true))}</div></fieldset>
             <fieldset className="zc-fieldset"><legend>03 · FIPE e produtos</legend><div className="zc-form-grid">
               <label>Valor FIPE<input readOnly={!!savedFipe} value={savedFipe || assignment.fipe_value || ""} onChange={e=>setAssignment(a=>({...a,fipe_value:e.target.value}))}/></label>
-              <label>Tipo de veículo<select disabled={!!savedType} value={savedType || assignment.vehicle_type || ""} onChange={e=>setAssignment(a=>({...a,vehicle_type:e.target.value}))}><option value="">Selecione</option>{[...new Set(["Automóvel","Motocicleta",savedType].filter(Boolean))].map(v=><option key={v}>{v}</option>)}</select></label>
-              <label>Regra regional<select disabled={!!doc.fipe_region} value={region} onChange={e=>setAssignment(a=>({...a,fipe_region:e.target.value}))}><option value="">Selecione</option>{fipeRegions.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>
+              <label>Tipo de veículo<select disabled={busy} value={assignment.vehicle_type || savedType || ""} onChange={e=>setAssignment(a=>({...a,vehicle_type:e.target.value}))}><option value="">Selecione</option>{[...new Set(["Automóvel","Moto",savedType,assignment.vehicle_type].filter(Boolean))].map(v=><option key={v}>{v}</option>)}</select></label>
+              <label>Regra regional<select disabled={busy} value={region} onChange={e=>setAssignment(a=>({...a,fipe_region:e.target.value}))}><option value="">Selecione</option>{fipeRegions.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>
+              <label>Tipo FIPE<select disabled={busy} value={assignment.fipe_override||""} onChange={e=>setAssignment(a=>({...a,fipe_override:e.target.value}))}><option value="">Automático · {fipe.label||"Não classificado"}</option>{fipeCategories.map(x=><option key={x}>{x}</option>)}</select></label>
+              <label>Classificação SGA<input disabled={busy} value={assignment.sga_classification||""} onChange={e=>setAssignment(a=>({...a,sga_classification:e.target.value}))}/></label>
+              <label>Situação SGA<input disabled={busy} value={assignment.sga_status||""} onChange={e=>setAssignment(a=>({...a,sga_status:e.target.value}))}/></label>
             </div><SgaProducts value={selected.data.sga_products}/></fieldset>
             <button type="button" className="secondary-button" disabled={busy} onClick={()=>action(async()=>{const {data}=await api.patch("/sga-intake/entries/"+selected.id+"/draft",assignment);setSelected(data);await reload();notify("Cadastro salvo, sem gerar OS.");})}>Salvar preenchimento sem gerar OS</button>
             <details><summary>Dados originais do SGA (JSON)</summary><pre className="sga-raw-data">{JSON.stringify(selected.raw_source,null,2)}</pre></details>

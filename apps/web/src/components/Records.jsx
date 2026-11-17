@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import SgaProducts from "./SgaProducts";
 import SgaIntake from "./SgaIntake";
-import { classifyFipe, fipeRegions } from "@zen/domain/fipe.mjs";
+import { classifyFipe, fipeRegions, fipeCategories } from "@zen/domain/fipe.mjs";
 import {
   addressFields,
   brazilStates,
@@ -267,6 +267,7 @@ export function Orders({
                         >
                           <ArrowRight size={16} />
                         </button>
+                        <button type="button" className="icon-button" aria-label={"Sincronizar SGA da OS "+o.id} title="Sincronizar dados do SGA" onClick={()=>openOrder(o.id,true)}><RefreshCw size={16}/></button>
                       </td>
                     </tr>
                   ))}
@@ -289,6 +290,7 @@ export function OrderEditor({
   onClose,
   navigate,
   openOrder,
+  syncOnOpen = false,
 }) {
   const [order, setOrder] = useState(null),
     [values, setValues] = useState({
@@ -329,7 +331,10 @@ export function OrderEditor({
           setTechs(t.data.items);
           if (o.data) {
             setOrder(o.data);
-            setValues(o.data);
+            const doc={...o.data.document_data};
+            if (!doc.fipe_region && brazilStates.includes(doc.customer_state)) doc.fipe_region=["SP","RJ"].includes(doc.customer_state)?doc.customer_state:"GERAL";
+            setValues({...o.data,document_data:doc});
+            if (syncOnOpen) syncSaved(o.data);
           }
         }
       })
@@ -385,6 +390,7 @@ export function OrderEditor({
       document_data: {
         ...v.document_data,
         [key]: value,
+        ...(key==="customer_state" && !v.document_data?.fipe_region && brazilStates.includes(value) ? {fipe_region:["SP","RJ"].includes(value)?value:"GERAL"} : {}),
         ...(["customer_", "service_"].some((prefix) =>
           addressFields.some(([field]) => key === prefix + field),
         ) && v.document_data?.service_address_same === undefined
@@ -437,6 +443,8 @@ export function OrderEditor({
       "chassis",
       "sga_id",
       "fipe_value",
+      "sga_classification",
+      "sga_status",
       "volunteer",
       "location",
       "shift",
@@ -526,32 +534,40 @@ export function OrderEditor({
       setBusy(false);
     }
   }
-  async function lookup() {
-    setLookupBusy(true);
-    setBusy(true);
-    try {
-      const { data } = await api.post(
-        "/sga/lookup",
-        {
-          term: values.vehicle,
-          sga_id: values.sga_id,
-          chassis: values.chassis,
-        },
-        { timeout: 180000 },
-      );
-      setValues((v) => ({
-        ...v,
-        ...data,
-        location: v.location || data.location,
-        document_data: { ...v.document_data, ...data.document_data },
-      }));
-      notify("Cadastro consultado. Confira os campos antes de salvar.");
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setBusy(false);
-      setLookupBusy(false);
+  function applySga(data, saved) {
+    setValues(v=>{
+      const base=saved||v;
+      const nonempty=obj=>Object.fromEntries(Object.entries(obj||{}).filter(([,value])=>value!==""&&value!=null));
+      const keys=["vehicle","chassis","sga_id","customer_name","contact","volunteer","fipe_value","sga_classification","sga_status","sga_check","sga_verification","sga_products"];
+      const mapped=nonempty(Object.fromEntries(keys.map(key=>[key,data[key]])));
+      const doc={...base.document_data,...nonempty(data.document_data)};
+      if(doc.customer_state&&!doc.fipe_region)doc.fipe_region=["SP","RJ"].includes(doc.customer_state)?doc.customer_state:"GERAL";
+      return {...base,...mapped,location:base.location||data.location,document_data:doc,...(!base.parent_order_id&&data.sga_products?.state==="available"&&typeof data.sga_products.perfurado==="boolean"?{sticker_discount_opt_in:data.sga_products.perfurado}:{})};
+    });
+  }
+  async function syncSaved(saved){
+    setLookupBusy(true);setBusy(true);setError("");
+    try{
+      const {data}=await api.post("/orders/"+encodeURIComponent(saved.id)+"/sga-sync",{},{timeout:180000});
+      if(data.order_version!==saved.version)throw new Error("A OS mudou. Feche e abra novamente antes de sincronizar.");
+      if(saved.status==="CONCLUÍDO"||saved.parent_order_id){
+        setValues(v=>({...v,sga_check:data.sga_check,sga_products:data.sga_products}));
+        notify("Consulta atualizada para conferência. Histórico preservado.");
+      }else{
+        applySga(data,saved);notify("Dados atualizados na ficha. Confira e salve a OS.");
+      }
+    }catch(e){setError(errorMessage(e));}finally{setBusy(false);setLookupBusy(false);}
+  }
+  async function lookup(){
+    if(id&&order){
+      if(dirty&&!(await confirmAction("Recuperar os dados da OS salva e descartar alterações ainda não salvas?")))return;
+      return syncSaved(order);
     }
+    setLookupBusy(true);setBusy(true);setError("");
+    try{
+      const {data}=await api.post("/sga/lookup",{term:values.vehicle,sga_id:values.sga_id,chassis:values.chassis},{timeout:180000});
+      applySga(data);notify("Cadastro consultado. Confira os campos antes de salvar.");
+    }catch(e){setError(errorMessage(e));}finally{setBusy(false);setLookupBusy(false);}
   }
   const field = (label, name, opts = {}) => (
     <Field
@@ -794,7 +810,7 @@ export function OrderEditor({
                 )}
                 {lookupBusy
                   ? "Consultando SGA…"
-                  : "Consultar cadastro e situação SGA"}
+                  : id ? "Sincronizar dados do SGA" : "Consultar cadastro e situação SGA"}
               </button>
             </div>
             <div className="zc-full zc-document-equipment">
@@ -860,24 +876,15 @@ export function OrderEditor({
               ],
             })}
             {documentField("Categoria", "category")}
-            {field("Código do veículo SGA", "sga_id")}
+            {field("Código do veículo SGA","sga_id")}
+            {field("Classificação SGA","sga_classification")}
+            {field("Situação SGA","sga_status")}
             {field("Valor FIPE", "fipe_value")}
             {documentField("Regra regional FIPE", "fipe_region", {
               options: [["", "Selecione a regra regional"], ...fipeRegions],
             })}
-            <label className="zc-fipe-result zc-full">
-              Tipo FIPE (automático)
-              <output aria-live="polite">
-                {fipe.label || "Não classificado"}
-              </output>
-              <small>{fipe.message}</small>
-              {!!order?.fipe_risk && fipe.status !== "classified" && (
-                <small>
-                  Registro anterior: {order.fipe_risk}. Informe os dados de
-                  classificação para atualizar.
-                </small>
-              )}
-            </label>
+            {documentField("Tipo FIPE","fipe_override",{options:[["","Automático · "+(fipe.label||"Não classificado")],...fipeCategories.map(x=>[x,x])]})}
+            <div className="zc-fipe-result zc-full"><small>{documentData.fipe_override?"Classificação manual: "+documentData.fipe_override+" · cálculo original: "+(fipe.label||"não classificado"):fipe.message}</small></div>
             {field("Voluntário", "volunteer")}
             <div className="zc-full zc-document-equipment">
               <label className="zc-checkbox">

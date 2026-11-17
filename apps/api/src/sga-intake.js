@@ -18,11 +18,12 @@ function equipmentForIntake(data, input) {
   const region = document.fipe_region || (document.customer_state ? (["SP","RJ"].includes(document.customer_state) ? document.customer_state : "GERAL") : "");
   const fipe = classifyFipe({ value: data.fipe_value, vehicleType: document.vehicle_type, region });
   if (region) document.fipe_region = region;
-  if (fipe.status !== "classified") fail(409, "FIPE ou categoria não confirmada no SGA. Complete o cadastro antes de gerar a OS.");
+  const category=document.fipe_override || fipe.label;
+  if (!category || !fipeCents(data.fipe_value)) fail(409, "FIPE ou categoria não confirmada no SGA. Complete o cadastro antes de gerar a OS.");
   if (!["yes","no"].includes(input.electric)) fail(400, "Confirme se o veículo é elétrico.");
   document.vehicle_electric = input.electric === "yes";
   if (document.vehicle_electric && !["tracker","tag_only"].includes(input.customer_choice)) fail(400, "Consulte o cliente e registre a autorização para instalar o rastreador ou somente TAG.");
-  document.equipment_counts = { tracker: document.vehicle_electric && input.customer_choice === "tag_only" ? 0 : 1, tag: fipe.label === "Alta" || (document.vehicle_electric && input.customer_choice === "tag_only") ? 1 : 0 };
+  document.equipment_counts = { tracker: document.vehicle_electric && input.customer_choice === "tag_only" ? 0 : 1, tag: category === "Alta" || fipe.label === "Alta" || (document.vehicle_electric && input.customer_choice === "tag_only") ? 1 : 0 };
   return document;
 }
 // Rebuild the working form locally from the immutable imported payload.
@@ -46,7 +47,7 @@ function preparedData(entry) {
   data.document_data = doc;
   if (!data.location) data.location = formatAddress(doc) || doc.customer_address || "";
   const fipe = classifyFipe({ value: data.fipe_value, vehicleType: doc.vehicle_type, region: doc.fipe_region });
-  data.fipe_risk = fipe.label || "";
+  data.fipe_risk = doc.fipe_override || fipe.label || "";
   return data;
 }
 function completeDraft(data, input) {
@@ -60,8 +61,11 @@ function completeDraft(data, input) {
     if (!result.document_data[key] && input.document_data?.[key] !== undefined)
       result.document_data[key] = d.string(input.document_data[key], key, documentFields[key]);
   if (!fipeCents(result.fipe_value) && input.fipe_value) result.fipe_value = d.string(input.fipe_value,"FIPE",40);
-  if (!fipeVehicleType(result.document_data.vehicle_type) && ["Automóvel","Motocicleta"].includes(input.vehicle_type)) result.document_data.vehicle_type = input.vehicle_type;
-  if (!result.document_data.fipe_region && ["GERAL","SP","RJ"].includes(input.fipe_region)) result.document_data.fipe_region = input.fipe_region;
+  if (input.vehicle_type) result.document_data.vehicle_type=d.string(input.vehicle_type,"Tipo de veículo",120);
+  if (input.fipe_region) result.document_data.fipe_region=d.string(input.fipe_region,"Regra regional FIPE",10);
+  if (input.fipe_override !== undefined) result.document_data.fipe_override=d.string(input.fipe_override,"Tipo FIPE",20);
+  for (const key of ["sga_classification","sga_status"]) if(input[key]!==undefined) result[key]=d.string(input[key],key,200);
+  if(input.sticker_discount_opt_in!==undefined) result.sticker_discount_opt_in=d.boolean(input.sticker_discount_opt_in,"Desconto do adesivo");
   const { formatAddress } = require("../../../packages/domain/order-fields.mjs");
   const originalAddress = result.document_data.customer_address;
   if (!result.document_data.fipe_region && result.document_data.customer_state) result.document_data.fipe_region = ["SP","RJ"].includes(result.document_data.customer_state) ? result.document_data.customer_state : "GERAL";
@@ -624,7 +628,7 @@ async function assign(pool, cfg, client, id, input, actor) {
         service: "Instalação",
         status: "AGENDADO",
         sticker_discount_opt_in: d.boolean(
-          input.sticker_discount_opt_in ?? false,
+          input.sticker_discount_opt_in ?? data.sticker_discount_opt_in ?? (fresh.sga_products?.perfurado === true),
           "Desconto do adesivo",
         ),
         sga_verification: eligibility.sign(check, cfg.SESSION_SECRET),

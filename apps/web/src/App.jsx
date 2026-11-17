@@ -182,7 +182,7 @@ export default function App() {
     revision,
     refresh,
     navigate,
-    openOrder: (id) => setOrder({ id: id || null }),
+    openOrder: (id,sync=false)=>setOrder({id:id||null,sync:sync===true}),
   };
   return (
     <div className="inventory-app zen-shell zen-shell-control">
@@ -456,6 +456,7 @@ export default function App() {
           key={order.id || "new"}
           {...props}
           id={order.id}
+          syncOnOpen={order.sync}
           onClose={() => setOrder(null)}
         />
       )}{" "}

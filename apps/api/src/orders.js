@@ -278,9 +278,8 @@ async function validate(db, input, old = null, cfg = {}) {
     region: document.fipe_region,
   });
   if (fipeChanged && fipe.status === "invalid_value") fail(400, fipe.message);
-  // Historical free text survives unrelated edits; clients cannot override a calculated category.
-  out.fipe_risk =
-    fipeChanged || fipe.status === "classified" ? fipe.label : old.fipe_risk;
+  const overrideChanged=(document.fipe_override||"")!==(old?.document_data?.fipe_override||"");
+  out.fipe_risk = document.fipe_override || (fipeChanged || overrideChanged || fipe.status === "classified" ? fipe.label : old.fipe_risk);
   if (!old) {
     for (const key of ["vehicle", "service", "customer_name"])
       if (!merged[key]) fail(400, "Informe veículo, associado e serviço.");

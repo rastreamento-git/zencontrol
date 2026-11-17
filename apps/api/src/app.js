@@ -1236,6 +1236,17 @@ function createApp(pool, env = process.env) {
       ),
     }),
   );
+  app.post("/api/orders/:id/sga-sync", admin, async (req,res) => {
+    const order=await o.get(pool,req.params.id);
+    const data=await sgaClient.lookup({sga_id:order.sga_id,term:order.vehicle,chassis:order.chassis});
+    if(order.sga_id && String(data.sga_id)!==String(order.sga_id)) fail(409,"O SGA retornou outro veículo.");
+    const identities=[d.vehicle(order.vehicle),d.vehicle(order.chassis)].filter(Boolean);
+    if(!order.sga_id && ![d.vehicle(data.vehicle),d.vehicle(data.chassis)].some(v=>identities.includes(v))) fail(409,"O cadastro retornado não corresponde à OS.");
+    const eligibility=require("./sga-eligibility");
+    data.sga_check=eligibility.snapshot(data);
+    data.sga_verification=eligibility.sign(data.sga_check,cfg.SESSION_SECRET);
+    res.json({...data,order_version:order.version});
+  });
   app.post("/api/sga/lookup", async (req, res) => {
     const data = await sgaClient.lookup({
       term: req.body.term,

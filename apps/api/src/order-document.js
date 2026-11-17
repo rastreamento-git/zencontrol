@@ -2,7 +2,7 @@ const { fail } = require("./errors");
 const d = require("./domain");
 const {
   fipeCategories,
-  fipeRegions,
+  fipeRegions, classifyFipe, fipeVehicleType,
 } = require("../../../packages/domain/fipe.mjs");
 const {
   addressFields,
@@ -26,6 +26,7 @@ const documentFields = {
   vehicle_type: 120,
   category: 120,
   fipe_region: 10,
+  fipe_override: 20,
   scheduled_service: 30,
   visit_outcome: 30,
   ...Object.fromEntries(
@@ -72,6 +73,7 @@ function normalizeDocumentData(value, previous = {}) {
     !fipeRegions.some(([region]) => region === result.fipe_region)
   )
     fail(400, "Regra regional FIPE inválida. Selecione padrão, SP ou RJ.");
+  if (value.fipe_override !== undefined && result.fipe_override && !fipeCategories.includes(result.fipe_override)) fail(400,"Classificação FIPE manual inválida.");
   if (value.equipment !== undefined) {
     if (
       !Array.isArray(value.equipment) ||
@@ -117,6 +119,8 @@ function normalizeDocumentData(value, previous = {}) {
         fail(400, "Selecione uma UF válida.");
     }
   }
+  if (!result.fipe_region && brazilStates.includes(result.customer_state))
+    result.fipe_region = ["SP","RJ"].includes(result.customer_state) ? result.customer_state : "GERAL";
   if (addressFields.some(([key]) => Object.hasOwn(result, "customer_" + key)))
     result.customer_address = formatAddress(result);
   if (value.equipment_counts !== undefined) {
@@ -323,6 +327,10 @@ function mapSgaVehicle(v) {
     v.situacao_veiculo,
     v.situacao,
   );
+  const rawType=scalar(v.tipo,v.descricao_tipo_veiculo,v.descricao_tipo);
+  const vehicleType=fipeVehicleType(rawType)==="car"?"Automóvel":fipeVehicleType(rawType)==="motorcycle"?"Moto":rawType;
+  const region=state?(["SP","RJ"].includes(state)?state:"GERAL"):"";
+  const fipeValue=money(scalar(v.valor_fipe,v.valor_fipe_veiculo,v.fipe_valor,v.valor_mercado));
   return {
     vehicle: /^(SEM[\s-]*PLACA|N[AÃ]O[\s-]*INFORMAD[AO]|0+)$/i.test(scalar(v.placa)) ? scalar(v.chassi) : scalar(v.placa, v.chassi),
     chassis: scalar(v.chassi),
@@ -330,8 +338,8 @@ function mapSgaVehicle(v) {
     customer_name: scalar(v.nome, v.nome_associado, v.nome_cliente, v.associado?.nome),
     contact,
     volunteer: scalar(v.voluntario_real, v.nome_voluntario, v.nome_usuario),
-    fipe_value: money(scalar(v.valor_fipe, v.valor_fipe_veiculo, v.fipe_valor, v.valor_mercado)),
-    fipe_risk: "",
+    fipe_value: fipeValue,
+    fipe_risk: classifyFipe({value:fipeValue,vehicleType,region}).label || "",
     sga_classification: displaySga(
       scalar(
         v.codigo_classificacao,
@@ -364,7 +372,8 @@ function mapSgaVehicle(v) {
       year: [scalar(v.ano_fabricacao), scalar(v.ano_modelo)]
         .filter(Boolean)
         .join("/"),
-      vehicle_type: scalar(v.tipo, v.descricao_tipo_veiculo, v.descricao_tipo),
+      vehicle_type: vehicleType,
+      fipe_region: region,
       category: scalar(v.categoria, v.descricao_categoria),
     },
   };
