@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { ArrowRight, CheckCircle2, AlertCircle, Download, Settings2, Trash2 } from "lucide-react";
+import { ArrowRight, CheckCircle2, AlertCircle, Download, Settings2, Trash2, RefreshCw, CalendarDays, Search, ChevronDown } from "lucide-react";
 import Modal from "@zen/ui/components/Modal";
-import { api, errorMessage, format } from "./common";
+import { api, errorMessage, format, Empty, Loading, Pager } from "./common";
 import { notify } from "@zen/ui/lib/feedback";
 import SgaProducts from "./SgaProducts";
 import { classifyFipe, fipeRegions, fipeCents, fipeVehicleType, fipeCategories } from "@zen/domain/fipe.mjs";
@@ -33,7 +33,7 @@ export default function SgaIntake({
   initialRunId = "",
   onOpenQueue,
 }) {
-  const [config, setConfig] = useState(null),
+  const [config, setConfig] = useState({enabled:false,daily_time:"18:00",pending_kind:"classifications",pending_code:""}),
     [choices, setChoices] = useState([]),
     [runs, setRuns] = useState([]);
   const [queue, setQueue] = useState({ items: [], total: 0 }),
@@ -51,6 +51,10 @@ export default function SgaIntake({
     [error, setError] = useState(""),
     [loading, setLoading] = useState(true),
     [configured, setConfigured] = useState(false);
+  const [configState,setConfigState]=useState("loading"), [catalogState,setCatalogState]=useState("loading");
+  const [configError,setConfigError]=useState(""), [catalogError,setCatalogError]=useState(""), [historyError,setHistoryError]=useState("");
+  const [configRetry,setConfigRetry]=useState(0), [catalogRetry,setCatalogRetry]=useState(0);
+  const [savedConfig,setSavedConfig]=useState(null);
   const [confirmed, setConfirmed] = useState(false),
     [showSettings, setShowSettings] = useState(false);
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
@@ -61,13 +65,14 @@ export default function SgaIntake({
   const loadData = async () => {
     const history = api.get("/sga-intake/runs");
     const entries = settings ? Promise.resolve(null) : api.get("/sga-intake/entries", { params: { page, q: query, origin, run_id: runId } });
-    const [h, e] = await Promise.all([history,entries]);
-    return { history: h.data.items, entries: e?.data };
+    const [h,e]=await Promise.allSettled([history,entries]);
+    return {history:h.status==="fulfilled"?h.value.data.items:null,entries:e.status==="fulfilled"?e.value?.data:null,historyError:h.status==="rejected"?errorMessage(h.reason):"",entryError:e.status==="rejected"?errorMessage(e.reason):""};
   };
   const reload = async () => {
     const result = await loadData();
     if (result.entries) setQueue(result.entries);
-    setRuns(result.history);
+    if(result.history) setRuns(result.history);
+    setHistoryError(result.historyError || result.entryError);
   };
   useEffect(() => {
     let active = true,
@@ -77,12 +82,13 @@ export default function SgaIntake({
         const result = await loadData();
         if (active) {
           if (result.entries) setQueue(result.entries);
-          setRuns(result.history);
+          if(result.history) setRuns(result.history);
+          setHistoryError(result.historyError || result.entryError);
           setLoading(false);
         }
       } catch (e) {
         if (active) {
-          setError(errorMessage(e));
+          setHistoryError(errorMessage(e));
           setLoading(false);
         }
       }
@@ -95,32 +101,38 @@ export default function SgaIntake({
     };
   }, [page, query, revision, origin, runId, settings]);
   useEffect(() => { setMarked([]); }, [page, query, origin, runId]);
-  useEffect(() => {
-    if (!settings) return;
-    let active = true;
-    Promise.allSettled([
-      api.get("/sga-intake/config"),
-      api.get("/sga-intake/catalogs"),
-    ])
-      .then(([c, catalogs]) => {
-        if (active) {
-          if (c.status === "fulfilled") {
-            setConfig(c.value.data.config);
-            setShowSettings(!c.value.data.config.pending_code);
-            setConfigured(c.value.data.configured);
-          } else setError(errorMessage(c.reason));
-          if (catalogs.status === "fulfilled")
-            setChoices(catalogs.value.data.items);
-          else setError(errorMessage(catalogs.reason));
-        }
-      })
-      .catch((e) => {
-        if (active) setError(errorMessage(e));
-      });
-    return () => {
-      active = false;
-    };
-  }, [settings]);
+  // Config and remote catalogs have independent lifecycles. A slow SGA must not
+  // hide local configuration or the manual import controls.
+  useEffect(()=>{
+    if(!settings)return;
+    let active=true;
+    setConfigState("loading");setConfigError("");
+    api.get("/sga-intake/config",{timeout:20000}).then(({data})=>{
+      if(!active)return;
+      if(!data?.config || typeof data.config.version!=="number")throw new Error("Resposta de configuração inválida. Confira a versão da API.");
+      setConfig(data.config);setSavedConfig(data.config);setConfigured(data.configured===true);setConfigState("ready");
+      setShowSettings(v=>v||!data.config.pending_code);
+    }).catch(e=>{if(active){setConfigState("error");setConfigError(errorMessage(e));setConfigured(false);}});
+    return()=>{active=false};
+  },[settings,configRetry]);
+  useEffect(()=>{
+    if(!settings)return;
+    let active=true;
+    setCatalogState("loading");setCatalogError("");
+    api.get("/sga-intake/catalogs",{timeout:90000}).then(({data})=>{
+      if(!active)return;
+      if(!Array.isArray(data?.items))throw new Error("Resposta de catálogo inválida.");
+      setChoices(data.items);setCatalogState("ready");
+      if(Object.keys(data.errors||{}).length)setCatalogError("Parte do catálogo SGA não respondeu. Confira a conexão ou atualize o catálogo.");
+    }).catch(e=>{if(active){setCatalogState("error");setCatalogError(errorMessage(e));}});
+    return()=>{active=false};
+  },[settings,catalogRetry]);
+  const configReady=configState==="ready" && !!savedConfig;
+  const configDirty=configReady && ["enabled","daily_time","pending_kind","pending_code"].some(k=>config[k]!==savedConfig[k]);
+  const validPeriod=!!start&&!!end&&start<=end&&end<=today&&Date.parse(end)-Date.parse(start)<=30*86400000;
+  const canCollect=configReady&&configured&&!!savedConfig.pending_code&&!configDirty&&!loading&&!historyError&&!collecting&&!busy&&validPeriod&&confirmed;
+  const savedOption=config.pending_code?config.pending_kind+":"+config.pending_code:"";
+  const importBlocker=!configReady?"Aguardando configuração da API.":!configured?"Integração SGA indisponível. Confira a configuração do servidor.":configDirty?"Salve a configuração antes de iniciar a coleta.":!savedConfig.pending_code?"Configure a etapa Instalação pendente antes de importar.":historyError?"Não foi possível confirmar a fila de coletas. Atualize a conexão.":!validPeriod?"Selecione um período válido de até 31 dias.":"";
   async function action(task) {
     setBusy(true);
     setError("");
@@ -197,27 +209,37 @@ export default function SgaIntake({
         {settings && <button className="secondary-button" onClick={() => onOpenQueue?.()}><ArrowRight size={16}/> Abrir Controle de OS</button>}
       </div>
 
-      {settings && config && (
+      {settings && configState !== "ready" && (
+        <div className="sga-connection-status" role={configState==="error"?"alert":"status"}>
+          <div><strong>{configState==="loading"?"Carregando configuração da integração…":"Não foi possível carregar a configuração SGA"}</strong><small>{configError||"Os controles permanecem visíveis. Aguarde a confirmação do servidor."}</small></div>
+          {configState==="error"&&<button type="button" className="secondary-button" onClick={()=>setConfigRetry(v=>v+1)}><RefreshCw size={15}/> Tentar novamente</button>}
+        </div>
+      )}
+      {settings && (
+        <div className="sga-import-layout">
         <details
           className="sga-config-details"
           open={showSettings}
           onToggle={(e) => setShowSettings(e.currentTarget.open)}
         >
           <summary>
-            <Settings2 size={17} aria-hidden="true"/> <span>Coleta automática</span><small>{config.enabled ? config.daily_time + " · Brasília" : "Desativada"}</small>
+            <Settings2 size={19} aria-hidden="true"/><span>Coleta automática<small>{!configReady?"Aguardando conexão":savedConfig.enabled?savedConfig.daily_time+" · Brasília":"Desativada"}</small></span><ChevronDown size={16} className="sga-disclosure-icon" aria-hidden="true"/>
           </summary>
           <form
             className="sga-intake-settings"
             onSubmit={(e) => {
               e.preventDefault();
+              if(!configReady)return;
               action(async () => {
                 const { data } = await api.put("/sga-intake/config", config);
                 setConfig(data);
+                setSavedConfig(data);
                 setShowSettings(false);
                 notify("Configuração da coleta SGA salva.");
               });
             }}
           >
+            <fieldset disabled={!configReady || busy} className="sga-config-fields">
             <label>
               Etapa no catálogo atual do SGA
               <select
@@ -227,7 +249,7 @@ export default function SgaIntake({
                     ? config.pending_kind + ":" + config.pending_code
                     : ""
                 }
-                disabled={busy || (config.enabled && !configured)}
+                disabled={busy || !configReady || catalogState==="loading" || (config.enabled && !configured)}
                 onChange={(e) => {
                   const [kind, code] = e.target.value.split(":");
                   setConfig({
@@ -238,6 +260,7 @@ export default function SgaIntake({
                 }}
               >
                 <option value="">Selecione Instalação pendente</option>
+                {savedOption&&!choices.some(c=>c.kind+":"+c.code===savedOption)&&<option value={savedOption}>Etapa salva · código {config.pending_code}</option>}
                 {choices.map((c) => (
                   <option
                     key={c.kind + ":" + c.code}
@@ -275,28 +298,26 @@ export default function SgaIntake({
               Ativar coleta automática diária
             </label>
             <small>A coleta depende do servidor ativo no horário configurado.</small>
-            {!choices.length && (
-              <p role="status">
-                Nenhum código de Instalação pendente foi encontrado no catálogo.
-                Confira os códigos e as permissões de consulta no SGA.
-              </p>
-            )}
+            </fieldset>
+            <div className="sga-catalog-status">
+              <small role="status">{catalogState==="loading"?"Consultando catálogo SGA…":catalogError||(!choices.length?"Nenhuma etapa de instalação pendente encontrada no catálogo.":"Catálogo disponível.")}</small>
+              <button type="button" className="secondary-button" disabled={busy||catalogState==="loading"} onClick={()=>setCatalogRetry(v=>v+1)}><RefreshCw size={14}/> Atualizar catálogo</button>
+            </div>
             <button
               className="primary-button"
-              disabled={busy || (config.enabled && !configured)}
+              disabled={busy || !configReady || !configDirty || (config.enabled && !configured)}
             >
               Salvar configuração
             </button>
           </form>
         </details>
-      )}
-      {settings && config && (
         <div className="sga-intake-manual">
-          <h3><Download size={17} aria-hidden="true"/> Importação manual</h3>
+          <div className="sga-section-heading"><CalendarDays size={20} aria-hidden="true"/><div><h3>Importação manual</h3><small>Selecione o intervalo de movimentações.</small></div></div>
           <div className="zc-form-grid">
             <label>Data inicial<input type="date" required value={start} max={end || today} disabled={busy || collecting} onChange={e => { setStart(e.target.value); setConfirmed(false); }} /></label>
             <label>Data final<input type="date" required value={end} min={start} max={today} disabled={busy || collecting} onChange={e => { setEnd(e.target.value); setConfirmed(false); }} /></label>
           </div>
+          <div className="sga-period-actions"><button type="button" className="secondary-button" disabled={busy||collecting} onClick={()=>{setStart(today);setEnd(today);setConfirmed(false);}}>Hoje</button><button type="button" className="secondary-button" disabled={busy||collecting} onClick={()=>{setStart(today.slice(0,7)+"-01");setEnd(today);setConfirmed(false);}}>Mês atual</button></div>
           <small>Até 31 dias por coleta. Cadastros existentes serão ignorados.</small>
           <label className="sga-intake-check"><input type="checkbox" checked={complementary} disabled={busy || collecting} onChange={e => setComplementary(e.target.checked)} /> Consultar também situação financeira e cadastral durante a coleta (mais lento; obrigatória ao agendar).</label>
           <label className="sga-intake-check">
@@ -310,13 +331,7 @@ export default function SgaIntake({
           </label>
           <button
             className="primary-button"
-            disabled={
-              busy || loading ||
-              !confirmed || !start || !end || start > end || end > today ||
-              !configured ||
-              !config.pending_code ||
-              runs.some((r) => ["running", "queued"].includes(r.state))
-            }
+            disabled={!canCollect}
             onClick={() =>
               action(async () => {
                 const { data: task } = await api.post("/sga-intake/runs", { confirmed: true, start, end, complementary });
@@ -327,10 +342,13 @@ export default function SgaIntake({
               })
             }
           >
-            {busy ? "Iniciando…" : collecting ? "Importação em andamento" : "Buscar pendências do período"}
+            <Download size={16} aria-hidden="true"/>{busy ? "Processando…" : collecting ? "Importação em andamento" : "Buscar pendências do período"}
           </button>
+          {importBlocker && <small className="sga-blocker" role="status">{importBlocker}</small>}
+        </div>
         </div>
       )}
+      {historyError && <div className="error-banner" role="alert">{historyError} <button type="button" className="secondary-button" disabled={busy} onClick={()=>action(reload)}><RefreshCw size={14}/> Atualizar</button></div>}
       {settings && activeRuns.map(run => <ImportProgress key={run.id} run={run}/>)}
       {settings && !collecting && latest && (
         <div className="sga-import-result" role="status">
@@ -386,7 +404,7 @@ export default function SgaIntake({
       )}
       {!settings && (
         <>
-          <div className="zc-filters">
+          <div className="sga-queue-filters zc-form-grid">
             <label>Origem da coleta
               <select value={origin} onChange={e => { setOrigin(e.target.value); setRunId(""); setPage(1); }}>
                 <option value="">Todas as origens</option>
@@ -403,8 +421,8 @@ export default function SgaIntake({
             </label>
             <button type="button" className="secondary-button" onClick={() => { setOrigin(""); setRunId(""); setQuery(""); setPage(1); }}>Limpar filtros</button>
           </div>
-          {runId && <p><small>Este filtro mostra os novos cadastros preservados por este lote que ainda não têm OS. Duplicados permanecem no lote original; limpe os filtros para vê-los.</small></p>}
-          <label>
+          {runId && <p className="zc-muted"><small>Este filtro mostra os novos cadastros preservados por este lote que ainda não têm OS. Duplicados permanecem no lote original; limpe os filtros para vê-los.</small></p>}
+          <label className="sga-search-label">
             Buscar cadastro recebido
             <input
               type="search"
@@ -426,8 +444,8 @@ export default function SgaIntake({
               {collecting && <small>Limpeza disponível após a coleta.</small>}
             </div>
           )}
-          {!loading && !queue.items.length ? (
-            <p>Nenhuma instalação pendente recebida nesta lista.</p>
+          {loading ? <Loading/> : !queue.items.length && !historyError ? (
+            <Empty title="Nenhuma instalação pendente recebida nesta lista." description="Novos cadastros da importação aparecerão aqui."/>
           ) : (
             <div className="zc-table-scroll">
               <table className="zc-table zc-responsive-table">
@@ -482,28 +500,7 @@ export default function SgaIntake({
               </table>
             </div>
           )}
-          {queue.total > 25 && (
-            <nav
-              className="sga-intake-heading"
-              aria-label="Paginação de pendências SGA"
-            >
-              <button
-                disabled={page === 1 || busy}
-                onClick={() => setPage(page - 1)}
-              >
-                Anterior
-              </button>
-              <span>
-                Página {page} de {Math.ceil(queue.total / 25)}
-              </span>
-              <button
-                disabled={page * 25 >= queue.total || busy}
-                onClick={() => setPage(page + 1)}
-              >
-                Próxima
-              </button>
-            </nav>
-          )}
+          {queue.total > 25 && <Pager data={{...queue,page,limit:queue.limit||25}} onPage={setPage}/>}
         </>
       )}
       {!settings && clearDialog && (
@@ -529,7 +526,7 @@ export default function SgaIntake({
               <div><small>INSTALAÇÃO · SEM NÚMERO DE OS</small><h2>{selected.customer_name}</h2><p>{selected.vehicle} · {doc.model || "Modelo não informado"}</p></div>
               <div className="sga-prepared-status"><strong>Cadastro importado</strong><small>SGA {selected.data.sga_id} · {format(selected.received_at,true)}</small></div>
             </div>
-            <p className="zc-notice">Dados recuperados da importação salva. Complete apenas os campos ausentes. A regularidade precisa estar válida no momento de atribuir.</p>
+            <p className="zc-notice">Dados recuperados da importação salva. Confira os campos editáveis e complete as informações ausentes. A regularidade precisa estar válida no momento de atribuir.</p>
             <div className="sga-prepared-metrics"><div><small>Valor FIPE</small><strong>{selected.data.fipe_value || "Não informado"}</strong></div><div><small>Classificação</small><strong>{effectiveFipe || "A confirmar"}</strong></div><div><small>Equipamentos previstos</small><strong>{assignment.electric === "yes" && !assignment.customer_choice ? "Consultar cliente" : assignment.customer_choice === "tag_only" ? "1 TAG" : (effectiveFipe === "Alta" || fipe.label === "Alta") ? "1 Rastreador + 1 TAG" : effectiveFipe ? "1 Rastreador" : "A confirmar"}</strong></div></div>
             <fieldset className="zc-fieldset"><legend>01 · Veículo e associado</legend><div className="zc-form-grid">
               <label>Associado<input readOnly value={selected.customer_name}/></label>
@@ -549,7 +546,7 @@ export default function SgaIntake({
             <button type="button" className="secondary-button" disabled={busy} onClick={()=>action(async()=>{const {data}=await api.patch("/sga-intake/entries/"+selected.id+"/draft",assignment);setSelected(data);await reload();notify("Cadastro salvo, sem gerar OS.");})}>Salvar preenchimento sem gerar OS</button>
             <details><summary>Dados originais do SGA (JSON)</summary><pre className="sga-raw-data">{JSON.stringify(selected.raw_source,null,2)}</pre></details>
           </div>
-          <form
+          <form className="sga-assignment-form"
             onSubmit={(e) => {
               e.preventDefault();
               action(async () => {
@@ -607,8 +604,9 @@ export default function SgaIntake({
               </label>
 
             </div>
-            <label>Veículo elétrico<select required value={assignment.electric} onChange={e => setAssignment({ ...assignment, electric: e.target.value, customer_choice: "" })} disabled={busy}><option value="">Confirme o tipo</option><option value="no">Não</option><option value="yes">Sim</option></select></label>
+            <div className="zc-form-grid sga-electric-grid"><label>Veículo elétrico<select required value={assignment.electric} onChange={e => setAssignment({ ...assignment, electric: e.target.value, customer_choice: "" })} disabled={busy}><option value="">Confirme o tipo</option><option value="no">Não</option><option value="yes">Sim</option></select></label>
             {assignment.electric === "yes" && <label>Autorização após contato com o cliente<select required value={assignment.customer_choice} disabled={busy} onChange={e => setAssignment({ ...assignment, customer_choice: e.target.value })}><option value="">Aguardando consulta</option><option value="tracker">Cliente autorizou rastreador</option><option value="tag_only">Cliente autorizou somente TAG</option></select></label>}
+            </div>
             <label className="sga-intake-check">
               <input
                 type="checkbox"

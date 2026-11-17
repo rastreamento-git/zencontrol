@@ -260,14 +260,14 @@ export function Orders({
                           )}
                       </td>
                       <td>
-                        <button
+                        <div className="sga-order-actions"><button
                           className="icon-button"
                           aria-label={"Abrir " + o.id}
                           onClick={() => openOrder(o.id)}
                         >
                           <ArrowRight size={16} />
                         </button>
-                        <button type="button" className="icon-button" aria-label={"Sincronizar SGA da OS "+o.id} title="Sincronizar dados do SGA" onClick={()=>openOrder(o.id,true)}><RefreshCw size={16}/></button>
+                        <button type="button" className="icon-button" aria-label={"Sincronizar SGA da OS "+o.id} title="Sincronizar dados do SGA" onClick={()=>openOrder(o.id,true)}><RefreshCw size={16}/></button></div>
                       </td>
                     </tr>
                   ))}
@@ -884,7 +884,7 @@ export function OrderEditor({
               options: [["", "Selecione a regra regional"], ...fipeRegions],
             })}
             {documentField("Tipo FIPE","fipe_override",{options:[["","Automático · "+(fipe.label||"Não classificado")],...fipeCategories.map(x=>[x,x])]})}
-            <div className="zc-fipe-result zc-full"><small>{documentData.fipe_override?"Classificação manual: "+documentData.fipe_override+" · cálculo original: "+(fipe.label||"não classificado"):fipe.message}</small></div>
+            <div className="zc-fipe-result zc-full sga-fipe-note"><small>{documentData.fipe_override?"Classificação manual: "+documentData.fipe_override+" · cálculo original: "+(fipe.label||"não classificado"):fipe.message}</small></div>
             {field("Voluntário", "volunteer")}
             <div className="zc-full zc-document-equipment">
               <label className="zc-checkbox">
