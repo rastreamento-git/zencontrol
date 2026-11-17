@@ -9,6 +9,8 @@ test("massa fictícia RJ tem dez bases, cinquenta clientes e vinte paradas no me
  assert.ok(customers.every(c=>c.address.customer_state==="RJ"&&c.name.includes("NÃO ATENDER")));
  const today=customers.filter(c=>c.day_offset===0);
  assert.equal(today.length,20);assert.equal(new Set(today.map(c=>c.technician_key)).size,4);
+ assert.ok(today.every(c=>!c.approximate));
+ assert.equal(new Set(customers.map(c=>JSON.stringify(c.address))).size,50);
  for(const t of technicians)assert.equal(customers.filter(c=>c.technician_key===t.key).length,5);
 });
 test("filtros da agenda são parametrizados e restringem a contagem a OS principais",()=>{

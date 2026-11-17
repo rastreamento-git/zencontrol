@@ -35,10 +35,13 @@ async function seed({pool,stockPool,move,credentials,online,enabled}){
      if(!product)product=(await stockPool.query("INSERT INTO produtos(nome,categoria) VALUES($1,$2) RETURNING id",["Modelo simulação RJ "+category,category])).rows[0];
      const count=category==="RASTREADOR"?(t.key===10?1:5+t.key%3):(t.key===10?0:3);
      const codes=Array.from({length:count},(_,j)=>category==="RASTREADOR"?"990"+String(t.key).padStart(3,"0")+String(j+1).padStart(9,"0"):"TAG-RJ-DEMO-"+t.key+"-"+(j+1));
-     for(const code of codes){
-       const prior=(await stockPool.query("SELECT status FROM equipamentos_seriais WHERE codigo_serial=$1",[code])).rows[0];
-       if(!prior){await move(stockPool,"entrada",{produto_id:product.id,seriais:[code]});await move(stockPool,"transferir",{produto_id:product.id,tecnico_id:st.id,seriais:[code]});}
-     }
+     if(!codes.length)continue;
+     const previous=(await stockPool.query("SELECT codigo_serial,status,produto_id FROM equipamentos_seriais WHERE codigo_serial=ANY($1::text[])",[codes])).rows;
+     const existing=new Map(previous.map(item=>[item.codigo_serial,item]));
+     const missing=codes.filter(code=>!existing.has(code));
+     if(missing.length)await move(stockPool,"entrada",{produto_id:product.id,seriais:missing});
+     const transfer=[...missing,...previous.filter(item=>item.status==="MATRIZ"&&item.produto_id===product.id).map(item=>item.codigo_serial)];
+     if(transfer.length)await move(stockPool,"transferir",{produto_id:product.id,tecnico_id:st.id,seriais:transfer});
    }
  }
  for(const customer of data.customers){
