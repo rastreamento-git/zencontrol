@@ -2,10 +2,10 @@ export default function SgaProducts({ value }) {
   if (!value) return null;
   return (
     <section
-      className="zc-notice"
+      className="sga-products-panel"
       aria-label="Produtos do associado neste veículo"
     >
-      <strong>Produtos vinculados a este veículo no SGA</strong>
+      <h3>Produtos vinculados a este veículo no SGA</h3>
       {value.state !== "available" ? (
         <p role="status">
           Produtos indisponíveis nesta consulta. A presença do Perfurado ainda
@@ -26,9 +26,8 @@ export default function SgaProducts({ value }) {
             <ul className="sga-products-list">
               {value.items.map((product, index) => (
                 <li key={`${product.kind}-${product.code}-${index}`}>
-                  <strong>{product.name}</strong> · código {product.code} ·{" "}
-                  {product.status || "Situação não informada"}
-                  {product.kind === "additional" ? " · Produto adicional" : ""}
+                  <div><strong>{product.name}</strong><small>Código {product.code}{product.kind === "additional" ? " · Produto adicional" : ""}</small></div>
+                  <span className="sga-product-state" data-active={product.active===true?"yes":product.active===false?"no":"unknown"}>{product.status || "Não confirmado"}</span>
                 </li>
               ))}
             </ul>

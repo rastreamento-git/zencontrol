@@ -147,10 +147,24 @@ async function main() {
     .fill("Intake1!teste");
   await page.getByRole("button", { name: "Entrar", exact: true }).click();
   await page.getByRole("navigation", { name: "Acesso rápido" }).waitFor();
+  // Reproduce unavailable local config and a stalled remote catalog independently.
+  let releaseCatalog;
+  const catalogGate=new Promise(resolve=>{releaseCatalog=resolve});
+  await page.route("**/api/sga-intake/config",route=>route.request().method()==="GET"?route.fulfill({status:503,contentType:"application/json",body:JSON.stringify({message:"Configuração temporariamente indisponível"})}):route.continue());
+  await page.route("**/api/sga-intake/catalogs",async route=>{await catalogGate;await route.continue();});
   await page.goto(origin + "/zencontrol?area=imports");
   const region = page.getByRole("region", {
     name: "Instalações pendentes do SGA",
   });
+  await region.getByText("Não foi possível carregar a configuração SGA",{exact:true}).waitFor();
+  assert.equal(await region.getByLabel("Data inicial").isVisible(),true);
+  assert.equal(await region.getByLabel("Data final").isVisible(),true);
+  assert.equal(await region.getByRole("button",{name:"Buscar pendências do período"}).isDisabled(),true);
+  await page.unroute("**/api/sga-intake/config");
+  await region.getByRole("button",{name:"Tentar novamente",exact:true}).click();
+  await region.getByLabel("Horário diário (Brasília)").waitFor({state:"visible"});
+  assert.equal(await region.getByLabel("Data inicial").isVisible(),true);
+  releaseCatalog();
   await region
     .getByLabel("Etapa no catálogo atual do SGA")
     .selectOption("classifications:42");
