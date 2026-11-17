@@ -74,7 +74,7 @@ async function roadRoute(key,origin,destination,request=fetch){
 }
 function rank(items){
  const eligible=x=>["sufficient","not_required"].includes(x.stock_state)&&x.route.state==="confirmed";
- return [...items].sort((a,b)=>Number(eligible(b))-Number(eligible(a))||(eligible(a)&&eligible(b)?a.route.duration_seconds-b.route.duration_seconds||a.route.distance_meters-b.route.distance_meters:0)||a.name.localeCompare(b.name,"pt-BR")).map(x=>({...x,recommended:eligible(x)}));
+ return [...items].sort((a,b)=>Number(eligible(b))-Number(eligible(a))||(eligible(a)&&eligible(b)?a.route.distance_meters-b.route.distance_meters||a.route.duration_seconds-b.route.duration_seconds:0)||a.name.localeCompare(b.name,"pt-BR")).map(x=>({...x,recommended:eligible(x)}));
 }
 async function mapLimit(items,limit,fn){
  const result=new Array(items.length);let cursor=0;
@@ -107,6 +107,6 @@ async function recommend(pool,cfg,input,{stock=new StockClient(cfg),route=roadRo
    if(journey.state==="confirmed")try{travel_estimate=require("./travel-policy").estimate(journey.distance_meters,t)}catch{}
    return {id:t.id,name:t.name,stock:available,stock_state,stock_note:stockNote,route:journey,travel_estimate};
  });
- return {items:rank(rows),required,routing_configured:configured,checked_at:new Date().toISOString(),travel_mode:"DRIVE",traffic:"not_considered"};
+ return {items:rank(rows),required,routing_configured:configured,checked_at:new Date().toISOString(),travel_mode:"DRIVE",traffic:"not_considered",ranking:"distance_then_duration"};
 }
 module.exports={requirements,validateInput,inventory,stockState,roadRoute,rank,recommend};

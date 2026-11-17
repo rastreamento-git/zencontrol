@@ -12,9 +12,9 @@ test("estima estoque livre sem contar duas vezes OS agrupada e serial reservado"
  assert.equal(stockState(null,{RASTREADOR:0,TAG:0,PERFURADO:0}),"not_required");
  assert.equal(requirements({...orders[0],document_data:{...orders[0].document_data,reinstallation:true,reuse_equipment:true}}).RASTREADOR,0);
 });
-test("ordena por tempo rodoviário somente com estoque e rota confirmados",()=>{
+test("ordena por distância rodoviária somente com estoque e rota confirmados",()=>{
  const rows=rank([{name:"Sem estoque",stock_state:"insufficient",route:{state:"confirmed",duration_seconds:60,distance_meters:100}},{name:"A",stock_state:"sufficient",route:{state:"confirmed",duration_seconds:900,distance_meters:10000}},{name:"B",stock_state:"sufficient",route:{state:"confirmed",duration_seconds:600,distance_meters:15000}},{name:"C",stock_state:"unknown",route:{state:"unavailable"}}]);
- assert.deepEqual(rows.slice(0,2).map(x=>x.name),["B","A"]);
+ assert.deepEqual(rows.slice(0,2).map(x=>x.name),["A","B"]);
  assert.equal(rows.filter(x=>x.recommended).length,2);
 });
 test("rota usa DRIVE e rejeita endereço parcial, sem fabricar distância",async()=>{
@@ -23,4 +23,9 @@ test("rota usa DRIVE e rejeita endereço parcial, sem fabricar distância",async
  assert.deepEqual(await roadRoute("test","Base fictícia","Destino fictício",request),{state:"confirmed",distance_meters:12000,duration_seconds:900});
  const partial=async()=>({ok:true,json:async()=>({routes:[{distanceMeters:12000,duration:"900s"}],geocodingResults:{origin:exact,destination:{...exact,partialMatch:true}}})});
  assert.deepEqual(await roadRoute("test","Base fictícia","Destino fictício",partial),{state:"address_review"});
+});
+
+test("desempate usa duração somente se a distância de automóvel é igual",()=>{
+ const rows=rank([{name:"Longo",stock_state:"sufficient",route:{state:"confirmed",distance_meters:15000,duration_seconds:90}},{name:"Lento",stock_state:"sufficient",route:{state:"confirmed",distance_meters:10000,duration_seconds:900}},{name:"Rápido",stock_state:"sufficient",route:{state:"confirmed",distance_meters:10000,duration_seconds:600}},{name:"Sem estoque",stock_state:"insufficient",route:{state:"confirmed",distance_meters:50,duration_seconds:5}}]);
+ assert.deepEqual(rows.map(x=>x.name),["Rápido","Lento","Longo","Sem estoque"]);
 });

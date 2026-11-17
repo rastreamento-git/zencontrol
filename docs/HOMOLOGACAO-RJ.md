@@ -8,3 +8,5 @@ Agenda: filtros de período, técnico, serviço e situação. GET /api/agenda/su
 
 ## Atribuição inicial
 Os 50 novos atendimentos ficam PENDENTE, sem técnico, com data e horário propostos. O grupo regional é somente uma referência da massa. Uma atualização única libera atribuições originais não modificadas; registros que já foram editados, executados ou possuem evidências são preservados. Os dois técnicos e atendimentos de regressão originais continuam disponíveis para testes de evidências. Somente o inicializador isolado passa a flag booleana DEMO_RJ_ISOLATED; a dispensa de consulta SGA vale exclusivamente para OS existentes geradas pela massa, com identidade fictícia intacta e sem código SGA. Não se aplica a importações ou cadastros reais.
+
+A recomendação ordena primeiro os técnicos com estoque suficiente e trajeto confirmado, pela menor distância rodoviária da base ao endereço de instalação, com duração estimada como desempate. A região usada para criar os endereços fictícios não fixa nenhum técnico. A atribuição permanece decisão do operador.
