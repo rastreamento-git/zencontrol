@@ -263,3 +263,5 @@
  .workspace-view .zc-service-list .zc-table td{padding:9px 12px}
  .sga-run-details{max-width:100%}
 }
+
+.sga-select-page-mobile{display:none;align-items:center;gap:6px;font-size:12px}.sga-select-page-mobile input{width:16px;height:16px;accent-color:var(--ep-primary)}@media(max-width:600px){.sga-select-page-mobile{display:inline-flex}}

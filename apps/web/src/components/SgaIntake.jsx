@@ -81,6 +81,7 @@ export default function SgaIntake({
   useEffect(() => {
     let active = true,
       timer;
+    setLoading(true);
     async function poll() {
       try {
         const result = await loadData();
@@ -167,13 +168,14 @@ export default function SgaIntake({
     });
   }
   const pageIds = queue.items.map(entry => entry.id);
-  const selectedIds = marked.filter(id => pageIds.includes(id));
-  const allMarked = pageIds.length > 0 && pageIds.every(id => marked.includes(id));
+  const filterPending = query !== searchTerm;
+  const selectedIds = filterPending ? [] : marked.filter(id => pageIds.includes(id));
+  const allMarked = !filterPending && pageIds.length > 0 && pageIds.every(id => marked.includes(id));
   const incomplete = entry => !entry.data.contact || !entry.data.document_data?.model || !entry.data.document_data?.customer_street || !entry.data.document_data?.customer_city || !entry.data.document_data?.customer_state || !entry.data.fipe_risk || entry.data.sga_products?.perfurado == null;
   const toggleMarked = id => setMarked(old => old.includes(id) ? old.filter(x => x !== id) : [...old,id]);
   async function clearMarked() {
     const ids = selectedIds.slice();
-    if (!ids.length) return;
+    if (!ids.length || filterPending || historyError) return;
     await action(async () => {
       let data;
       try {
@@ -382,9 +384,10 @@ export default function SgaIntake({
           <div className="sga-compact-toolbar">
             <span aria-live="polite">{loading?"Carregando…":queue.total+" pendência(s)"}{selectedIds.length?" · "+selectedIds.length+" selecionado(s)":""}</span>
             {queue.items.length>0&&<>
-              <button type="button" className="secondary-button" disabled={busy||loading||!!historyError||!queue.items.some(incomplete)} onClick={()=>setMarked(queue.items.filter(incomplete).map(e=>e.id))}>Selecionar incompletos</button>
+              <label className="sga-select-page-mobile"><input type="checkbox" aria-label="Selecionar página no celular" checked={allMarked} disabled={busy||loading||filterPending||!!historyError} onChange={e=>setMarked(e.target.checked?pageIds:[])}/> Selecionar página</label>
+              <button type="button" className="secondary-button" disabled={busy||loading||filterPending||!!historyError||!queue.items.some(incomplete)} onClick={()=>setMarked(queue.items.filter(incomplete).map(e=>e.id))}>Selecionar incompletos</button>
               {selectedIds.length>0&&<button type="button" className="secondary-button" disabled={busy} onClick={()=>setMarked([])}>Desmarcar</button>}
-              <button type="button" className="secondary-button sga-bulk-remove" disabled={busy||loading||!!historyError||collecting||!selectedIds.length} onClick={()=>{setClearReason("reimport");setClearDialog(true);}}><Trash2 size={15}/> Limpar selecionados</button>
+              <button type="button" className="secondary-button sga-bulk-remove" disabled={busy||loading||filterPending||!!historyError||collecting||!selectedIds.length} onClick={()=>{setClearReason("reimport");setClearDialog(true);}}><Trash2 size={15}/> Limpar selecionados</button>
             </>}
             {collecting&&<small>Limpeza disponível após a coleta.</small>}
           </div>
@@ -396,7 +399,7 @@ export default function SgaIntake({
               <table className="zc-table zc-responsive-table">
                 <thead>
                   <tr>
-                    <th className="sga-select-cell" scope="col"><input type="checkbox" aria-label="Selecionar página" checked={allMarked} disabled={busy||loading||!!historyError} onChange={e=>setMarked(e.target.checked?pageIds:[])}/></th>
+                    <th className="sga-select-cell" scope="col"><input type="checkbox" aria-label="Selecionar página" checked={allMarked} disabled={busy||loading||filterPending||!!historyError} onChange={e=>setMarked(e.target.checked?pageIds:[])}/></th>
                     <th>ASSOCIADO</th>
                     <th>VEÍCULO</th>
                     <th>SERVIÇO / FIPE</th>
@@ -408,7 +411,7 @@ export default function SgaIntake({
                 <tbody>
                   {queue.items.map(entry=>(
                     <tr key={entry.id} className={marked.includes(entry.id)?"sga-row-selected":""}>
-                      <td className="sga-select-cell" data-label="Seleção"><input type="checkbox" aria-label={"Selecionar cadastro SGA "+entry.data.sga_id} checked={marked.includes(entry.id)} disabled={busy||loading||!!historyError} onChange={()=>toggleMarked(entry.id)}/></td>
+                      <td className="sga-select-cell" data-label="Seleção"><input type="checkbox" aria-label={"Selecionar cadastro SGA "+entry.data.sga_id} checked={marked.includes(entry.id)} disabled={busy||loading||filterPending||!!historyError} onChange={()=>toggleMarked(entry.id)}/></td>
                       <td data-label="Associado">
                         <button type="button" className="zc-link sga-associate-link" disabled={busy} onClick={()=>select(entry)}>{entry.customer_name||"Associado não informado"}</button>
                         <small>SGA {entry.data.sga_id}{entry.data.contact?" · "+entry.data.contact:""}</small>
