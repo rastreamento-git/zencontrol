@@ -1248,3 +1248,16 @@ test("classificação FIPE manual explícita é persistida e pode voltar ao cál
  const invalid=await request("/api/orders/"+row.id,"PATCH",{version:reverted.data.version,document_data:{fipe_override:"Inexistente"}});
  assert.equal(invalid.status,400);
 });
+
+test("agenda consolida atendimentos por serviço e técnico em todas as páginas",async()=>{
+ const day="2030-01-10";
+ const first=await create({vehicle:"AGD1A23",scheduled_at:day+"T08:00",service:"Instalação",document_data:{equipment_counts:{tracker:1,tag:1}}});
+ await create({vehicle:"AGD2A23",scheduled_at:day+"T10:00",service:"Manutenção"});
+ const r=await request("/api/orders?day="+day+"&technician_id="+tech.id+"&limit=1");
+ assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(r.data.total,2);assert.equal(r.data.items.length,1);
+ assert.equal(r.data.summary.totals.appointments,2);assert.equal(r.data.summary.totals.additional_orders,1);
+ assert.equal(r.data.summary.by_technician[0].appointments,2);
+ const filtered=await request("/api/agenda/summary?day="+day+"&technician_id="+tech.id+"&service_type=Instalação");
+ assert.equal(filtered.status,200);assert.equal(filtered.data.totals.appointments,1);
+ assert.equal(filtered.data.rows[0].service_type,"Instalação");
+});

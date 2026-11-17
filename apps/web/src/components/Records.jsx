@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import SgaProducts from "./SgaProducts";
 import TechnicianRecommendations from "./TechnicianRecommendations";
 import SgaIntake from "./SgaIntake";
+import "./agenda.css";
 import { classifyFipe, fipeRegions, fipeCategories, canonicalVehicleType } from "@zen/domain/fipe.mjs";
 import {
   addressFields,
@@ -53,7 +54,10 @@ export function Orders({
     [term, setTerm] = useState(q),
     [page, setPage] = useState(1),
     [status, setStatus] = useState(""),
-    [day, setDay] = useState(meta.today);
+    [day, setDay] = useState(meta.today),
+    [endDay,setEndDay]=useState(meta.today),[technician,setTechnician]=useState(""),[serviceType,setServiceType]=useState("");
+  const technicians=useLoad("/technicians",revision);
+  useEffect(()=>{setPage(1)},[agenda]);
   useEffect(() => {
     setQ(globalQuery || "");
     setPage(1);
@@ -69,7 +73,7 @@ export function Orders({
       page,
       limit: 25,
       status,
-      ...(agenda ? { day } : {}),
+      ...(agenda ? { agenda_from:day,agenda_to:endDay,technician_id:technician,service_type:serviceType } : {}),
     });
   const { data, loading, error } = useLoad(path, revision);
   return (
@@ -114,27 +118,15 @@ export function Orders({
       ) : (
       <Panel className="zc-service-list">
         {agenda ? (
-          <div className="zc-filters">
-            <label>
-              Data do atendimento
-              <input
-                type="date"
-                value={day}
-                onChange={(e) => {
-                  setDay(e.target.value);
-                  setPage(1);
-                }}
-              />
-            </label>
-            <button
-              className="secondary-button"
-              onClick={() => {
-                setDay(meta.today);
-                setPage(1);
-              }}
-            >
-              Hoje
-            </button>
+          <div className="zc-filters zc-agenda-filters">
+            <label>De<input type="date" aria-label="Data inicial da agenda" value={day} onChange={e=>{setDay(e.target.value);if(e.target.value>endDay)setEndDay(e.target.value);setPage(1)}}/></label>
+            <label>Até<input type="date" aria-label="Data final da agenda" min={day} value={endDay} onChange={e=>{setEndDay(e.target.value);setPage(1)}}/></label>
+            <label>Técnico<select aria-label="Filtrar por técnico" value={technician} onChange={e=>{setTechnician(e.target.value);setPage(1)}}><option value="">Todos os técnicos</option><option value="unassigned">Sem técnico</option>{(technicians.data?.items||[]).map(t=><option key={t.id} value={t.id}>{t.name}{t.active?"":" (inativo)"}</option>)}</select></label>
+            <label>Serviço<select value={serviceType} aria-label="Filtrar por serviço" onChange={e=>{setServiceType(e.target.value);setPage(1)}}><option value="">Todos os serviços</option>{["Instalação","Manutenção","Retirada","Reinstalação","Visita improdutiva","Reagendamento","Visita (legado)","Outros"].map(s=><option key={s}>{s}</option>)}</select></label>
+            <label>Situação<select aria-label="Situação da agenda" value={status} onChange={e=>{setStatus(e.target.value);setPage(1)}}><option value="">Todas</option>{meta.statuses.map(s=><option key={s}>{s}</option>)}</select></label>
+            <button type="button" className="secondary-button" onClick={()=>{setDay(meta.today);setEndDay(meta.today);setPage(1)}}>Hoje</button>
+            <button type="button" className="secondary-button" onClick={()=>{setTechnician("");setServiceType("");setStatus("");setQ("");setTerm("");setPage(1)}}>Limpar filtros</button>
+            {technicians.error&&<small role="alert">Não foi possível carregar os técnicos.</small>}
           </div>
         ) : (
           <div className="zc-filters">
@@ -165,6 +157,7 @@ export function Orders({
             </select>
           </div>
         )}
+        {agenda&&!loading&&!error&&data?.summary&&<AgendaSummary summary={data.summary}/>}
         {loading || error ? (
           <Loading error={error} />
         ) : !data.items.length ? (
@@ -275,6 +268,15 @@ export function Orders({
       )}
     </>
   );
+}
+function AgendaSummary({summary}){
+ const {totals,by_service,by_technician}=summary;
+ return <section className="zc-agenda-summary" aria-label="Indicadores da agenda">
+  <div className="zc-agenda-metrics">{[["Atendimentos",totals.appointments],["Em aberto",totals.open],["Concluídos",totals.completed],["Cancelados",totals.cancelled],["OS adicionais",totals.additional_orders]].map(([label,n])=><div key={label}><small>{label}</small><strong>{n}</strong></div>)}</div>
+  <div className="zc-agenda-breakdown"><div><strong>Por tipo de serviço</strong><div className="zc-agenda-chips">{by_service.map(s=><span key={s.service_type}>{s.service_type} <b>{s.appointments}</b></span>)}{!by_service.length&&<small>Sem atendimentos</small>}</div></div>
+  <details><summary>Por técnico ({by_technician.length})</summary><div className="zc-table-scroll"><table className="zc-table zc-responsive-table"><thead><tr><th>TÉCNICO</th><th>SERVIÇOS</th><th>TOTAL</th><th>CONCLUÍDOS</th><th>CANCELADOS</th></tr></thead><tbody>{by_technician.map(t=><tr key={t.technician_id??"unassigned"}><td data-label="Técnico">{t.technician_name}</td><td data-label="Serviços">{Object.entries(t.services).map(([s,n])=><small key={s}>{s}: {n}</small>)}</td><td data-label="Total">{t.appointments}</td><td data-label="Concluídos">{t.completed}</td><td data-label="Cancelados">{t.cancelled}</td></tr>)}</tbody></table></div></details></div>
+  <small>Contagem por atendimento principal na data agendada; OS adicionais são separadas. Indicadores incluem todas as páginas do filtro.</small>
+ </section>
 }
 export function OrderEditor({
   id,

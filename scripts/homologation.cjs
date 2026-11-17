@@ -149,6 +149,7 @@ async function main() {
       : "http://127.0.0.1:4320",
     SSO_STOCK_URL: online ? onlineConfig.stockOrigin : "http://127.0.0.1:4321",
     GOOGLE_CLIENT_ID: online ? "" : process.env.GOOGLE_CLIENT_ID,
+    GOOGLE_ROUTES_API_KEY: process.env.GOOGLE_ROUTES_API_KEY,
     SGA_READ_ENABLED: process.env.SGA_READ_ENABLED,
     SGA_SCHEDULING_GUARD: process.env.SGA_SCHEDULING_GUARD,
     HINOVA_API_URL: process.env.HINOVA_API_URL,
@@ -324,6 +325,10 @@ async function main() {
     await fs.writeFile(credentialFile, JSON.stringify(credentials, null, 2), {
       mode: 0o600,
     });
+  }
+  if(online||process.env.ZEN_DEMO_RJ==="1"){
+    await require("./rj-demo-seed.cjs").seed({pool:db.pool,stockPool:stockDb.pool,move,credentials,online,enabled:true});
+    await fs.writeFile(credentialFile,JSON.stringify(credentials,null,2),{mode:0o600});
   }
   const fixtures = online
     ? path.join(root, ".homologation-build/fixtures")
