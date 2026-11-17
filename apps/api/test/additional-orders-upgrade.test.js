@@ -52,12 +52,14 @@ test("existing additional OS gain a parent link without changing completed servi
         parent_order_id,
         additional_equipment,
         travel_fee_cents,
+        travel_extra_meters,
         sga_check,
         proposed_scheduled_at,
         sticker_discount_opt_in,
         ...original
       } = row;
       assert.equal(travel_fee_cents, 0);
+      assert.equal(travel_extra_meters, 0);
       assert.deepEqual(sga_check, {});
       assert.equal(proposed_scheduled_at, "");
       assert.equal(sticker_discount_opt_in, false);
@@ -67,6 +69,16 @@ test("existing additional OS gain a parent link without changing completed servi
     }
     assert.equal(after[1].parent_order_id, "OS-LEGACY");
     assert.equal(after[1].additional_equipment, "RASTREADOR");
+    // Existing rows keep the zero default and cannot accrue both travel modes.
+    await assert.rejects(
+      db.pool.query("UPDATE zc_orders SET travel_extra_meters=1000,travel_fee_cents=100 WHERE id='OS-LEGACY'"),
+      {code:"23514",constraint:"zc_orders_travel_one_mode"},
+    );
+    assert.deepEqual(
+      (await db.pool.query("SELECT travel_extra_meters,travel_fee_cents FROM zc_orders WHERE id='OS-LEGACY'")).rows[0],
+      {travel_extra_meters:0,travel_fee_cents:0},
+    );
+
     const edited = {};
     prepareEquipment(
       edited,
