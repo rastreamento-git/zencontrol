@@ -53,6 +53,7 @@ test("existing additional OS gain a parent link without changing completed servi
         additional_equipment,
         travel_fee_cents,
         travel_extra_meters,
+        travel_total_meters,
         sga_check,
         proposed_scheduled_at,
         sticker_discount_opt_in,
@@ -60,6 +61,7 @@ test("existing additional OS gain a parent link without changing completed servi
       } = row;
       assert.equal(travel_fee_cents, 0);
       assert.equal(travel_extra_meters, 0);
+      assert.equal(travel_total_meters, 0);
       assert.deepEqual(sga_check, {});
       assert.equal(proposed_scheduled_at, "");
       assert.equal(sticker_discount_opt_in, false);

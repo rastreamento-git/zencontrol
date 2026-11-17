@@ -64,7 +64,7 @@ function stockState(stock,required){
 async function roadRoute(key,origin,destination,request=fetch){
  const response=await request("https://routes.googleapis.com/directions/v2:computeRoutes",{
  method:"POST",headers:{"Content-Type":"application/json","X-Goog-Api-Key":key,"X-Goog-FieldMask":"routes.distanceMeters,routes.duration,geocodingResults.origin,geocodingResults.destination"},
- body:JSON.stringify({origin:{address:origin+", Brasil"},destination:{address:destination},travelMode:"DRIVE",routingPreference:"TRAFFIC_UNAWARE",regionCode:"BR",languageCode:"pt-BR",units:"METRIC"}),signal:AbortSignal.timeout(8000)});
+ body:JSON.stringify({origin:{address:origin.replace(/,\s*Brasil$/i,"")+", Brasil"},destination:{address:destination},travelMode:"DRIVE",routingPreference:"TRAFFIC_UNAWARE",regionCode:"BR",languageCode:"pt-BR",units:"METRIC"}),signal:AbortSignal.timeout(8000)});
  if(!response.ok)throw Error("Rota indisponível");
  const data=await response.json(),route=data.routes?.[0],geo=data.geocodingResults;
  const precise=w=>w?.placeId&&w.partialMatch!==true&&!(w.geocoderStatus?.code)&&Array.isArray(w.type)&&w.type.some(x=>["street_address","premise","subpremise","establishment","point_of_interest"].includes(x));
@@ -84,7 +84,7 @@ async function mapLimit(items,limit,fn){
 async function recommend(pool,cfg,input,{stock=new StockClient(cfg),route=roadRoute}={}){
  const {required,destination,orderId}=validateInput(input);
  if(orderId){const order=await d.one(pool,"SELECT id,parent_order_id,status FROM zc_orders WHERE id=$1 AND deleted_at='' ",[orderId]);if(!order||order.parent_order_id||["CONCLUÍDO","CANCELADO"].includes(order.status))fail(400,"Recomendações disponíveis apenas para OS principais em aberto.");}
- const technicians=await d.rows(pool,"SELECT id,name,address,stock_technician_id FROM zc_technicians WHERE active=true ORDER BY name,id");
+ const technicians=await d.rows(pool,"SELECT t.id,t.name,t.address,t.stock_technician_id,r.travel_km_cents,r.travel_policy FROM zc_technicians t LEFT JOIN LATERAL (SELECT travel_km_cents,travel_policy FROM zc_rates WHERE technician_id=t.id AND effective_on<=$1 ORDER BY effective_on DESC LIMIT 1) r ON true WHERE t.active=true ORDER BY t.name,t.id",[d.today()]);
  if(technicians.length>100)fail(409,"Mais de 100 técnicos ativos. Divida a consulta por região antes de calcular as rotas.");
  const ids=technicians.map(t=>t.id);
  const orders=await d.rows(pool,"SELECT id,parent_order_id,technician_id,service,status,document_data,tracker_waiver_authorized,sticker_discount_opt_in,stock_sync_state FROM zc_orders WHERE technician_id=ANY($1::int[]) AND deleted_at='' AND status NOT IN ('CONCLUÍDO','CANCELADO')",[ids]);
@@ -103,7 +103,9 @@ async function recommend(pool,cfg,input,{stock=new StockClient(cfg),route=roadRo
    if(configured&&t.address?.trim()&&["sufficient","not_required"].includes(stock_state)){
       try{journey=await route(cfg.GOOGLE_ROUTES_API_KEY,t.address.trim(),destination)}catch{journey={state:"unavailable"}}
    }
-   return {id:t.id,name:t.name,stock:available,stock_state,stock_note:stockNote,route:journey};
+   let travel_estimate=null;
+   if(journey.state==="confirmed")try{travel_estimate=require("./travel-policy").estimate(journey.distance_meters,t)}catch{}
+   return {id:t.id,name:t.name,stock:available,stock_state,stock_note:stockNote,route:journey,travel_estimate};
  });
  return {items:rank(rows),required,routing_configured:configured,checked_at:new Date().toISOString(),travel_mode:"DRIVE",traffic:"not_considered"};
 }

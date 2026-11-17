@@ -54,6 +54,10 @@ function configurePortal(app, pool, cfg, auth) {
       user: req.user,
     });
   });
+  app.post(prefix+"/daily-route",async(req,res)=>{
+    const t=await portal.technician(pool,req.user.id);
+    res.json(await require("./daily-route").dailyRoute(pool,cfg,t,req.body));
+  });
   app.get(prefix + "/orders", async (req, res) => {
     const t = await portal.technician(pool, req.user.id),
       limit = Math.min(100, integer(req.query.limit || 50, "Limite")),
