@@ -482,6 +482,57 @@ test("converte duas TAGs em instalação com OS adicional sem movimentações au
   );
 });
 
+test("leitura XLSX independe da ordem de workbook.xml e das abas no ZIP", async () => {
+  const w = new ExcelJS.Workbook();
+  const header = [
+    "", "SERVIÇOS", "NOME DO ASSOCIADO", "PLACA / CHASSI", "IMEI",
+    "DATA DE ENVIO DO TERMO", "DATA DE CONCLUSÃO", "TÉCNICO",
+    "REGIÃO", "VOLUNTÁRIO", "VALOR FIPE", "FIPE", "INCLUIU", "CONCLUIU", "SITUAÇÃO",
+  ];
+  const nov = w.addWorksheet("NOVEMBRO 2026");
+  nov.addRow(header);
+  const a = row("RAC1B23");
+  a[5] = new Date("2026-11-01T12:00:00Z");
+  nov.addRow(a);
+  const jun = w.addWorksheet("JUNHO 2026");
+  jun.addRow(header);
+  jun.addRow(row("RAC2B34"));
+  const original = Buffer.from(await w.xlsx.writeBuffer());
+  const zip = await require("unzipper").Open.buffer(original);
+  const ordered = (names) => {
+    const pos = (name) => names.includes(name) ? names.indexOf(name) : names.length;
+    return zip.files.filter(f => f.type !== "Directory").sort((a,b)=>pos(a.path)-pos(b.path));
+  };
+  const entries = ordered([
+    "xl/sharedStrings.xml", "xl/_rels/workbook.xml.rels",
+    "xl/worksheets/sheet1.xml", "xl/worksheets/sheet2.xml",
+    "xl/workbook.xml", "xl/styles.xml",
+  ]);
+  assert.ok(entries.findIndex(f => f.path === "xl/worksheets/sheet1.xml") <
+    entries.findIndex(f => f.path === "xl/workbook.xml"));
+  const archive = require("archiver")("zip");
+  const chunks = [];
+  const complete = new Promise((resolve,reject) => {
+    archive.on("data", (chunk)=>chunks.push(chunk));
+    archive.on("end", ()=>resolve(Buffer.concat(chunks)));
+    archive.on("error",reject);
+  });
+  for (const entry of entries) archive.append(await entry.buffer(), {name:entry.path});
+  await archive.finalize();
+  const bytes = await complete;
+  const rows = await preview(bytes, "2026-11-17", false);
+  assert.deepEqual(rows.sheets.map(s=>s.name), ["NOVEMBRO 2026","JUNHO 2026"]);
+  assert.equal(rows.length,2);
+  assert.ok(rows.every(r=>r.state==="ready"));
+  assert.equal(rows[0].data.imei,a[4]);
+  assert.equal(rows[0].data.vehicle,"RAC1B23");
+  const upload = await call("/api/spreadsheet-imports",{
+    filename:"ordem-invertida.xlsx",content:bytes.toString("base64"),
+  },token,type);
+  assert.equal(upload.status,201,JSON.stringify(upload.data));
+  assert.deepEqual(upload.data.sheets.map(s=>s.name),["NOVEMBRO 2026","JUNHO 2026"]);
+});
+
 test("abas selecionadas agrupam rastreador e TAG automaticamente, preservando os seriais", async () => {
   const w = new ExcelJS.Workbook();
   const header = [

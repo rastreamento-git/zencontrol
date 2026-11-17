@@ -64,6 +64,25 @@ async function preview(bytes, today = d.today(), deduplicate = true) {
       hyperlinks: "ignore",
     },
   );
+  // ExcelJS 4.4.0 may start reading a worksheet as soon as shared strings
+  // and relationships are present, even if workbook.xml appears later in
+  // the ZIP. Its worksheet reader then accesses this.model.sheets before
+  // the model exists. XLSX does not require a particular ZIP entry order.
+  // Preload workbook metadata and styles from the validated ZIP directory;
+  // keep the worksheet reader streaming to preserve bounded memory.
+  const workbookEntry = zip.files.find((f) => f.path === "xl/workbook.xml");
+  const relationshipsEntry = zip.files.find(
+    (f) => f.path === "xl/_rels/workbook.xml.rels",
+  );
+  const stylesEntry = zip.files.find((f) => f.path === "xl/styles.xml");
+  if (!relationshipsEntry) fail(400, "Planilha XLSX sem relações de abas.");
+  try {
+    await reader._parseWorkbook(workbookEntry.stream());
+    await reader._parseRels(relationshipsEntry.stream());
+    if (stylesEntry) await reader._parseStyles(stylesEntry.stream());
+  } catch {
+    fail(400, "Metadados da planilha XLSX inválidos.");
+  }
   const rows = [],
     sheets = [];
   Object.defineProperty(rows, "sheets", { value: sheets });
