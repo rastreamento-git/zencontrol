@@ -44,6 +44,7 @@ function travelCharge(order,rate){
  }
  if(meters&&order.travel_fee_cents)fail(409,"Escolha somente uma forma de pagamento do deslocamento.");
  if(meters){
+   if(rate?.travel_policy?.mode==="none")fail(409,"O acordo vigente não cobra por km. Confira o lançamento; valores fixos excepcionais dependem de autorização.");
    const cents=kmRate(rate?.travel_km_cents??0);
    if(!cents)fail(409,"Não há valor por km vigente para a data do serviço. Confira o acordo do técnico.");
    const amount=Math.round(meters*cents/1000);
