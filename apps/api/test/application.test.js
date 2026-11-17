@@ -1274,3 +1274,23 @@ test("agenda consolida atendimentos por serviço e técnico em todas as páginas
  const empty=await request("/api/agenda/summary?day="+day+"&technician_id="+tech.id+"&service_type=Retirada");
  assert.equal(empty.status,200,JSON.stringify(empty.data));assert.equal(empty.data.totals.appointments,0);assert.equal(empty.data.rows.length,0);
 });
+
+test("demonstração RJ libera atribuição original e permite novo agendamento sem consultar SGA real",async()=>{
+ const {dataset}=require("../../../scripts/rj-demo-data.cjs"),{resetOriginalAssignments}=require("../../../scripts/rj-demo-seed.cjs"),{actor}=require("../src/demo-rj");
+ const {technicians,customers}=dataset(),customer=customers[0];
+ const original=await o.insert(pool,"zc_technicians",{name:technicians[0].name});
+ const demo=await o.create(pool,{customer_name:customer.name,vehicle:customer.vehicle,service:"Instalação",technician_id:original.id,status:"AGENDADO",scheduled_at:d.today()+"T10:30",document_data:{equipment_counts:{tracker:1,tag:1}}},actor,{});
+ const other=await o.create(pool,{customer_name:"Outro atendimento",vehicle:"RJT9S87",service:"Manutenção",technician_id:original.id,status:"AGENDADO",scheduled_at:d.today()+"T11:30"},"Operação",{});
+ await resetOriginalAssignments(pool);
+ let released=await o.get(pool,demo.id);
+ assert.equal(released.technician_id,null);assert.equal(released.status,"PENDENTE");assert.equal(released.scheduled_at,demo.scheduled_at);
+ const children=await d.rows(pool,"SELECT * FROM zc_orders WHERE parent_order_id=$1",[demo.id]);
+ assert.equal(children.length,1);assert.equal(children[0].technician_id,null);assert.equal(children[0].status,"PENDENTE");
+ assert.equal((await o.get(pool,other.id)).technician_id,original.id);
+ const assignment={version:released.version,technician_id:original.id,status:"AGENDADO"};
+ await assert.rejects(o.edit(pool,demo.id,assignment,"Operação",{SGA_SCHEDULING_GUARD:true}));
+ const assigned=await o.edit(pool,demo.id,assignment,"Operação",{SGA_SCHEDULING_GUARD:true,DEMO_RJ_ISOLATED:true});
+ assert.equal(assigned.technician_id,original.id);assert.equal(assigned.status,"AGENDADO");
+ await resetOriginalAssignments(pool);
+ assert.equal((await o.get(pool,demo.id)).technician_id,original.id);
+});
