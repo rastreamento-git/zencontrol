@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import SgaProducts from "./SgaProducts";
+import TechnicianRecommendations from "./TechnicianRecommendations";
 import SgaIntake from "./SgaIntake";
 import { classifyFipe, fipeRegions, fipeCategories, canonicalVehicleType } from "@zen/domain/fipe.mjs";
 import {
@@ -994,6 +995,14 @@ export function OrderEditor({
             {field("Data e horário", "scheduled_at", {
               type: "datetime-local",
             })}
+            <TechnicianRecommendations
+              enabled={!order?.parent_order_id&&!["CONCLUÍDO","CANCELADO"].includes(order?.status)&&["admin","operador"].includes(user?.papel)}
+              disabled={busy}
+              orderId={id||""}
+              address={Object.fromEntries(["street","number","neighborhood","city","state"].map(k=>[k,documentData[(documentData.service_address_same===false?"service_":"customer_")+k]||""]))}
+              required={{RASTREADOR:installation&&!values.tracker_waiver_authorized&&!documentData.reuse_equipment?equipmentCounts.tracker:0,TAG:installation&&!values.tracker_waiver_authorized&&!documentData.reuse_equipment?equipmentCounts.tag:0,PERFURADO:installation&&!values.tracker_waiver_authorized&&values.sticker_discount_opt_in?1:0}}
+              onSelect={technicianId=>setValues(v=>({...v,technician_id:String(technicianId)}))}
+            />
             {field("Turno", "shift", {
               options: [
                 ["", "Não definido"],

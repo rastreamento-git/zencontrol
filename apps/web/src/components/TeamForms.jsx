@@ -179,7 +179,7 @@ export function TechnicianForm({ technician, onSaved, onClose }) {
           : []),
         { name: "phone", label: "Telefone com DDI e DDD" },
         { name: "tags", label: "Habilidades" },
-        { name: "address", label: "Endereço / região base", full: true },
+        { name: "address", label: "Endereço completo de partida (rua, número, bairro, cidade e UF)", full: true },
         {
           name: "stock_technician_id",
           label: "Cadastro correspondente no Estoque Pro",

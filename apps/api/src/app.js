@@ -154,6 +154,10 @@ function createApp(pool, env = process.env) {
     auth,
     sgaClient,
   );
+  app.post("/api/technician-recommendations", async (req,res)=>{
+    if(!["admin","operador"].includes(req.user?.papel))fail(403,"Acesso restrito à operação.");
+    res.json(await require("./technician-recommendations").recommend(pool,cfg,req.body));
+  });
   const admin = auth.requireAdmin;
   const actor = (req) => req.user.nome || req.user.login;
   const page = (req) => ({
