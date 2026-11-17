@@ -51,14 +51,19 @@ function configureSgaIntake(app, pool, cfg, client) {
       fail(400, "Informe e confirme o período da coleta.");
     res.status(202).json(await intake.enqueue(pool, client, actor(req), { start: req.body.start, end: req.body.end, complementary: req.body.complementary ?? true }));
   });
-  app.get("/api/sga-intake/runs", staff, async (req, res) =>
-    res.json({
-      items: await d.rows(
-        pool,
-        "SELECT id,day,state,actor,attempts,created_at,finished_at,summary,message,CASE WHEN run_key LIKE 'daily:%' THEN 'automatic' ELSE 'manual' END AS origin,COALESCE(config->>'period_start',day) AS period_start,COALESCE(config->>'period_end',day) AS period_end FROM zc_sga_intake_runs ORDER BY created_at DESC,id DESC LIMIT 15",
-      ),
-    }),
-  );
+  app.get("/api/sga-intake/runs", staff, async (req,res)=>{
+    const fields="id,day,state,actor,attempts,created_at,finished_at,summary,message,CASE WHEN run_key LIKE 'daily:%' THEN 'automatic' ELSE 'manual' END AS origin,COALESCE(config->>'period_start',day) AS period_start,COALESCE(config->>'period_end',day) AS period_end";
+    if(req.query.page===undefined) return res.json({items:await d.rows(pool,"SELECT "+fields+" FROM zc_sga_intake_runs ORDER BY created_at DESC,id DESC LIMIT 15")});
+    const page=integer(req.query.page,"Página"),limit=Math.min(100,integer(req.query.limit||25,"Limite"));
+    if(page<1||limit<1)fail(400,"Paginação inválida.");
+    const origin=String(req.query.origin||""),state=String(req.query.state||"");
+    if(!["","automatic","manual"].includes(origin)||!["","queued","running","completed","failed"].includes(state))fail(400,"Filtro de coleta inválido.");
+    const condition=" WHERE ($1='' OR ($1='automatic' AND run_key LIKE 'daily:%') OR ($1='manual' AND run_key NOT LIKE 'daily:%')) AND ($2='' OR state=$2)";
+    const args=[origin,state];
+    const total=Number((await d.one(pool,"SELECT count(*)::int n FROM zc_sga_intake_runs"+condition,args)).n);
+    const items=await d.rows(pool,"SELECT "+fields+" FROM zc_sga_intake_runs"+condition+" ORDER BY created_at DESC,id DESC LIMIT $3 OFFSET $4",[...args,limit,(page-1)*limit]);
+    res.json({items,total,page,limit});
+  });
   app.get("/api/sga-intake/entries", staff, async (req, res) => {
     const limit = Math.min(100, integer(req.query.limit || 25, "Limite"));
     const page = integer(req.query.page || 1, "Página");

@@ -194,9 +194,20 @@ async function main() {
     path: path.join(directory, "sga-importacao-desktop.png"),
     fullPage: true,
   });
-  await region.getByRole("button", { name: "Abrir lote no Controle de OS", exact: true }).click();
+  await page.getByRole("button",{name:"Histórico de coletas",exact:true}).click();
+  const history=page.locator(".sga-history-panel");
+  await history.getByRole("table").waitFor();
+  await history.getByText("Concluído",{exact:true}).waitFor();
+  await history.getByText("Diagnóstico",{exact:true}).click();
+  await history.getByText(/Responsável:/).waitFor();
+  await history.getByRole("button",{name:"Abrir lote no Controle de OS",exact:true}).click();
   await page.getByRole("button", { name: "Pendências SGA · Sem OS", exact: true }).waitFor();
   await page.getByRole("region", { name: "Instalações pendentes do SGA" }).getByText("João de Teste", { exact: true }).waitFor();
+  assert.equal(await page.getByText("Histórico de coletas e diagnósticos",{exact:true}).count(),0);
+  assert.equal(await page.locator(".sga-queue-panel .zc-table").count(),1);
+  await page.getByRole("checkbox",{name:"Selecionar página",exact:true}).check();
+  assert.equal(await page.getByRole("button",{name:"Limpar selecionados",exact:true}).isEnabled(),true);
+  await page.getByRole("checkbox",{name:"Selecionar página",exact:true}).uncheck();
   await page.getByRole("region", { name: "Instalações pendentes do SGA" }).getByRole("button", { name: "Revisar e atribuir" }).click();
   const dialog = page.getByRole("dialog", {
     name: "Revisar cadastro e atribuir ao técnico",

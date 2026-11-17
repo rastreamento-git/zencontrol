@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Database, FileSpreadsheet } from "lucide-react";
+import { Database, FileSpreadsheet, History } from "lucide-react";
 import { Intro } from "./common";
 import SpreadsheetImport from "./SpreadsheetImport";
 import SgaIntake from "./SgaIntake";
+import SgaCollectionHistory from "./SgaCollectionHistory";
 export default function ImportPage(props) {
   const [tab, setTab] = useState("sga");
   return (
@@ -23,9 +24,14 @@ export default function ImportPage(props) {
         >
           <FileSpreadsheet size={16} aria-hidden="true"/> Planilha de controle
         </button>
+        <button type="button" className={tab === "history" ? "primary-button" : "secondary-button"} aria-pressed={tab === "history"} onClick={()=>setTab("history")}>
+          <History size={16} aria-hidden="true"/> Histórico de coletas
+        </button>
       </nav>
       {tab === "sga" ? (
         <SgaIntake {...props} settings={true} />
+      ) : tab === "history" ? (
+        <SgaCollectionHistory onOpenQueue={props.onOpenQueue} revision={props.revision}/>
       ) : (
         <SpreadsheetImport />
       )}
