@@ -832,12 +832,13 @@ export function Rates() {
                   : "Versão anterior"}
             </h2>
             <p>Desde {r.effective_on}</p>
-            {Object.entries(r.prices).map(([s, n]) => (
+            {Object.entries(r.prices).filter(([s])=>s!=="Visita").map(([s, n]) => (
               <div className="eco-row" key={s}>
-                <span>{s}</span>
+                <span>{serviceLabel(s)}</span>
                 <strong>{brl(n)}</strong>
               </div>
             ))}
+            <div className="eco-row"><span>Deslocamento extra por km</span><strong>{brl(r.travel_km_cents)}</strong></div>
           </article>
         ))}
       </div>
