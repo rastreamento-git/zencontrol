@@ -20,3 +20,14 @@ test("filtros da agenda são parametrizados e restringem a contagem a OS princip
  assert.throws(()=>filters({day:"2026-11-17",technician_id:"3 OR 1=1"}));
  assert.throws(()=>filters({agenda_from:"2026-11-20",agenda_to:"2026-11-17"}));
 });
+
+test("dispensa SGA de demonstração exige flag isolada, origem e identidade intacta",()=>{
+ const {actor,isDemoOrder}=require("../src/demo-rj");
+ const c=dataset().customers[0],row={created_by:actor,customer_name:c.name,vehicle:c.vehicle,sga_id:"",parent_order_id:null};
+ assert.equal(isDemoOrder({DEMO_RJ_ISOLATED:true},row),true);
+ assert.equal(isDemoOrder({DEMO_RJ_ISOLATED:"true"},row),false);
+ assert.equal(isDemoOrder({},row),false);
+ assert.equal(isDemoOrder({DEMO_RJ_ISOLATED:true},{...row,created_by:"admin"}),false);
+ assert.equal(isDemoOrder({DEMO_RJ_ISOLATED:true},row,{...row,sga_id:"100"}),false);
+ assert.equal(isDemoOrder({DEMO_RJ_ISOLATED:true},row,{...row,vehicle:"ABC1D23"}),false);
+});

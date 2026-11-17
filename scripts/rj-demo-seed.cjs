@@ -3,11 +3,29 @@ const d=require("../apps/api/src/domain"),o=require("../apps/api/src/orders"),f=
 const {transaction}=require("../apps/api/src/database");
 const {formatAddress}=require("../packages/domain/order-fields.mjs");
 const {createTechnicianAccount}=require("../apps/api/src/technician-access");
-const marker="local-demo-rj-v1",actor="Demonstração RJ - FICTÍCIO";
+const {actor,isDemoOrder}=require("../apps/api/src/demo-rj");
+const marker="local-demo-rj-v1",resetMarker="local-demo-rj-unassigned-v2",demoCfg={DEMO_RJ_ISOLATED:true};
+async function resetOriginalAssignments(pool){
+ if(await d.one(pool,"SELECT 1 FROM zc_migration_runs WHERE fingerprint=$1",[resetMarker]))return;
+ const {customers,technicians}=dataset();let released=0,skipped=0;
+ for(const c of customers){
+   const row=await d.one(pool,"SELECT * FROM zc_orders WHERE created_by=$1 AND customer_name=$2 AND vehicle=$3 AND parent_order_id IS NULL AND deleted_at='' ",[actor,c.name,c.vehicle]);
+   if(!row||!row.technician_id)continue;
+   const original=technicians.find(t=>t.key===c.technician_key);
+   // Only reset untouched original fixtures; preserve anything already edited or executed.
+   if(!isDemoOrder(demoCfg,row)||row.version!==1||row.status!=="AGENDADO"||row.technician_name!==original?.name||row.execution_finished_at||row.executed_on||row.completed_at){skipped++;continue;}
+   const protectedRecord=await d.one(pool,`SELECT 1 FROM zc_orders member WHERE (member.id=$1 OR member.parent_order_id=$1) AND
+     (member.version<>1 OR member.status<>'AGENDADO' OR EXISTS(SELECT 1 FROM zc_batches b WHERE b.order_id=member.id) OR EXISTS(SELECT 1 FROM zc_financial_ledger f WHERE f.order_id=member.id) OR EXISTS(SELECT 1 FROM zc_settlement_orders s WHERE s.order_id=member.id)) LIMIT 1`,[row.id]);
+   if(protectedRecord){skipped++;continue;}
+   await o.edit(pool,row.id,{version:row.version,technician_id:null,status:"PENDENTE"},actor,demoCfg);released++;
+ }
+ await pool.query("INSERT INTO zc_migration_runs(fingerprint,source,created_at,summary) VALUES($1,'local-fictional',$2,$3::jsonb)",[resetMarker,d.now(),JSON.stringify({released,skipped})]);
+ console.log("Demonstração RJ: "+released+" atribuições originais liberadas; "+skipped+" registros já alterados preservados.");
+}
 async function seed({pool,stockPool,move,credentials,online,enabled}){
  if(!enabled)return;
  if(process.env.DATABASE_URL||process.env.TEST_DATABASE_URL)throw Error("A massa RJ é exclusiva da homologação isolada.");
- if(await d.one(pool,"SELECT 1 FROM zc_migration_runs WHERE fingerprint=$1",[marker]))return;
+ if(await d.one(pool,"SELECT 1 FROM zc_migration_runs WHERE fingerprint=$1",[marker])){await resetOriginalAssignments(pool);return;}
  const data=dataset(),techs=new Map();
  // Enrich only the known original demonstration records, never real imports.
  for(const [i,name] of ["José da Silva Martins","Maria de Souza Lima"].entries()){
@@ -46,9 +64,10 @@ async function seed({pool,stockPool,move,credentials,online,enabled}){
  }
  for(const customer of data.customers){
    if(await d.one(pool,"SELECT id FROM zc_orders WHERE created_by=$1 AND customer_name=$2 AND parent_order_id IS NULL",[actor,customer.name]))continue;
-   const tech=techs.get(customer.technician_key),installation=customer.service==="Instalação";
-   await o.create(pool,{customer_name:customer.name,vehicle:customer.vehicle,service:customer.service,technician_id:tech.id,scheduled_at:cal.add(d.today(),customer.day_offset)+"T"+customer.hour,status:"AGENDADO",fipe_value:installation?(customer.tag?"95000":"45000"):"",notes:"SIMULAÇÃO RJ — NÃO REALIZAR ATENDIMENTO OU CONTATO. "+(customer.approximate?"Número de teste não verificado.":"Referência de endereço público.")+" Fonte: "+customer.source,document_data:{...customer.address,service_address_same:true,vehicle_type:"Automóvel",fipe_region:"RJ",equipment_counts:{tracker:installation?1:0,tag:customer.tag?1:0}}},actor,{});
+   const installation=customer.service==="Instalação";
+   await o.create(pool,{customer_name:customer.name,vehicle:customer.vehicle,service:customer.service,technician_id:null,scheduled_at:cal.add(d.today(),customer.day_offset)+"T"+customer.hour,status:"PENDENTE",fipe_value:installation?(customer.tag?"95000":"45000"):"",notes:"SIMULAÇÃO RJ — NÃO REALIZAR ATENDIMENTO OU CONTATO. "+(customer.approximate?"Número de teste não verificado.":"Referência de endereço público.")+" Fonte: "+customer.source,document_data:{...customer.address,service_address_same:true,vehicle_type:"Automóvel",fipe_region:"RJ",equipment_counts:{tracker:installation?1:0,tag:customer.tag?1:0}}},actor,{});
  }
  await pool.query("INSERT INTO zc_migration_runs(fingerprint,source,created_at,summary) VALUES($1,'local-fictional',$2,$3::jsonb)",[marker,d.now(),JSON.stringify({technicians:data.technicians.length,customers:data.customers.length})]);
+ await resetOriginalAssignments(pool);
 }
-module.exports={seed};
+module.exports={seed,resetOriginalAssignments};
