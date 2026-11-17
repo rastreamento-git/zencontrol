@@ -370,6 +370,7 @@ async function main() {
   await freshClosing
     .getByRole("button", { name: "Aprovar fechamento", exact: true })
     .click();
+  await central.getByRole("button",{name:"Confirmar",exact:true}).click();
   await freshClosing
     .getByRole("button", { name: "Registrar pagamento externo", exact: true })
     .click();

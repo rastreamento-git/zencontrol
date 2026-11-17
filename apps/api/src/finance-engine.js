@@ -410,7 +410,7 @@ async function payment(db, id, input, actor, receipt = {}) {
   );
   return row;
 }
-async function summary(db, tid) {
+async function summary(db, tid, {includeOutstanding=false}={}) {
   const cycle = await policyFor(db, tid);
   const ledger = await d.rows(
     db,
@@ -419,7 +419,7 @@ async function summary(db, tid) {
   );
   const settlements = await d.rows(
     db,
-    "SELECT s.*,COALESCE((SELECT sum(p.amount_cents)::int FROM zc_payments p WHERE p.settlement_id=s.id),0) paid_cents FROM zc_settlements s WHERE s.technician_id=$1 ORDER BY created_at DESC LIMIT 200",
+    "SELECT s.*,COALESCE((SELECT sum(p.amount_cents)::int FROM zc_payments p WHERE p.settlement_id=s.id),0) paid_cents FROM zc_settlements s WHERE s.technician_id=$1"+(includeOutstanding?" AND (s.state IN ('draft','legacy_unverified','approved','awaiting_payment','partial') OR s.id IN (SELECT id FROM zc_settlements WHERE technician_id=$1 ORDER BY created_at DESC,id DESC LIMIT 200)) ORDER BY created_at DESC,id DESC":" ORDER BY created_at DESC LIMIT 200"),
     [tid],
   );
   for (const s of settlements) {
