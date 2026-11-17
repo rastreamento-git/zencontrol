@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ArrowRight, CheckCircle2, AlertCircle, Download, Settings2, Trash2, RefreshCw, CalendarDays, Search, ChevronDown } from "lucide-react";
 import Modal from "@zen/ui/components/Modal";
-import { api, errorMessage, format, Empty, Loading, Pager } from "./common";
+import { api, errorMessage, format, Empty, Loading, Pager, Badge } from "./common";
 import { notify } from "@zen/ui/lib/feedback";
 import SgaProducts from "./SgaProducts";
 import { classifyFipe, fipeRegions, fipeCents, canonicalVehicleType, fipeCategories } from "@zen/domain/fipe.mjs";
@@ -31,6 +31,7 @@ export default function SgaIntake({
   openOrder,
   refresh,
   initialRunId = "",
+  globalQuery = "",
   onOpenQueue,
 }) {
   const [config, setConfig] = useState({enabled:false,daily_time:"18:00",pending_kind:"classifications",pending_code:""}),
@@ -38,10 +39,13 @@ export default function SgaIntake({
     [runs, setRuns] = useState([]);
   const [queue, setQueue] = useState({ items: [], total: 0 }),
     [page, setPage] = useState(1),
-    [query, setQuery] = useState(""),
+    [query, setQuery] = useState(globalQuery || ""),
     [origin, setOrigin] = useState(settings ? "manual" : ""),
     [runId, setRunId] = useState(initialRunId);
   const [marked, setMarked] = useState([]);
+  const [searchTerm,setSearchTerm]=useState(globalQuery||"");
+  useEffect(()=>{if(!settings){setQuery(globalQuery||"");setPage(1);}},[globalQuery,settings]);
+  useEffect(()=>{const timer=setTimeout(()=>setSearchTerm(query),250);return()=>clearTimeout(timer)},[query]);
   const [clearReason, setClearReason] = useState("reimport");
   const [clearDialog, setClearDialog] = useState(false);
   const [selected, setSelected] = useState(null),
@@ -64,7 +68,7 @@ export default function SgaIntake({
   const latest = runs[0];
   const loadData = async () => {
     const history = api.get("/sga-intake/runs");
-    const entries = settings ? Promise.resolve(null) : api.get("/sga-intake/entries", { params: { page, q: query, origin, run_id: runId } });
+    const entries = settings ? Promise.resolve(null) : api.get("/sga-intake/entries", { params: { page, q: searchTerm, origin, run_id: runId } });
     const [h,e]=await Promise.allSettled([history,entries]);
     return {history:h.status==="fulfilled"?h.value.data.items:null,entries:e.status==="fulfilled"?e.value?.data:null,historyError:h.status==="rejected"?errorMessage(h.reason):"",entryError:e.status==="rejected"?errorMessage(e.reason):""};
   };
@@ -99,7 +103,7 @@ export default function SgaIntake({
       active = false;
       clearTimeout(timer);
     };
-  }, [page, query, revision, origin, runId, settings]);
+  }, [page, searchTerm, revision, origin, runId, settings]);
   useEffect(() => { setMarked([]); }, [page, query, origin, runId]);
   // Config and remote catalogs have independent lifecycles. A slow SGA must not
   // hide local configuration or the manual import controls.
@@ -200,14 +204,11 @@ export default function SgaIntake({
     return <label key={key}>{label}{key === "customer_state" ? <select disabled={!!stored || busy} value={value} onChange={e => setAssignment(a => ({...a,document_data:{...a.document_data,[key]:e.target.value}}))}><option value="">Selecione a UF</option>{brazilStates.map(uf => <option key={uf}>{uf}</option>)}</select> : <input readOnly={!!stored} disabled={busy} value={value} placeholder="Não informado" onChange={e => setAssignment(a => document ? {...a,document_data:{...a.document_data,[key]:e.target.value}} : {...a,[key]:e.target.value})}/>}</label>;
   };
   return (
-    <section className={"sga-intake" + (settings ? " sga-import-view" : "")} aria-label="Instalações pendentes do SGA">
-      <div className="sga-intake-heading">
-        <div>
-          <h2>Instalações pendentes do SGA</h2>
-          <p className="sga-intake-subtitle">{settings ? "Importação automática ou por período." : loading ? "Carregando…" : `${queue.total} cadastro(s) aguardando atribuição · sem número de OS`}</p>
-        </div>
-        {settings && <button className="secondary-button" onClick={() => onOpenQueue?.()}><ArrowRight size={16}/> Abrir Controle de OS</button>}
-      </div>
+    <section className={settings ? "sga-intake sga-import-view" : "dashboard-panel zc-service-list sga-queue-panel"} aria-label="Instalações pendentes do SGA">
+      {settings && <div className="sga-intake-heading">
+        <div><h2>Instalações pendentes do SGA</h2><p className="sga-intake-subtitle">Importação automática ou por período.</p></div>
+        <button className="secondary-button" onClick={() => onOpenQueue?.()}><ArrowRight size={16}/> Abrir Controle de OS</button>
+      </div>}
 
       {settings && configState !== "ready" && (
         <div className="sga-connection-status" role={configState==="error"?"alert":"status"}>
@@ -362,145 +363,68 @@ export default function SgaIntake({
           {error}
         </p>
       )}
-      {!settings && !!runs.length && (
-        <details className="sga-config-details">
-          <summary>Histórico de coletas e diagnósticos</summary>
-          <ul>
-            {runs.map((run) => (
-              <li key={run.id}>
-                <strong>{format(run.created_at, true)}</strong> · {run.period_start} a {run.period_end} ·{" "}
-                {
-                  {
-                    queued: "Na fila",
-                    running: "Consultando SGA…",
-                    completed: "Concluída",
-                    failed: "Requer atenção",
-                  }[run.state]
-                }
-                {run.summary?.imported !== undefined &&
-                  ` · ${run.summary.imported} recebidos · ${run.summary.duplicates} já existentes · ${run.summary.failed} falhas em cadastros${run.summary.failed_days ? " · " + run.summary.failed_days + " datas com erro" : ""}`}
-                <p>{run.message}</p>
-                <small>{run.origin === "automatic" ? "Coleta automática" : "Coleta manual"}</small>
-                <button type="button" className="secondary-button" onClick={() => { setOrigin(run.origin || ""); setRunId(run.id); setPage(1); }}>Ver cadastros deste lote</button>
-                {onOpenQueue && <button type="button" className="secondary-button" onClick={() => onOpenQueue(run.id)}>Abrir lote no Controle de OS</button>}
-                {!!run.summary?.day_results?.length && (
-                  <ul className="sga-intake-errors">
-                    {run.summary.day_results.map(day => (
-                      <li key={day.day}><strong>{day.day}</strong>: {day.state === "failed" ? (run.summary.day_errors?.find(x => x.day === day.day)?.message || "Falha de consulta") : day.state === "empty" ? "Nenhuma movimentação" : day.movements + " movimentação(ões) recebida(s)"}</li>
-                    ))}
-                  </ul>
-                )}
-                {!!run.summary?.errors?.length && (
-                  <ul className="sga-intake-errors">
-                    {run.summary.errors.map((x) => (
-                      <li key={x.sga_id}><strong>SGA {x.sga_id}</strong>{x.stage ? " · " + x.stage : ""}: {x.message || "Motivo não registrado na versão anterior."}</li>
-                    ))}
-                  </ul>
-                )}
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
       {!settings && (
         <>
-          <div className="sga-queue-filters zc-form-grid">
-            <label>Origem da coleta
-              <select value={origin} onChange={e => { setOrigin(e.target.value); setRunId(""); setPage(1); }}>
-                <option value="">Todas as origens</option>
-                <option value="automatic">Automática diária</option>
-                <option value="manual">Manual por período</option>
-              </select>
-            </label>
-            <label>Lote de coleta
-              <select value={runId} onChange={e => { setRunId(e.target.value); setPage(1); }}>
-                <option value="">Todos os lotes</option>
-                {runId && !runs.some(r => r.id === runId) && <option value={runId}>Lote selecionado</option>}
-                {runs.filter(r => !origin || r.origin === origin || r.id === runId).map(r => <option key={r.id} value={r.id}>{r.period_start} a {r.period_end} · {r.origin === "automatic" ? "Auto" : "Manual"} · {format(r.created_at, true)}</option>)}
-              </select>
-            </label>
-            <button type="button" className="secondary-button" onClick={() => { setOrigin(""); setRunId(""); setQuery(""); setPage(1); }}>Limpar filtros</button>
-          </div>
-          {runId && <p className="zc-muted"><small>Este filtro mostra os novos cadastros preservados por este lote que ainda não têm OS. Duplicados permanecem no lote original; limpe os filtros para vê-los.</small></p>}
-          <label className="sga-search-label">
-            Buscar cadastro recebido
-            <input
-              type="search"
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value);
-                setPage(1);
-              }}
-              placeholder="Nome, placa, chassi ou código SGA"
-            />
-          </label>
-          {queue.items.length > 0 && (
-            <div className="sga-bulk-toolbar">
-              <label className="sga-intake-check"><input type="checkbox" checked={allMarked} disabled={busy} onChange={e=>setMarked(e.target.checked ? pageIds : [])}/> Selecionar página</label>
-              <button type="button" className="secondary-button" disabled={busy || !queue.items.some(incomplete)} onClick={()=>setMarked(queue.items.filter(incomplete).map(e=>e.id))}>Selecionar incompletos</button>
-              <small aria-live="polite">{selectedIds.length} selecionado(s)</small>
-              {selectedIds.length > 0 && <button type="button" className="secondary-button" disabled={busy} onClick={()=>setMarked([])}>Desmarcar</button>}
-              <button type="button" className="secondary-button sga-bulk-remove" disabled={busy || collecting || !selectedIds.length} onClick={()=>{setClearReason("reimport");setClearDialog(true);}}><Trash2 size={16}/> Limpar selecionados</button>
-              {collecting && <small>Limpeza disponível após a coleta.</small>}
+          <div className="zc-filters sga-compact-filters">
+            <div className="trace-search"><Search size={17} aria-hidden="true"/>
+              <input type="search" aria-label="Buscar cadastro recebido" placeholder="Buscar associado, placa ou código SGA…" value={query} onChange={e=>{setQuery(e.target.value);setPage(1);}}/>
             </div>
-          )}
-          {loading ? <Loading/> : !queue.items.length && !historyError ? (
+            <select aria-label="Origem da coleta" value={origin} onChange={e=>{setOrigin(e.target.value);setRunId("");setPage(1);}}>
+              <option value="">Todas as origens</option><option value="automatic">Automática diária</option><option value="manual">Manual por período</option>
+            </select>
+            <select aria-label="Lote de coleta" value={runId} onChange={e=>{setRunId(e.target.value);setPage(1);}}>
+              <option value="">Todos os lotes</option>
+              {runId&&!runs.some(r=>r.id===runId)&&<option value={runId}>Lote selecionado</option>}
+              {runs.filter(r=>!origin||r.origin===origin||r.id===runId).map(r=><option key={r.id} value={r.id}>{r.period_start} a {r.period_end} · {format(r.created_at,true)}</option>)}
+            </select>
+            {(origin||runId||query)&&<button type="button" className="secondary-button" onClick={()=>{setOrigin("");setRunId("");setQuery("");setPage(1);}}>Limpar filtros</button>}
+          </div>
+          <div className="sga-compact-toolbar">
+            <span aria-live="polite">{loading?"Carregando…":queue.total+" pendência(s)"}{selectedIds.length?" · "+selectedIds.length+" selecionado(s)":""}</span>
+            {queue.items.length>0&&<>
+              <button type="button" className="secondary-button" disabled={busy||loading||!!historyError||!queue.items.some(incomplete)} onClick={()=>setMarked(queue.items.filter(incomplete).map(e=>e.id))}>Selecionar incompletos</button>
+              {selectedIds.length>0&&<button type="button" className="secondary-button" disabled={busy} onClick={()=>setMarked([])}>Desmarcar</button>}
+              <button type="button" className="secondary-button sga-bulk-remove" disabled={busy||loading||!!historyError||collecting||!selectedIds.length} onClick={()=>{setClearReason("reimport");setClearDialog(true);}}><Trash2 size={15}/> Limpar selecionados</button>
+            </>}
+            {collecting&&<small>Limpeza disponível após a coleta.</small>}
+          </div>
+          {runId&&<p className="sga-lot-note"><small>Exibindo pendências deste lote. Cadastros duplicados permanecem no lote original.</small></p>}
+          {loading ? <Loading/> : !queue.items.length ? (
             <Empty title="Nenhuma instalação pendente recebida nesta lista." description="Novos cadastros da importação aparecerão aqui."/>
           ) : (
             <div className="zc-table-scroll">
               <table className="zc-table zc-responsive-table">
                 <thead>
                   <tr>
-                    <th className="sga-select-cell" scope="col">Seleção</th>
-                    <th>Associado / veículo</th>
-                    <th>Entrada na etapa SGA</th>
-                    <th>Origem / período</th>
-                    <th>FIPE</th>
-                    <th>Perfurado 2371</th>
-                    <th>Ação</th>
+                    <th className="sga-select-cell" scope="col"><input type="checkbox" aria-label="Selecionar página" checked={allMarked} disabled={busy||loading||!!historyError} onChange={e=>setMarked(e.target.checked?pageIds:[])}/></th>
+                    <th>ASSOCIADO</th>
+                    <th>VEÍCULO</th>
+                    <th>SERVIÇO / FIPE</th>
+                    <th>ENTRADA SGA</th>
+                    <th>SITUAÇÃO</th>
+                    <th aria-label="Ações"/>
                   </tr>
                 </thead>
                 <tbody>
-                  {queue.items.map((entry) => (
-                    <tr key={entry.id} className={marked.includes(entry.id) ? "sga-row-selected" : ""}>
-                      <td data-label="Seleção" className="sga-select-cell"><input type="checkbox" aria-label={"Selecionar cadastro SGA "+entry.data.sga_id} checked={marked.includes(entry.id)} disabled={busy} onChange={()=>toggleMarked(entry.id)}/></td>
-                      <td data-label="Associado / veículo">
-                        <strong>{entry.customer_name}</strong>
-                        <br />
-                        {entry.vehicle} ·{" "}
-                        {entry.data.document_data?.model ||
-                          "Modelo não informado"}
-                        <br />
-                        <small>SGA {entry.data.sga_id} · Sem OS</small>
-                        {incomplete(entry) && <small className="sga-incomplete">Dados a conferir</small>}
-                        <small>{[entry.data.contact,entry.data.document_data?.customer_city,entry.data.document_data?.customer_state].filter(Boolean).join(" · ") || "Contato ou endereço não informado"}</small>
+                  {queue.items.map(entry=>(
+                    <tr key={entry.id} className={marked.includes(entry.id)?"sga-row-selected":""}>
+                      <td className="sga-select-cell" data-label="Seleção"><input type="checkbox" aria-label={"Selecionar cadastro SGA "+entry.data.sga_id} checked={marked.includes(entry.id)} disabled={busy||loading||!!historyError} onChange={()=>toggleMarked(entry.id)}/></td>
+                      <td data-label="Associado">
+                        <button type="button" className="zc-link sga-associate-link" disabled={busy} onClick={()=>select(entry)}>{entry.customer_name||"Associado não informado"}</button>
+                        <small>SGA {entry.data.sga_id}{entry.data.contact?" · "+entry.data.contact:""}</small>
                       </td>
-                      <td data-label="Entrada SGA">{format(entry.movement_at, true)}</td>
-                      <td data-label="Origem / período">{entry.origin === "automatic" ? "Automática" : "Manual"}<br/><small>{entry.period_start} a {entry.period_end}</small></td>
-                      <td data-label="FIPE"><strong>{entry.data.fipe_value || "Não informado"}</strong><small>{entry.data.fipe_risk || "Não classificado"}</small></td>
-                      <td data-label="Perfurado 2371">
-                        {entry.data.sga_products?.perfurado === true
-                          ? "Ativo"
-                          : entry.data.sga_products?.perfurado === false
-                            ? "Não encontrado ativo"
-                            : "Não confirmado"}
-                      </td>
-                      <td data-label="Ação">
-                        <button
-                          className="secondary-button"
-                          disabled={busy}
-                          onClick={() => select(entry)}
-                        >
-                          Revisar e atribuir
-                        </button>
-                      </td>
+                      <td data-label="Veículo"><span className="zc-plate">{entry.vehicle||"Sem identificação"}</span><small>{entry.data.document_data?.model||"Modelo não informado"}{entry.data.document_data?.vehicle_type?" · "+entry.data.document_data.vehicle_type:""}</small></td>
+                      <td data-label="Serviço / FIPE"><strong>Instalação</strong><small>{[entry.data.fipe_value,entry.data.fipe_risk].filter(Boolean).join(" · ")||"FIPE a confirmar"}</small></td>
+                      <td data-label="Entrada SGA"><strong>{format(entry.movement_at,true)}</strong><small>{entry.origin==="automatic"?"Automática":"Manual"} · {format(entry.period_start)} a {format(entry.period_end)}</small></td>
+                      <td data-label="Situação"><Badge value="Sem OS"/><small>{incomplete(entry)?"Dados a conferir":"Dados básicos preenchidos"}</small><small>Perfurado: {entry.data.sga_products?.perfurado===true?"Ativo":entry.data.sga_products?.perfurado===false?"Não ativo":"Não confirmado"}</small></td>
+                      <td data-label="Ação"><div className="sga-order-actions"><button type="button" className="icon-button" title="Revisar e atribuir" aria-label="Revisar e atribuir" disabled={busy} onClick={()=>select(entry)}><ArrowRight size={16}/></button></div></td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           )}
-          {queue.total > 25 && <Pager data={{...queue,page,limit:queue.limit||25}} onPage={setPage}/>}
+          {!loading&&queue.total>0&&<Pager data={{...queue,page,limit:queue.limit||25}} onPage={setPage}/>}
         </>
       )}
       {!settings && clearDialog && (
@@ -521,7 +445,7 @@ export default function SgaIntake({
           busy={busy}
           onClose={() => setSelected(null)}
         >
-          <div className="sga-intake-detail">
+          <div className="sga-intake-detail sga-compact-detail">
             <div className="sga-prepared-header">
               <div><small>INSTALAÇÃO · SEM NÚMERO DE OS</small><h2>{selected.customer_name}</h2><p>{selected.vehicle} · {doc.model || "Modelo não informado"}</p></div>
               <div className="sga-prepared-status"><strong>Cadastro importado</strong><small>SGA {selected.data.sga_id} · {format(selected.received_at,true)}</small></div>

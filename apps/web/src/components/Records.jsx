@@ -74,12 +74,7 @@ export function Orders({
   return (
     <>
       <Intro
-        title={
-          pending ? "Instalações aguardando OS"
-            : agenda
-            ? "Sua agenda, organizada."
-            : "Cada atendimento no lugar certo."
-        }
+        title={agenda ? "Agenda de atendimentos" : "Ordens de serviço"}
         subtitle={
           pending ? "Cadastros SGA prontos para revisão e atribuição, ainda sem numeração."
             : agenda
@@ -92,8 +87,7 @@ export function Orders({
           Nova ordem de serviço
         </button>
       </Intro>
-      <Panel>
-        <nav className="zc-filters" aria-label="Visualização dos serviços">
+      <nav className="zc-service-tabs" aria-label="Visualização dos serviços">
           <button
             type="button"
             className={agenda || pending ? "secondary-button" : "primary-button"}
@@ -113,12 +107,11 @@ export function Orders({
           <button type="button" className={pending ? "primary-button" : "secondary-button"} aria-pressed={pending} onClick={() => onChangeView("sga-pending")}>
             Pendências SGA · Sem OS
           </button>
-        </nav>
-      </Panel>
+      </nav>
       {pending ? (
-        <SgaIntake revision={revision} openOrder={openOrder} refresh={refresh} initialRunId={initialRunId} />
+        <SgaIntake revision={revision} openOrder={openOrder} refresh={refresh} initialRunId={initialRunId} globalQuery={globalQuery} />
       ) : (
-      <Panel>
+      <Panel className="zc-service-list">
         {agenda ? (
           <div className="zc-filters">
             <label>
