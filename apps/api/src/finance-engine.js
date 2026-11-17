@@ -158,7 +158,9 @@ async function policyFor(db, tid, on = d.today()) {
   );
   const current = cal.period(policy, on, holidays),
     next = cal.period(policy, current.next_start, holidays);
-  return { policy, version: found?.version || 0, current, next };
+  const previousDay = cal.add(current.start,-1);
+  const previous = previousDay >= policy.anchor ? cal.period(policy,previousDay,holidays) : null;
+  return { policy, version: found?.version || 0, current, next, previous };
 }
 async function preview(db, tid, start, end) {
   cal.date(start);
@@ -408,7 +410,7 @@ async function payment(db, id, input, actor, receipt = {}) {
   );
   return row;
 }
-async function summary(db, tid) {
+async function summary(db, tid, {includeOutstanding=false}={}) {
   const cycle = await policyFor(db, tid);
   const ledger = await d.rows(
     db,
@@ -417,7 +419,7 @@ async function summary(db, tid) {
   );
   const settlements = await d.rows(
     db,
-    "SELECT s.*,COALESCE((SELECT sum(p.amount_cents)::int FROM zc_payments p WHERE p.settlement_id=s.id),0) paid_cents FROM zc_settlements s WHERE s.technician_id=$1 ORDER BY created_at DESC LIMIT 200",
+    "SELECT s.*,COALESCE((SELECT sum(p.amount_cents)::int FROM zc_payments p WHERE p.settlement_id=s.id),0) paid_cents FROM zc_settlements s WHERE s.technician_id=$1"+(includeOutstanding?" AND (s.state IN ('draft','legacy_unverified','approved','awaiting_payment','partial') OR s.id IN (SELECT id FROM zc_settlements WHERE technician_id=$1 ORDER BY created_at DESC,id DESC LIMIT 200)) ORDER BY created_at DESC,id DESC":" ORDER BY created_at DESC LIMIT 200"),
     [tid],
   );
   for (const s of settlements) {
@@ -434,6 +436,9 @@ async function summary(db, tid) {
     "SELECT a.* FROM zc_adjustments a JOIN zc_financial_ledger l ON l.order_id=a.order_id JOIN zc_orders o ON o.id=l.order_id WHERE o.tracker_waiver_authorized=false AND l.technician_id=$1 ORDER BY a.created_at DESC LIMIT 200",
     [tid],
   );
+  return {cycle,ledger,settlements,adjustments,...await accountTotals(db,tid)};
+}
+async function accountTotals(db,tid){
   // Totals cover the entire account, independently of display limits above.
   const base = await d.one(
     db,
@@ -451,10 +456,6 @@ async function summary(db, tid) {
     [tid],
   );
   return {
-    cycle,
-    ledger,
-    settlements,
-    adjustments,
     estimated_cents: Number(base.estimated) + Number(extra.estimated),
     confirmed_cents: Number(base.confirmed) + Number(extra.confirmed),
     balance_cents: Number(balances.balance),
@@ -462,6 +463,19 @@ async function summary(db, tid) {
     unverified_cents: Number(balances.unverified),
   };
 }
+async function overview(db){
+  const technicians=await d.rows(db,"SELECT id,name,active FROM zc_technicians ORDER BY active DESC,name,id");
+  const items=[];
+  for(const t of technicians){
+    const totals=await accountTotals(db,t.id),cycle=await policyFor(db,t.id);
+    const settlement=await d.one(db,
+      "SELECT COALESCE(sum(paid),0) paid,COALESCE(sum(balance) FILTER(WHERE state IN ('approved','awaiting_payment','partial') AND due_on<>'' AND due_on<$2),0) overdue,MIN(due_on) FILTER(WHERE state IN ('approved','awaiting_payment','partial') AND balance>0 AND due_on<>'') next_due FROM (SELECT s.state,s.due_on,COALESCE((SELECT sum(p.amount_cents) FROM zc_payments p WHERE p.settlement_id=s.id),0) paid,s.total_cents-COALESCE((SELECT sum(p.amount_cents) FROM zc_payments p WHERE p.settlement_id=s.id),0) balance FROM zc_settlements s WHERE s.technician_id=$1) q",[t.id,d.today()]);
+    items.push({...t,...totals,cycle,paid_cents:Number(settlement.paid),overdue_cents:Number(settlement.overdue),next_due:settlement.next_due||""});
+  }
+  const keys=["estimated_cents","confirmed_cents","pending_closing_cents","balance_cents","unverified_cents","paid_cents","overdue_cents"];
+  return {items,totals:Object.fromEntries(keys.map(key=>[key,items.reduce((sum,t)=>sum+t[key],0)])),as_of:d.today()};
+}
+
 module.exports = {
   prices,
   initialRate,
@@ -475,4 +489,5 @@ module.exports = {
   approveClosing,
   payment,
   summary,
+  overview,
 };

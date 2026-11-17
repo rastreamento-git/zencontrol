@@ -8,7 +8,8 @@ import {
 import AppLinks from "@zen/ui/components/AppLinks";
 import ProfileButton from "@zen/ui/components/ProfileButton";
 import Chat from "@zen/ui/components/Chat";
-import { NoticeBell, FinancePanel } from "./components/Ecosystem";
+import { NoticeBell } from "./components/Ecosystem";
+import TechnicianFinance from "./components/TechnicianFinance";
 import OperationalServices from "./components/OperationalServices";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -428,7 +429,7 @@ export default function App() {
             ) : tab === "blocking" ? (
               <OperationalServices {...props} />
             ) : tab === "finance" ? (
-              <FinancePanel />
+              <TechnicianFinance />
             ) : tab === "history" ? (
               <HistoryPage {...props} />
             ) : tab === "imports" && user.papel === "admin" ? (

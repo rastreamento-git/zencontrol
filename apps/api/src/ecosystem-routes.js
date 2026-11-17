@@ -474,8 +474,9 @@ function configureEcosystem(app, pool, cfg, auth) {
       return { ok: true, state };
     });
   }
+  app.get("/api/finance-v2/overview", admin, async (req,res)=>res.json(await f.overview(pool)));
   app.get("/api/finance-v2/technicians/:id", admin, async (req, res) =>
-    res.json(await f.summary(pool, integer(req.params.id, "Técnico"))),
+    res.json(await f.summary(pool, integer(req.params.id, "Técnico"),{includeOutstanding:true})),
   );
   app.get("/api/finance-v2/technicians/:id/rates", admin, async (req, res) =>
     res.json({

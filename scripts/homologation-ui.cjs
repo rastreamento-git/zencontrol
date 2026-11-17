@@ -334,6 +334,7 @@ async function main() {
   await central
     .getByRole("heading", { name: "Fechamentos e pagamentos", exact: true })
     .waitFor();
+  await central.getByRole("button",{name:"Fechamentos",exact:true}).click();
   await central.getByLabel("Técnico", { exact: true }).selectOption("1");
   await central
     .getByRole("heading", { name: "Fechamentos anteriores", exact: true })
@@ -365,15 +366,11 @@ async function main() {
       exact: true,
     })
     .click();
-  const freshClosing = central.locator("article").filter({
-    has: central.getByRole("heading", {
-      name: begin + " a " + day,
-      exact: true,
-    }),
-  });
+  const freshClosing = central.getByRole("row").filter({has:central.getByRole("button",{name:begin.split("-").reverse().join("/")+" a "+day.split("-").reverse().join("/"),exact:true})});
   await freshClosing
     .getByRole("button", { name: "Aprovar fechamento", exact: true })
     .click();
+  await central.getByRole("button",{name:"Confirmar",exact:true}).click();
   await freshClosing
     .getByRole("button", { name: "Registrar pagamento externo", exact: true })
     .click();
@@ -385,6 +382,7 @@ async function main() {
     .click();
   await freshClosing.getByText("Quitado", { exact: true }).waitFor();
   // Respond to the rate request from the central interface.
+  await central.getByRole("button",{name:"Solicitações",exact:true}).click();
   const request = central.locator("article").filter({
     has: central.getByRole("heading", {
       name: "Reajuste de tarifas",
@@ -403,6 +401,7 @@ async function main() {
     .click();
   await request.getByText("Aprovado", { exact: true }).waitFor();
   // Complete the existing demonstration payment without banking traffic.
+  await central.getByRole("button",{name:"Pagamentos",exact:true}).click();
   await central
     .getByRole("button", { name: "Registrar pagamento externo", exact: true })
     .click();
