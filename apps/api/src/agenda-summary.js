@@ -20,11 +20,22 @@ function filters(q){
  return {from,to,args,conditions:conditions.join(" AND "),base:"deleted_at='' AND parent_order_id IS NULL"};
 }
 async function summarize(db,filter){
- const rows=await d.rows(db,`SELECT substring(scheduled_at,1,10) day,technician_id,COALESCE(NULLIF(technician_name,''),'Sem técnico') technician_name,
- ${serviceType} service_type,status,count(*)::int appointments,
- COALESCE(sum((SELECT count(*) FROM zc_orders child WHERE child.parent_order_id=eligible.id AND child.deleted_at='')),0)::int additional_orders
- FROM zc_orders eligible WHERE ${filter.base} AND ${filter.conditions}
- GROUP BY 1,2,3,4,5 ORDER BY 1,3,4,5`,filter.args);
+ const rows=await d.rows(db,`WITH matched AS (
+   SELECT eligible.id AS id, substring(scheduled_at,1,10) AS scheduled_day,
+     technician_id, COALESCE(NULLIF(technician_name,''),'Sem técnico') AS technician_name,
+     (${serviceType}) AS service_type, status
+   FROM zc_orders AS eligible WHERE ${filter.base} AND ${filter.conditions}
+ ), extras AS (
+   SELECT child.parent_order_id, count(*) AS additional_count
+   FROM zc_orders AS child JOIN matched AS m ON child.parent_order_id=m.id
+   WHERE child.deleted_at='' GROUP BY child.parent_order_id
+ )
+ SELECT m.scheduled_day AS "day", m.technician_id, m.technician_name,
+   m.service_type, m.status, count(*)::integer AS appointments,
+   COALESCE(sum(e.additional_count),0)::integer AS additional_orders
+ FROM matched AS m LEFT JOIN extras AS e ON e.parent_order_id=m.id
+ GROUP BY m.scheduled_day,m.technician_id,m.technician_name,m.service_type,m.status
+ ORDER BY m.scheduled_day,m.technician_name,m.service_type,m.status`,filter.args);
  const byService=new Map(),byTechnician=new Map(),totals={appointments:0,additional_orders:0,cancelled:0,completed:0,open:0};
  for(const row of rows){const n=row.appointments;totals.appointments+=n;totals.additional_orders+=row.additional_orders;
  if(row.status==="CANCELADO")totals.cancelled+=n;else if(row.status==="CONCLUÍDO")totals.completed+=n;else totals.open+=n;
