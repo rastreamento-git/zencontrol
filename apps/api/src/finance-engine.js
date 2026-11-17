@@ -3,6 +3,7 @@ const d = require("./domain"),
   { fail } = require("./errors"),
   cal = require("./financial-calendar");
 const { notify } = require("./notifications");
+const travelPolicy=require("./travel-policy");
 const pricesFrom = (t) => ({
   Instalação: t.price_install,
   Reinstalação: t.price_install,
@@ -33,9 +34,17 @@ function kmRate(value){
 }
 function travelCharge(order,rate){
  if(order.parent_order_id)return null;
+ const total=order.travel_total_meters||0;
  const meters=order.travel_extra_meters||0;
+ if(total){
+   if(meters||order.travel_fee_cents)fail(409,"Escolha somente uma forma de pagamento do deslocamento.");
+   const estimate=travelPolicy.estimate(total,rate);
+   if(estimate.state==="manual")fail(409,"Configure o acordo de cobertura do técnico ou informe apenas os km extras autorizados.");
+   return {type:"travel",description:"Deslocamento autorizado: "+(total/1000)+" km totais · "+(estimate.billable_meters/1000)+" km cobrados",amount_cents:estimate.amount_cents,distance_meters:total,billable_meters:estimate.billable_meters,rate_cents_per_km:rate?.travel_km_cents||0,travel_policy:travelPolicy.validatePolicy(rate?.travel_policy)};
+ }
  if(meters&&order.travel_fee_cents)fail(409,"Escolha somente uma forma de pagamento do deslocamento.");
  if(meters){
+   if(rate?.travel_policy?.mode==="none")fail(409,"O acordo vigente não cobra por km. Confira o lançamento; valores fixos excepcionais dependem de autorização.");
    const cents=kmRate(rate?.travel_km_cents??0);
    if(!cents)fail(409,"Não há valor por km vigente para a data do serviço. Confira o acordo do técnico.");
    const amount=Math.round(meters*cents/1000);
@@ -45,8 +54,8 @@ function travelCharge(order,rate){
  return order.travel_fee_cents?{type:"travel",description:"Taxa de deslocamento (operacional)",amount_cents:order.travel_fee_cents}:null;
 }
 async function travelForDate(db,order,day){
- if(!order.travel_extra_meters||order.parent_order_id)return travelCharge(order,null);
- const rate=await d.one(db,"SELECT travel_km_cents FROM zc_rates WHERE technician_id=$1 AND effective_on<=$2 ORDER BY effective_on DESC LIMIT 1",[order.technician_id,day]);
+ if((!order.travel_extra_meters&&!order.travel_total_meters)||order.parent_order_id)return travelCharge(order,null);
+ const rate=await d.one(db,"SELECT travel_km_cents,travel_policy FROM zc_rates WHERE technician_id=$1 AND effective_on<=$2 ORDER BY effective_on DESC LIMIT 1",[order.technician_id,day]);
  return travelCharge(order,rate);
 }
 async function initialRate(db, t, actor = "system") {
@@ -72,18 +81,21 @@ async function addRate(db, tid, proposal, actor) {
   if (!(await d.one(db, "SELECT 1 FROM zc_technicians WHERE id=$1", [tid])))
     fail(404, "Técnico não encontrado.");
   // A service-price change must not silently reset an existing mileage agreement.
-  const preceding=await d.one(db,"SELECT travel_km_cents FROM zc_rates WHERE technician_id=$1 AND effective_on<=$2 ORDER BY effective_on DESC LIMIT 1",[tid,effective]);
+  const preceding=await d.one(db,"SELECT travel_km_cents,travel_policy FROM zc_rates WHERE technician_id=$1 AND effective_on<=$2 ORDER BY effective_on DESC LIMIT 1",[tid,effective]);
   const travel=kmRate(proposal.travel_km_cents===undefined?(preceding?.travel_km_cents||0):proposal.travel_km_cents);
+  const policy=travelPolicy.validatePolicy(proposal.travel_policy??preceding?.travel_policy);
+  if(["excess","full"].includes(policy.mode)&&!travel)fail(400,"Informe o valor por km para este acordo.");
   const id = randomUUID();
   await db.query(
-    "INSERT INTO zc_rates(id,technician_id,effective_on,prices,created_by,travel_km_cents) VALUES($1,$2,$3,$4::jsonb,$5,$6)",
-    [id, tid, effective, JSON.stringify(servicePrices), actor,travel],
+    "INSERT INTO zc_rates(id,technician_id,effective_on,prices,created_by,travel_km_cents,travel_policy) VALUES($1,$2,$3,$4::jsonb,$5,$6,$7::jsonb)",
+    [id, tid, effective, JSON.stringify(servicePrices), actor,travel,JSON.stringify(policy)],
   );
   await d.audit(db, actor, "rate_authorized", "rate", id, {
     technician_id: tid,
     effective_on: effective,
     prices: servicePrices,
     travel_km_cents:travel,
+    travel_policy:policy,
   });
   await notify(
     db,

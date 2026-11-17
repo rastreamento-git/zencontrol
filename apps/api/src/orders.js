@@ -135,6 +135,14 @@ async function validate(db, input, old = null, cfg = {}) {
     out.travel_extra_meters=meters;
   }
   if((out.travel_extra_meters??old?.travel_extra_meters??0)>0&&(out.travel_fee_cents??old?.travel_fee_cents??0)>0)fail(400,"Informe o deslocamento por km ou por valor fixo, nunca ambos.");
+  if(input.travel_total_meters!==undefined){
+    const meters=input.travel_total_meters;
+    if(!Number.isSafeInteger(meters)||meters<0||meters>10000000)fail(400,"Informe uma distância total válida, até 10.000 km.");
+    if(old?.parent_order_id&&meters)fail(400,"Use a OS principal para lançar deslocamento.");
+    if(old&&meters!==(old.travel_total_meters||0)&&await d.one(db,"SELECT 1 FROM zc_financial_ledger WHERE order_id=$1",[old.id]))fail(409,"O deslocamento já foi calculado. Solicite um ajuste auditado.");
+    out.travel_total_meters=meters;
+  }
+  if((out.travel_total_meters??old?.travel_total_meters??0)>0&&((out.travel_extra_meters??old?.travel_extra_meters??0)>0||(out.travel_fee_cents??old?.travel_fee_cents??0)>0))fail(400,"Informe distância total, km extras ou valor fixo, sem acumular.");
   for (const [key, max] of Object.entries(textFields))
     if (input[key] !== undefined) out[key] = d.string(input[key], key, max);
   if ((!old || old.workflow_mode === "controlled") && out.imei !== undefined) {

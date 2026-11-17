@@ -179,7 +179,7 @@ function configureEcosystem(app, pool, cfg, auth) {
     res.json({
       items: await d.rows(
         pool,
-        "SELECT id,effective_on,prices,travel_km_cents,created_at FROM zc_rates WHERE technician_id=$1 ORDER BY effective_on DESC",
+        "SELECT id,effective_on,prices,travel_km_cents,travel_policy,created_at FROM zc_rates WHERE technician_id=$1 ORDER BY effective_on DESC",
         [t.id],
       ),
       today: d.today(),

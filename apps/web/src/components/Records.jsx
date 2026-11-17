@@ -298,6 +298,7 @@ export function OrderEditor({
       tracker_waiver_authorized: false,
       travel_fee_cents: 0,
       travel_extra_meters:0,
+      travel_total_meters:0,
       document_data: {
         scheduled_service: "Instalação",
         service_address_same: true,
@@ -449,6 +450,7 @@ export function OrderEditor({
       "tracker_waiver_authorized",
       "travel_fee_cents",
       "travel_extra_meters",
+      "travel_total_meters",
       "sticker_discount_opt_in",
     ].some(
       (k) => JSON.stringify(values[k] ?? "") !== JSON.stringify(order[k] ?? ""),
@@ -486,6 +488,7 @@ export function OrderEditor({
         "tracker_waiver_authorized",
         "travel_fee_cents",
       "travel_extra_meters",
+      "travel_total_meters",
         "sga_classification",
         "sga_status",
         "sga_verification",
@@ -1109,14 +1112,18 @@ export function OrderEditor({
               </div>
             )}
             <fieldset className="zc-fieldset zc-full">
-              <legend>Deslocamento extra</legend>
+              <legend>Deslocamento autorizado</legend>
               <div className="zc-form-grid">
+              <label>Distância total autorizada (km)
+                <input aria-label="Distância total autorizada (km)" type="number" min="0" max="10000" step="0.001" value={(values.travel_total_meters||0)/1000} disabled={!!values.travel_fee_cents||!!values.travel_extra_meters||!!order?.parent_order_id||!!order?.execution_finished_at||!!order?.submissions?.some(b=>["submitted","approved_sync","completed"].includes(b.state))} onChange={e=>setValues(v=>({...v,travel_total_meters:Math.round(Number(e.target.value)*1000)}))}/>
+                <small>Aplica a cobertura incluída no acordo do técnico, sem cobrança automática da rota sugerida.</small>
+              </label>
               <label>Distância extra autorizada (km)
-                <input aria-label="Distância extra autorizada (km)" type="number" min="0" max="10000" step="0.001" value={(values.travel_extra_meters||0)/1000} disabled={!!values.travel_fee_cents||!!order?.parent_order_id||!!order?.execution_finished_at||!!order?.submissions?.some(b=>["submitted","approved_sync","completed"].includes(b.state))} onChange={e=>setValues(v=>({...v,travel_extra_meters:Math.round(Number(e.target.value)*1000)}))}/>
+                <input aria-label="Distância extra autorizada (km)" type="number" min="0" max="10000" step="0.001" value={(values.travel_extra_meters||0)/1000} disabled={!!values.travel_total_meters||!!values.travel_fee_cents||!!order?.parent_order_id||!!order?.execution_finished_at||!!order?.submissions?.some(b=>["submitted","approved_sync","completed"].includes(b.state))} onChange={e=>setValues(v=>({...v,travel_extra_meters:Math.round(Number(e.target.value)*1000)}))}/>
                 <small>Multiplicada pelo valor por km do técnico vigente na data da execução.</small>
               </label>
               <label>Taxa de deslocamento (R$)
-                <input aria-label="Taxa de deslocamento (R$)" type="number" min="0" max="1000000" step="0.01" value={(values.travel_fee_cents||0)/100} disabled={!!values.travel_extra_meters||!!order?.parent_order_id||!!order?.execution_finished_at||!!order?.submissions?.some(b=>["submitted","approved_sync","completed"].includes(b.state))} onChange={e=>setValues(v=>({...v,travel_fee_cents:Math.round(Number(e.target.value)*100)}))}/>
+                <input aria-label="Taxa de deslocamento (R$)" type="number" min="0" max="1000000" step="0.01" value={(values.travel_fee_cents||0)/100} disabled={!!values.travel_total_meters||!!values.travel_extra_meters||!!order?.parent_order_id||!!order?.execution_finished_at||!!order?.submissions?.some(b=>["submitted","approved_sync","completed"].includes(b.state))} onChange={e=>setValues(v=>({...v,travel_fee_cents:Math.round(Number(e.target.value)*100)}))}/>
                 <small>Valor fixo alternativo, quando acordado. Não acumula com cobrança por km.</small>
               </label>
               </div>
@@ -1485,6 +1492,7 @@ const auditFieldLabel = (key) =>
     notes: "Observações da central",
     travel_fee_cents: "Deslocamento (centavos)",
     travel_extra_meters:"Distância extra (metros)",
+    travel_total_meters:"Distância total autorizada (metros)",
     document_data: "Dados do veículo e documento",
     scheduled_at: "Agendamento",
     tracker_waiver_authorized: "Dispensa de rastreador",
