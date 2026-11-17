@@ -206,9 +206,20 @@ function createApp(pool, env = process.env) {
       ),
     });
   });
+  app.get("/api/agenda/summary", async(req,res)=>{
+    if(!["admin","operador"].includes(req.user?.papel))fail(403,"Acesso restrito à operação.");
+    const agenda=require("./agenda-summary");
+    res.json(await agenda.summarize(pool,agenda.filters(req.query)));
+  });
   app.get("/api/orders", async (req, res) => {
-    const p = page(req),
-      conditions = [],
+    const p = page(req);
+    if(req.query.day||req.query.agenda_from||req.query.agenda_to){
+      const agenda=require("./agenda-summary"),filter=agenda.filters(req.query);
+      const result=await groupedPage(pool,{...filter,...p,sort:"scheduled_at,id"});
+      res.json({...result,items:await presentOrders(pool,result.items),summary:await agenda.summarize(pool,filter)});
+      return;
+    }
+    const conditions = [],
       args = [];
     const where = (s, v) => {
       args.push(v);

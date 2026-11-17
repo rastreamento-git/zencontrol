@@ -1248,3 +1248,29 @@ test("classificação FIPE manual explícita é persistida e pode voltar ao cál
  const invalid=await request("/api/orders/"+row.id,"PATCH",{version:reverted.data.version,document_data:{fipe_override:"Inexistente"}});
  assert.equal(invalid.status,400);
 });
+
+test("agenda consolida atendimentos por serviço e técnico em todas as páginas",async()=>{
+ const day="2030-01-10";
+ const first=await create({vehicle:"AGD1A23",scheduled_at:day+"T08:00",service:"Instalação",document_data:{equipment_counts:{tracker:1,tag:1}}});
+ await create({vehicle:"AGD2A23",scheduled_at:day+"T10:00",service:"Manutenção"});
+ // Exercise the standalone BI endpoint first, then the paginated agenda.
+ const summary=await request("/api/agenda/summary?agenda_from="+day+"&agenda_to="+day+"&technician_id="+tech.id);
+ assert.equal(summary.status,200,JSON.stringify(summary.data));
+ assert.equal(summary.data.totals.appointments,2);
+ assert.equal(summary.data.totals.additional_orders,1);
+ assert.ok(summary.data.rows.every(row=>row.day===day&&row.technician_id===tech.id));
+ const r=await request("/api/orders?day="+day+"&technician_id="+tech.id+"&limit=1");
+ assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(r.data.total,2);assert.equal(r.data.items.length,1);
+ assert.equal(r.data.summary.totals.appointments,2);assert.equal(r.data.summary.totals.additional_orders,1);
+ assert.equal(r.data.summary.by_technician[0].appointments,2);
+ const filtered=await request("/api/agenda/summary?day="+day+"&technician_id="+tech.id+"&service_type=Instalação");
+ assert.equal(filtered.status,200);assert.equal(filtered.data.totals.appointments,1);
+ assert.equal(filtered.data.rows[0].service_type,"Instalação");
+ const page2=await request("/api/orders?day="+day+"&technician_id="+tech.id+"&limit=1&page=2");
+ assert.equal(page2.status,200,JSON.stringify(page2.data));
+ assert.equal(page2.data.items.length,1);
+ assert.notEqual(page2.data.items[0].id,r.data.items[0].id);
+ assert.deepEqual(page2.data.summary,r.data.summary);
+ const empty=await request("/api/agenda/summary?day="+day+"&technician_id="+tech.id+"&service_type=Retirada");
+ assert.equal(empty.status,200,JSON.stringify(empty.data));assert.equal(empty.data.totals.appointments,0);assert.equal(empty.data.rows.length,0);
+});
