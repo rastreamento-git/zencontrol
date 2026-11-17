@@ -352,7 +352,7 @@ async function main() {
     .inputValue();
   await central.getByLabel("Fim", { exact: true }).fill(day);
   await central
-    .getByLabel("Fechamento extraordinário autorizado", { exact: true })
+    .getByLabel("Fechamento fora do prazo combinado", { exact: true })
     .check();
   await central
     .getByLabel("Justificativa do fechamento", { exact: true })

@@ -359,7 +359,7 @@ export function Requests({
           <p>{r.reason}</p>
           {r.kind === "rate" ? (
             <>
-              <p>Vigência solicitada: {r.proposed.effective_on}</p>
+              <p>Novos valores solicitados a partir de: {r.proposed.effective_on}</p>
               <div className="eco-grid">
                 {Object.entries(r.proposed.prices).map(([s, n]) => (
                   <p key={s}>
@@ -1093,14 +1093,14 @@ export function FinancePanel({ technical = false }) {
           <div className="eco-info">
             <CalendarDays size={20} />
             <p>
-              Ciclo atual:{" "}
+              Período atual:{" "}
               <strong>
                 {data.cycle.current.start} a {data.cycle.current.end}
               </strong>{" "}
               · Vencimento {data.cycle.current.due_on}
             </p>
             <p>
-              Próximo ciclo: {data.cycle.next.start} a {data.cycle.next.end}
+              Próximo período: {data.cycle.next.start} a {data.cycle.next.end}
             </p>
           </div>
           {!technical && policy && (
@@ -1357,7 +1357,7 @@ export function FinancePanel({ technical = false }) {
                   {preview.orders.map((o) => (
                     <p key={o.id}>
                       {o.id} · {o.executed_on} · {brl(o.total_cents)}{" "}
-                      {o.late ? "· Competência anterior" : ""}
+                      {o.late ? "· Serviço de período anterior" : ""}
                     </p>
                   ))}
                   {preview.carry_adjustments?.map((a) => (
