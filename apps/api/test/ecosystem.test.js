@@ -539,6 +539,13 @@ test("I/J: partial and full external payments, retry identity, overpayment prote
   assert.equal(s.state, "paid");
   assert.equal(s.balance_cents, 0);
   assert.equal(s.payments.length, 2);
+  const overview=await ok("/finance-v2/overview","GET",null,admin);
+  const row=overview.items.find(x=>x.id===tid);
+  assert.ok(row);
+  const full=await f.summary(pool,tid);
+  for(const key of ["estimated_cents","confirmed_cents","pending_closing_cents","balance_cents","unverified_cents"])assert.equal(row[key],full[key]);
+  assert.ok(row.paid_cents>=s.paid_cents);
+  assert.equal((await req("/finance-v2/overview","GET",null,other)).status,403);
   assert.equal(
     (
       await req(
