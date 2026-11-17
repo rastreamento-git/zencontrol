@@ -590,6 +590,7 @@ test("período inclusivo, limite e datas futuras", () => {
 test("FIPE alta requer dois equipamentos; elétrico exige consulta", () => {
  const vehicle = { ...data("999"), fipe_value: "R$ 95.000,00" };
  assert.deepEqual(intake.equipmentForIntake(vehicle,{electric:"no"}).equipment_counts,{tracker:1,tag:1});
+ assert.deepEqual(intake.equipmentForIntake({...vehicle,document_data:{...vehicle.document_data,fipe_override:"Baixa RJ"}},{electric:"no"}).equipment_counts,{tracker:1,tag:1});
  assert.throws(() => intake.equipmentForIntake(vehicle,{electric:"yes"}), /Consulte o cliente/);
  assert.deepEqual(intake.equipmentForIntake(vehicle,{electric:"yes",customer_choice:"tag_only"}).equipment_counts,{tracker:0,tag:1});
 });

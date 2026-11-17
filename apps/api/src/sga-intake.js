@@ -19,11 +19,11 @@ function equipmentForIntake(data, input) {
   const fipe = classifyFipe({ value: data.fipe_value, vehicleType: document.vehicle_type, region });
   if (region) document.fipe_region = region;
   const category=document.fipe_override || fipe.label;
-  if (!category || fipe.status==="invalid_value") fail(409, "FIPE ou categoria não confirmada no SGA. Complete o cadastro antes de gerar a OS.");
+  if (!category || !fipeCents(data.fipe_value)) fail(409, "FIPE ou categoria não confirmada no SGA. Complete o cadastro antes de gerar a OS.");
   if (!["yes","no"].includes(input.electric)) fail(400, "Confirme se o veículo é elétrico.");
   document.vehicle_electric = input.electric === "yes";
   if (document.vehicle_electric && !["tracker","tag_only"].includes(input.customer_choice)) fail(400, "Consulte o cliente e registre a autorização para instalar o rastreador ou somente TAG.");
-  document.equipment_counts = { tracker: document.vehicle_electric && input.customer_choice === "tag_only" ? 0 : 1, tag: category === "Alta" || (document.vehicle_electric && input.customer_choice === "tag_only") ? 1 : 0 };
+  document.equipment_counts = { tracker: document.vehicle_electric && input.customer_choice === "tag_only" ? 0 : 1, tag: category === "Alta" || fipe.label === "Alta" || (document.vehicle_electric && input.customer_choice === "tag_only") ? 1 : 0 };
   return document;
 }
 // Rebuild the working form locally from the immutable imported payload.

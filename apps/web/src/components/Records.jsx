@@ -331,7 +331,9 @@ export function OrderEditor({
           setTechs(t.data.items);
           if (o.data) {
             setOrder(o.data);
-            setValues(o.data);
+            const doc={...o.data.document_data};
+            if (!doc.fipe_region && brazilStates.includes(doc.customer_state)) doc.fipe_region=["SP","RJ"].includes(doc.customer_state)?doc.customer_state:"GERAL";
+            setValues({...o.data,document_data:doc});
             if (syncOnOpen) syncSaved(o.data);
           }
         }
@@ -388,6 +390,7 @@ export function OrderEditor({
       document_data: {
         ...v.document_data,
         [key]: value,
+        ...(key==="customer_state" && !v.document_data?.fipe_region && brazilStates.includes(value) ? {fipe_region:["SP","RJ"].includes(value)?value:"GERAL"} : {}),
         ...(["customer_", "service_"].some((prefix) =>
           addressFields.some(([field]) => key === prefix + field),
         ) && v.document_data?.service_address_same === undefined

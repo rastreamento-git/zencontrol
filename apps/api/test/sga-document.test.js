@@ -283,3 +283,12 @@ test("histórico SGA distingue 406 sem registros de 406 com erro desconhecido", 
   empty = false;
   await assert.rejects(client.pendingMovements("2026-11-15", "classifications", "42"), error => error.upstreamStatus === 406 && !error.noRecords);
 });
+
+test("mapeamento SGA classifica FIPE e normaliza UF e tipo automaticamente",()=>{
+ const data=require("../src/order-document").mapSgaVehicle({codigo_veiculo:"42",placa:"ABC1D23",nome:"Cadastro fictício",estado:"RIO DE JANEIRO",descricao_tipo_veiculo:"AUTOMÓVEL",valor_fipe:"40000.00",descricao_classificacao:"Instalação pendente",descricao_situacao:"Ativo"});
+ assert.equal(data.document_data.vehicle_type,"Automóvel");
+ assert.equal(data.document_data.fipe_region,"RJ");
+ assert.equal(data.fipe_risk,"Média RJ");
+ assert.equal(data.sga_classification,"Instalação pendente");
+ assert.equal(data.sga_status,"Ativo");
+});

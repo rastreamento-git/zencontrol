@@ -119,6 +119,8 @@ function normalizeDocumentData(value, previous = {}) {
         fail(400, "Selecione uma UF válida.");
     }
   }
+  if (!result.fipe_region && brazilStates.includes(result.customer_state))
+    result.fipe_region = ["SP","RJ"].includes(result.customer_state) ? result.customer_state : "GERAL";
   if (addressFields.some(([key]) => Object.hasOwn(result, "customer_" + key)))
     result.customer_address = formatAddress(result);
   if (value.equipment_counts !== undefined) {
