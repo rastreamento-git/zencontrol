@@ -4,6 +4,7 @@ import Modal from "@zen/ui/components/Modal";
 import { api, errorMessage, format, Empty, Loading, Pager, Badge } from "./common";
 import { notify } from "@zen/ui/lib/feedback";
 import SgaProducts from "./SgaProducts";
+import TechnicianRecommendations from "./TechnicianRecommendations";
 import { classifyFipe, fipeRegions, fipeCents, canonicalVehicleType, fipeCategories } from "@zen/domain/fipe.mjs";
 import { brazilStates, addressFields } from "@zen/domain/order-fields.mjs";
 import "./sga-intake.css";
@@ -534,6 +535,12 @@ export default function SgaIntake({
             <div className="zc-form-grid sga-electric-grid"><label>Veículo elétrico<select required value={assignment.electric} onChange={e => setAssignment({ ...assignment, electric: e.target.value, customer_choice: "" })} disabled={busy}><option value="">Confirme o tipo</option><option value="no">Não</option><option value="yes">Sim</option></select></label>
             {assignment.electric === "yes" && <label>Autorização após contato com o cliente<select required value={assignment.customer_choice} disabled={busy} onChange={e => setAssignment({ ...assignment, customer_choice: e.target.value })}><option value="">Aguardando consulta</option><option value="tracker">Cliente autorizou rastreador</option><option value="tag_only">Cliente autorizou somente TAG</option></select></label>}
             </div>
+            <TechnicianRecommendations
+              disabled={busy}
+              address={Object.fromEntries(["street","number","neighborhood","city","state"].map(k=>[k,doc["customer_"+k]||assignment.document_data?.["customer_"+k]||""]))}
+              required={effectiveFipe&&fipeCents(savedFipe||assignment.fipe_value)&&["yes","no"].includes(assignment.electric)&&(assignment.electric==="no"||assignment.customer_choice)?{RASTREADOR:assignment.electric==="yes"&&assignment.customer_choice==="tag_only"?0:1,TAG:effectiveFipe==="Alta"||fipe.label==="Alta"||(assignment.electric==="yes"&&assignment.customer_choice==="tag_only")?1:0,PERFURADO:assignment.sticker_discount_opt_in?1:0}:null}
+              onSelect={technicianId=>setAssignment(v=>({...v,technician_id:String(technicianId)}))}
+            />
             <label className="sga-intake-check">
               <input
                 type="checkbox"
