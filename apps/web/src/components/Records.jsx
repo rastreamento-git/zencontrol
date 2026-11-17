@@ -296,6 +296,7 @@ export function OrderEditor({
       additional: "",
       tracker_waiver_authorized: false,
       travel_fee_cents: 0,
+      travel_extra_meters:0,
       document_data: {
         scheduled_service: "Instalação",
         service_address_same: true,
@@ -446,6 +447,7 @@ export function OrderEditor({
       "document_data",
       "tracker_waiver_authorized",
       "travel_fee_cents",
+      "travel_extra_meters",
       "sticker_discount_opt_in",
     ].some(
       (k) => JSON.stringify(values[k] ?? "") !== JSON.stringify(order[k] ?? ""),
@@ -482,6 +484,7 @@ export function OrderEditor({
         "document_data",
         "tracker_waiver_authorized",
         "travel_fee_cents",
+      "travel_extra_meters",
         "sga_classification",
         "sga_status",
         "sga_verification",
@@ -1096,36 +1099,20 @@ export function OrderEditor({
                 </small>
               </div>
             )}
-            <label className="zc-full">
-              Taxa de deslocamento (R$)
-              <input
-                aria-label="Taxa de deslocamento (R$)"
-                type="number"
-                min="0"
-                max="1000000"
-                step="0.01"
-                value={(values.travel_fee_cents || 0) / 100}
-                disabled={
-                  !!order?.parent_order_id ||
-                  !!order?.execution_finished_at ||
-                  !!order?.submissions?.some((b) =>
-                    ["submitted", "approved_sync", "completed"].includes(
-                      b.state,
-                    ),
-                  )
-                }
-                onChange={(e) =>
-                  setValues((v) => ({
-                    ...v,
-                    travel_fee_cents: Math.round(Number(e.target.value) * 100),
-                  }))
-                }
-              />
-              <small>
-                Definida pela central, uma única vez por atendimento. O valor é
-                preservado ao registrar a execução.
-              </small>
-            </label>
+            <fieldset className="zc-fieldset zc-full">
+              <legend>Deslocamento extra</legend>
+              <div className="zc-form-grid">
+              <label>Distância extra autorizada (km)
+                <input aria-label="Distância extra autorizada (km)" type="number" min="0" max="10000" step="0.001" value={(values.travel_extra_meters||0)/1000} disabled={!!values.travel_fee_cents||!!order?.parent_order_id||!!order?.execution_finished_at||!!order?.submissions?.some(b=>["submitted","approved_sync","completed"].includes(b.state))} onChange={e=>setValues(v=>({...v,travel_extra_meters:Math.round(Number(e.target.value)*1000)}))}/>
+                <small>Multiplicada pelo valor por km do técnico vigente na data da execução.</small>
+              </label>
+              <label>Taxa de deslocamento (R$)
+                <input aria-label="Taxa de deslocamento (R$)" type="number" min="0" max="1000000" step="0.01" value={(values.travel_fee_cents||0)/100} disabled={!!values.travel_extra_meters||!!order?.parent_order_id||!!order?.execution_finished_at||!!order?.submissions?.some(b=>["submitted","approved_sync","completed"].includes(b.state))} onChange={e=>setValues(v=>({...v,travel_fee_cents:Math.round(Number(e.target.value)*100)}))}/>
+                <small>Valor fixo alternativo, quando acordado. Não acumula com cobrança por km.</small>
+              </label>
+              </div>
+              <small>Somente o deslocamento extra autorizado, uma única vez por atendimento. Reembolsos de pedágio, hospedagem e materiais são solicitados separadamente com comprovante.</small>
+            </fieldset>
             {field("Observações da central", "notes", {
               type: "textarea",
               full: true,
@@ -1488,6 +1475,7 @@ const auditFieldLabel = (key) =>
     fipe_risk: "Tipo FIPE",
     notes: "Observações da central",
     travel_fee_cents: "Deslocamento (centavos)",
+    travel_extra_meters:"Distância extra (metros)",
     document_data: "Dados do veículo e documento",
     scheduled_at: "Agendamento",
     tracker_waiver_authorized: "Dispensa de rastreador",

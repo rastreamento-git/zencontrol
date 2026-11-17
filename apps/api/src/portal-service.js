@@ -108,6 +108,7 @@ const publicOrder = (order) =>
       "location",
       "scheduled_at",
       "travel_fee_cents",
+      "travel_extra_meters",
       "notes",
       "status",
       "version",

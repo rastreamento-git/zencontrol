@@ -28,8 +28,9 @@ const services = [
   "Retirada",
   "Reinstalação",
   "Improdutiva",
-  "Visita",
 ];
+const expenseCategories={toll:"Pedágio",lodging:"Hospedagem",materials:"Materiais extras",parking:"Estacionamento",other:"Outros gastos"};
+const serviceLabel=s=>s==="Improdutiva"?"Visita improdutiva":s==="Visita"?"Visita (registro antigo)":s;
 const states = {
   legacy_unverified: "Histórico a conferir",
   no_payment_due: "Sem valor a pagar",
@@ -207,7 +208,7 @@ function PriceFields({ value, onChange }) {
       {services.map((s) => (
         <Field
           key={s}
-          label={s + " (R$)"}
+          label={serviceLabel(s) + " (R$)"}
           type="number"
           min="0"
           step="0.01"
@@ -361,9 +362,9 @@ export function Requests({
             <>
               <p>Novos valores solicitados a partir de: {r.proposed.effective_on}</p>
               <div className="eco-grid">
-                {Object.entries(r.proposed.prices).map(([s, n]) => (
+                {Object.entries(r.proposed.prices).filter(([s])=>s!=="Visita").map(([s, n]) => (
                   <p key={s}>
-                    {s}: <strong>{brl(n)}</strong>
+                    {serviceLabel(s)}: <strong>{brl(n)}</strong>
                   </p>
                 ))}
               </div>
@@ -372,9 +373,9 @@ export function Requests({
                   <strong>
                     Contraproposta · {r.counterproposal.effective_on}
                   </strong>
-                  {Object.entries(r.counterproposal.prices).map(([s, n]) => (
+                  {Object.entries(r.counterproposal.prices).filter(([s])=>s!=="Visita").map(([s, n]) => (
                     <p key={s}>
-                      {s}: {brl(n)}
+                      {serviceLabel(s)}: {brl(n)}
                     </p>
                   ))}
                 </div>
@@ -389,7 +390,7 @@ export function Requests({
           ) : (
             <p>
               {r.kind === "expense"
-                ? "Reembolso solicitado"
+                ? "Reembolso solicitado · "+(expenseCategories[r.proposed.category]||"Outros gastos")
                 : "Ajuste solicitado"}
               : {brl(r.proposed.amount_cents)}
             </p>
@@ -513,6 +514,7 @@ export function NewRequest({
     ),
     [orderId, setOrderId] = useState(initialOrderId),
     [amount, setAmount] = useState(""),
+    [expenseCategory,setExpenseCategory]=useState("other"),
     [stock, setStock] = useState({
       action: "replenishment",
       quantity: 1,
@@ -601,13 +603,14 @@ export function NewRequest({
             ? { prices, effective_on: effective }
             : kind === "stock"
               ? stock
-              : { amount_cents: Math.round(Number(amount) * 100) },
+              : { amount_cents: Math.round(Number(amount) * 100),...(kind==="expense"?{category:expenseCategory}:{}) },
       });
       key.current = crypto.randomUUID();
       setOpen(false);
       setReceipt("");
       setReason("");
       setAmount("");
+      setExpenseCategory("other");
       onSaved?.();
     } catch (e) {
       setError(errorMessage(e));
@@ -734,6 +737,7 @@ export function NewRequest({
       )}
       {kind === "expense" && (
         <>
+          <Field label="Tipo de gasto"><select value={expenseCategory} onChange={e=>setExpenseCategory(e.target.value)}>{Object.entries(expenseCategories).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></Field>
           <datalist id={orderList}>
             {orders.map((o) => (
               <option key={o.id} value={o.id}>
@@ -828,12 +832,13 @@ export function Rates() {
                   : "Versão anterior"}
             </h2>
             <p>Desde {r.effective_on}</p>
-            {Object.entries(r.prices).map(([s, n]) => (
+            {Object.entries(r.prices).filter(([s])=>s!=="Visita").map(([s, n]) => (
               <div className="eco-row" key={s}>
-                <span>{s}</span>
+                <span>{serviceLabel(s)}</span>
                 <strong>{brl(n)}</strong>
               </div>
             ))}
+            <div className="eco-row"><span>Deslocamento extra por km</span><strong>{brl(r.travel_km_cents)}</strong></div>
           </article>
         ))}
       </div>

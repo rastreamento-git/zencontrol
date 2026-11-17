@@ -734,7 +734,7 @@ test("operational travel fee is frozen and expenses require photo, description, 
     kind: "expense",
     order_id: item.id,
     reason: "Estacionamento durante atendimento",
-    proposed: { amount_cents: 2350 },
+    proposed: { amount_cents: 2350,category:"parking" },
     receipt: image,
     request_key: randomUUID(),
   };
@@ -861,7 +861,7 @@ test("operational travel fee is frozen and expenses require photo, description, 
   assert.equal(own.total_cents, ledger.base_cents + 4500 + 2350);
   assert.match(
     own.adjustments[0].reason,
-    /Reembolso de despesa: Estacionamento/,
+    /Reembolso de despesa \(Estacionamento\): Estacionamento/,
   );
   const closed = await transaction(pool, (tx) =>
     f.createClosing(
