@@ -16,7 +16,7 @@ const rates = [
   ["price_install", "Instalação (R$)"],
   ["price_maintenance", "Manutenção (R$)"],
   ["price_removal", "Retirada (R$)"],
-  ["price_visit", "Visita / improdutiva (R$)"],
+  ["price_visit", "Visita improdutiva (R$)"],
 ];
 
 export function AccountForm({

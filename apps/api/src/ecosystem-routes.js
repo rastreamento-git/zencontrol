@@ -179,7 +179,7 @@ function configureEcosystem(app, pool, cfg, auth) {
     res.json({
       items: await d.rows(
         pool,
-        "SELECT id,effective_on,prices,created_at FROM zc_rates WHERE technician_id=$1 ORDER BY effective_on DESC",
+        "SELECT id,effective_on,prices,travel_km_cents,created_at FROM zc_rates WHERE technician_id=$1 ORDER BY effective_on DESC",
         [t.id],
       ),
       today: d.today(),
@@ -241,8 +241,11 @@ function configureEcosystem(app, pool, cfg, auth) {
       if (reason.length < 5)
         fail(400, "Descreva o gasto realizado (mínimo de 5 caracteres).");
       oid = order.id;
+      const category=proposed.category||"other";
+      if(!["toll","lodging","materials","parking","other"].includes(category))fail(400,"Categoria de despesa inválida.");
       proposed = {
         amount_cents: amount,
+        category,
         receipt: await require("./expense-receipt").expenseReceipt(
           cfg,
           b.receipt,
@@ -421,7 +424,7 @@ function configureEcosystem(app, pool, cfg, auth) {
                 r.order_id,
                 proposal.amount_cents,
                 r.kind === "expense"
-                  ? "Reembolso de despesa: " +
+                  ? "Reembolso de despesa" + (r.proposed.category ? " ("+({toll:"Pedágio",lodging:"Hospedagem",materials:"Materiais extras",parking:"Estacionamento",other:"Outros"}[r.proposed.category]||"Outros")+")" : "")+": " +
                     r.reason +
                     ". Conferência: " +
                     reason

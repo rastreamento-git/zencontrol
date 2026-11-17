@@ -16,16 +16,38 @@ function prices(value) {
     !value ||
     typeof value !== "object" ||
     Array.isArray(value) ||
-    Object.keys(value).sort().join() !== [...d.services].sort().join() ||
+    ![d.services,[...d.services].filter(s=>s!=="Visita")].some(keys=>Object.keys(value).sort().join() === [...keys].sort().join()) ||
     Object.values(value).some(
       (x) => !Number.isSafeInteger(x) || x < 0 || x > 100000000,
     )
   )
     fail(
       400,
-      "Informe as seis tarifas em centavos inteiros, sem valores negativos.",
+      "Informe os cinco valores de serviço em centavos inteiros, sem valores negativos.",
     );
-  return value;
+  return {...value,Visita:value.Improdutiva};
+}
+function kmRate(value){
+ if(!Number.isSafeInteger(value)||value<0||value>100000)fail(400,"Valor por km inválido. Informe centavos entre 0 e 100000.");
+ return value;
+}
+function travelCharge(order,rate){
+ if(order.parent_order_id)return null;
+ const meters=order.travel_extra_meters||0;
+ if(meters&&order.travel_fee_cents)fail(409,"Escolha somente uma forma de pagamento do deslocamento.");
+ if(meters){
+   const cents=kmRate(rate?.travel_km_cents??0);
+   if(!cents)fail(409,"Não há valor por km vigente para a data do serviço. Confira o acordo do técnico.");
+   const amount=Math.round(meters*cents/1000);
+   if(amount>100000000)fail(400,"Valor de deslocamento acima do limite.");
+   return {type:"travel",description:(meters/1000).toLocaleString("pt-BR",{maximumFractionDigits:3})+" km extras × "+(cents/100).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})+"/km",amount_cents:amount,distance_meters:meters,rate_cents_per_km:cents};
+ }
+ return order.travel_fee_cents?{type:"travel",description:"Taxa de deslocamento (operacional)",amount_cents:order.travel_fee_cents}:null;
+}
+async function travelForDate(db,order,day){
+ if(!order.travel_extra_meters||order.parent_order_id)return travelCharge(order,null);
+ const rate=await d.one(db,"SELECT travel_km_cents FROM zc_rates WHERE technician_id=$1 AND effective_on<=$2 ORDER BY effective_on DESC LIMIT 1",[order.technician_id,day]);
+ return travelCharge(order,rate);
 }
 async function initialRate(db, t, actor = "system") {
   const previous = await d.one(
@@ -43,21 +65,25 @@ async function initialRate(db, t, actor = "system") {
 }
 async function addRate(db, tid, proposal, actor) {
   const effective = cal.date(proposal.effective_on);
-  prices(proposal.prices);
+  const servicePrices=prices(proposal.prices);
   // Rates may be future-dated. Backdating behind the authorization day is forbidden.
   if (effective < d.today())
     fail(400, "A vigência não pode anteceder a autorização.");
   if (!(await d.one(db, "SELECT 1 FROM zc_technicians WHERE id=$1", [tid])))
     fail(404, "Técnico não encontrado.");
+  // A service-price change must not silently reset an existing mileage agreement.
+  const preceding=await d.one(db,"SELECT travel_km_cents FROM zc_rates WHERE technician_id=$1 AND effective_on<=$2 ORDER BY effective_on DESC LIMIT 1",[tid,effective]);
+  const travel=kmRate(proposal.travel_km_cents===undefined?(preceding?.travel_km_cents||0):proposal.travel_km_cents);
   const id = randomUUID();
   await db.query(
-    "INSERT INTO zc_rates(id,technician_id,effective_on,prices,created_by) VALUES($1,$2,$3,$4::jsonb,$5)",
-    [id, tid, effective, JSON.stringify(proposal.prices), actor],
+    "INSERT INTO zc_rates(id,technician_id,effective_on,prices,created_by,travel_km_cents) VALUES($1,$2,$3,$4::jsonb,$5,$6)",
+    [id, tid, effective, JSON.stringify(servicePrices), actor,travel],
   );
   await d.audit(db, actor, "rate_authorized", "rate", id, {
     technician_id: tid,
     effective_on: effective,
-    prices: proposal.prices,
+    prices: servicePrices,
+    travel_km_cents:travel,
   });
   await notify(
     db,
@@ -109,12 +135,8 @@ async function capture(db, order, executedOn) {
     "SELECT type,description,amount_cents FROM zc_order_extras WHERE order_id=$1 ORDER BY id",
     [order.id],
   );
-  if (!order.parent_order_id && order.travel_fee_cents)
-    extras.push({
-      type: "travel",
-      description: "Taxa de deslocamento (operacional)",
-      amount_cents: order.travel_fee_cents,
-    });
+  const travel=travelCharge(order,r);
+  if(travel)extras.push(travel);
   const total = base + extras.reduce((s, x) => s + x.amount_cents, 0);
   if (!Number.isSafeInteger(total) || total > 1e9)
     fail(400, "Composição acima do limite por serviço.");
@@ -478,6 +500,8 @@ async function overview(db){
 
 module.exports = {
   prices,
+  travelCharge,
+  travelForDate,
   initialRate,
   addRate,
   capture,

@@ -127,6 +127,14 @@ async function validate(db, input, old = null, cfg = {}) {
       );
     out.travel_fee_cents = amount;
   }
+  if(input.travel_extra_meters!==undefined){
+    const meters=input.travel_extra_meters;
+    if(!Number.isSafeInteger(meters)||meters<0||meters>10000000)fail(400,"Informe uma distância extra válida, até 10.000 km.");
+    if(old?.parent_order_id&&meters)fail(400,"O deslocamento é lançado apenas na OS principal.");
+    if(old&&meters!==(old.travel_extra_meters||0)&&await d.one(db,"SELECT 1 FROM zc_financial_ledger WHERE order_id=$1",[old.id]))fail(409,"O deslocamento já foi calculado. Solicite um ajuste auditado.");
+    out.travel_extra_meters=meters;
+  }
+  if((out.travel_extra_meters??old?.travel_extra_meters??0)>0&&(out.travel_fee_cents??old?.travel_fee_cents??0)>0)fail(400,"Informe o deslocamento por km ou por valor fixo, nunca ambos.");
   for (const [key, max] of Object.entries(textFields))
     if (input[key] !== undefined) out[key] = d.string(input[key], key, max);
   if ((!old || old.workflow_mode === "controlled") && out.imei !== undefined) {
@@ -772,17 +780,15 @@ async function financial(db, tid, start, end) {
       "SELECT * FROM zc_order_extras WHERE order_id=$1",
       [o.id],
     );
-    if (!o.parent_order_id && o.travel_fee_cents)
-      extras.push({
-        type: "travel",
-        description: "Taxa de deslocamento (operacional)",
-        amount_cents: o.travel_fee_cents,
-      });
     const ledger = await d.one(
       db,
       "SELECT * FROM zc_financial_ledger WHERE order_id=$1",
       [o.id],
     );
+    if(!ledger){
+      const travel=await require("./finance-engine").travelForDate(db,o,String(o.completed_at).slice(0,10));
+      if(travel)extras.push(travel);
+    }
     orders.push({
       id: o.id,
       vehicle: o.vehicle,

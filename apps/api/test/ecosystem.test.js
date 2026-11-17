@@ -734,7 +734,7 @@ test("operational travel fee is frozen and expenses require photo, description, 
     kind: "expense",
     order_id: item.id,
     reason: "Estacionamento durante atendimento",
-    proposed: { amount_cents: 2350 },
+    proposed: { amount_cents: 2350,category:"parking" },
     receipt: image,
     request_key: randomUUID(),
   };
