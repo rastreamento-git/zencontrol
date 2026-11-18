@@ -8,7 +8,11 @@ const same=(a,b)=>Boolean(canonical(a)&&canonical(a)===canonical(b));
 function demoDestination(cfg,order,destination){
  if(!isDemoOrder(cfg,order))return false;
  const customer=data.customers.find(c=>c.name===order.customer_name&&c.vehicle===order.vehicle);
- return Boolean(customer&&same(formatAddress(customer.address),destination));
+ if(!customer)return false;
+ if(same(formatAddress(customer.address),destination))return true;
+ // The original demo persisted this public logradouro without "da". Only
+ // accept that specific historical spelling, for customer 047.
+ return customer.number===47&&same(formatAddress({...customer.address,customer_street:"Praça Roberto Silveira"}),destination);
 }
 function demoOrigin(cfg,technician){
  if(cfg?.DEMO_RJ_ISOLATED!==true)return false;

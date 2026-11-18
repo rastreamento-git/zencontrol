@@ -1,5 +1,6 @@
 // All coordinates and provider results live only for the current calculation.
 // No disk cache, personal identifiers, raw provider responses or tokens in logs.
+let googleQuotaUntil=0;
 const labels={ors:"OpenRouteService",mapbox:"Mapbox",google:"Google Maps"};
 function configuredProviders(cfg,allowExternal=false){
  const available={ors:allowExternal&&cfg.ORS_API_KEY,mapbox:allowExternal&&cfg.MAPBOX_ACCESS_TOKEN,google:cfg.GOOGLE_ROUTES_API_KEY};
@@ -29,10 +30,19 @@ function exactOrs(feature,p){
  const v=feature?.properties||{};
  return v.layer==="address"&&v.match_type!=="fallback"&&v.accuracy==="point"&&Number(v.confidence)>=0.8&&norm(v.housenumber)===norm(p.number)&&norm(v.street)===norm(p.street)&&[v.locality,v.localadmin,v.county].some(s=>norm(s)===norm(p.city))&&[v.region_a,v.region].some(s=>stateMatches(s,p.state))&&coordinates(feature);
 }
-function exactMapbox(feature,p){
- const v=feature?.properties||{},m=v.match_code||{},c=v.context||{};
- return v.feature_type==="address"&&["exact","high"].includes(m.confidence)&&m.address_number==="matched"&&m.street==="matched"&&["rooftop","parcel","point"].includes(v.coordinates?.accuracy)&&[c.place?.name,c.locality?.name,c.district?.name].some(s=>norm(s)===norm(p.city))&&[c.region?.region_code,c.region?.region_code_full,c.region?.name].some(s=>stateMatches(s,p.state))&&coordinates(feature);
+function mapboxMatch(feature,p){
+ const v=feature?.properties||{},m=v.match_code||{},c=v.context||{},accuracy=v.coordinates?.accuracy;
+ const interpolated=accuracy==="interpolated"&&["matched","plausible"].includes(m.address_number);
+ const exact=["rooftop","parcel","point"].includes(accuracy)&&m.address_number==="matched";
+ if(v.feature_type!=="address"||!["exact","high","medium"].includes(m.confidence)||m.street!=="matched"||(!exact&&!interpolated))return null;
+ if(![c.place?.name,c.locality?.name,c.district?.name].some(s=>norm(s)===norm(p.city))||![c.region?.region_code,c.region?.region_code_full,c.region?.name].some(s=>stateMatches(s,p.state)))return null;
+ if(c.address?.address_number&&norm(c.address.address_number)!==norm(p.number))return null;
+ if(c.country?.country_code&&c.country.country_code.toUpperCase()!=="BR")return null;
+ const point=coordinates(feature);
+ if(!point)return null;
+ return {point,accuracy:interpolated?"interpolated":"exact"};
 }
+function exactMapbox(feature,p){const hit=mapboxMatch(feature,p);return hit?.accuracy==="exact"?hit.point:null;}
 async function geocode(cfg,provider,value,request){
  const p=addressParts(value);
  if(!p)return {failure:{state:"address_review",provider,reason:"address_format"}};
@@ -43,14 +53,30 @@ async function geocode(cfg,provider,value,request){
   r=await json(request,url.toString(),{headers:{Authorization:cfg.ORS_API_KEY}},provider);
  }else{
   const url=new URL("https://api.mapbox.com/search/geocode/v6/forward");
-  url.search=new URLSearchParams({address_number:p.number,street:p.street,place:p.city,region:p.state,country:"BR",types:"address",autocomplete:"false",permanent:"false",limit:"5",language:"pt",access_token:cfg.MAPBOX_ACCESS_TOKEN}).toString();
+  url.search=new URLSearchParams({address_number:p.number,street:p.street,place:p.city,region:p.state==="RJ"?"Rio de Janeiro":p.state,country:"BR",types:"address",autocomplete:"false",permanent:"false",limit:"5",language:"pt",access_token:cfg.MAPBOX_ACCESS_TOKEN}).toString();
   r=await json(request,url.toString(),{},provider);
  }
  if(r.failure)return r;
- const found=(Array.isArray(r.data?.features)?r.data.features:[]).map(f=>provider==="ors"?exactOrs(f,p):exactMapbox(f,p)).filter(Boolean);
- // Ambiguous exact matches with differing coordinates require a review.
- if(!found.length||found.some(c=>c[0]!==found[0][0]||c[1]!==found[0][1]))return {failure:{state:"address_review",provider,reason:"geocode_unconfirmed"}};
- return {point:found[0]};
+ const select=data=>{
+  const matches=(Array.isArray(data?.features)?data.features:[]).map(f=>{
+   if(provider==="mapbox")return mapboxMatch(f,p);
+   const point=exactOrs(f,p);return point?{point,accuracy:"exact"}:null;
+  }).filter(Boolean);
+  const exact=matches.filter(m=>m.accuracy==="exact"),found=exact.length?exact:matches;
+  if(!found.length||found.some(c=>c.point[0]!==found[0].point[0]||c.point[1]!==found[0].point[1]))return null;
+  return found[0];
+ };
+ let found=select(r.data);
+ // One alternative query format; keep address number, municipality and UF
+ // validation unchanged. Only the already authorized demo addresses reach here.
+ if(!found&&provider==="mapbox"){
+  const url=new URL("https://api.mapbox.com/search/geocode/v6/forward");
+  url.search=new URLSearchParams({q:p.text,country:"BR",types:"address",autocomplete:"false",permanent:"false",limit:"5",language:"pt",access_token:cfg.MAPBOX_ACCESS_TOKEN}).toString();
+  r=await json(request,url.toString(),{},provider);
+  if(r.failure)return r;
+  found=select(r.data);
+ }
+ return found||{failure:{state:"address_review",provider,reason:"geocode_unconfirmed"}};
 }
 function metrics(provider,distance,duration){
  if(typeof distance!=="number"||typeof duration!=="number"||!Number.isFinite(distance)||!Number.isFinite(duration)||distance<0||duration<0)return unavailable("no_driving_route",provider);
@@ -91,9 +117,15 @@ async function calculateBatch(cfg,points,pairs,{allowExternal=false,googleRoute,
   const current=provider==="google"?remaining:remaining.filter(permitted);
   if(!current.length)continue;
   if(provider==="google"){
-   const routes=await limited(current,5,async([a,b])=>{
-    try{return {...await googleRoute(cfg.GOOGLE_ROUTES_API_KEY,points[a],points[b]),provider};}
-    catch{return unavailable("network_or_response",provider);}
+   // Stop issuing further Google calls as soon as the provider rejects the
+   // quota. A short process-wide cooldown is not a cache of route results.
+   const routes=await limited(current,2,async([a,b])=>{
+    if(Date.now()<googleQuotaUntil)return unavailable("quota_cooldown",provider,429);
+    try{
+     const result={...await googleRoute(cfg.GOOGLE_ROUTES_API_KEY,points[a],points[b]),provider};
+     if(result.http_status===429)googleQuotaUntil=Date.now()+60000;
+     return result;
+    }catch{return unavailable("network_or_response",provider);}
    });
    current.forEach((pair,i)=>record(pair,routes[i]));
   }else{
@@ -126,7 +158,12 @@ async function calculateBatch(cfg,points,pairs,{allowExternal=false,googleRoute,
     const result=await matrix(cfg,provider,coords,sourceIds.map(i=>ids.indexOf(i)),destIds.map(i=>ids.indexOf(i)),request);
     for(const pair of group){
      const i=sourceIds.indexOf(pair[0]),j=destIds.indexOf(pair[1]);
-     record(pair,result.failure||metrics(provider,result.data?.distances?.[i]?.[j],result.data?.durations?.[i]?.[j]));
+     const route=result.failure||metrics(provider,result.data?.distances?.[i]?.[j],result.data?.durations?.[i]?.[j]);
+     if(route.state==="confirmed"){
+      const origin=lookup.get(points[pair[0]]).accuracy,destination=lookup.get(points[pair[1]]).accuracy;
+      route.location_accuracy={origin,destination};
+     }
+     record(pair,route);
     }
    }
   }

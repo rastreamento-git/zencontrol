@@ -68,3 +68,31 @@ test("provedores novos não recebem endereço de técnico ou destino que esteja 
  const result=await calculateBatch({ORS_API_KEY:"ors",GOOGLE_ROUTES_API_KEY:"g"},points,[[0,1],[2,1]],{allowExternal:([i])=>i===0,request,googleRoute:async()=>({state:"confirmed",distance_meters:20000,duration_seconds:1000})});
  assert.deepEqual(result.map(r=>r.provider),["ors","google"]);
 });
+
+test("Mapbox aceita interpolação por número de rua somente com rua, município e UF conferidos",async()=>{
+ const make=(i)=>{const feature=mapFeature(i);feature.properties.coordinates.accuracy="interpolated";feature.properties.match_code.address_number="plausible";return feature};
+ const request=async(url,opts)=>{
+  const u=new URL(url);
+  if(u.pathname.includes("geocode"))return ok({features:[make(u.searchParams.get("address_number")==="206"?0:1)]});
+  return ok({routes:[{distance:4000,duration:500}]});
+ };
+ const [r]=await calculateBatch({MAPBOX_ACCESS_TOKEN:"mb"},points,[[0,1]],{allowExternal:true,request});
+ assert.equal(r.provider,"mapbox");assert.equal(r.distance_meters,4000);
+ assert.deepEqual(r.location_accuracy,{origin:"interpolated",destination:"interpolated"});
+});
+test("Mapbox nunca aceita centroide de CEP ou município como endereço",async()=>{
+ const request=async()=>{const m=mapFeature(0);m.properties.coordinates.accuracy="approximate";return ok({features:[m]})};
+ const [r]=await calculateBatch({MAPBOX_ACCESS_TOKEN:"mb"},points,[[0,1]],{allowExternal:true,request});
+ assert.equal(r.state,"address_review");assert.equal(r.distance_meters,undefined);
+});
+test("grafia antiga da praça em Caxias é autorizada somente para o cadastro fictício original",()=>{
+ const {dataset}=require("../../../scripts/rj-demo-data.cjs"),{formatAddress}=require("../../../packages/domain/order-fields.mjs"),{demoDestination}=require("../src/demo-routing-scope"),{actor}=require("../src/demo-rj");
+ const c=dataset().customers[46],cfg={DEMO_RJ_ISOLATED:true},o={created_by:actor,customer_name:c.name,vehicle:c.vehicle,sga_id:""};
+ assert.equal(demoDestination(cfg,o,formatAddress({...c.address,customer_street:"Praça Roberto Silveira"})),true);
+ assert.equal(demoDestination(cfg,o,formatAddress({...c.address,customer_street:"Praça Roberto Silveira",customer_number:"32"})),false);
+});
+test("HTTP 429 do Google interrompe novas chamadas dentro da janela de proteção",async()=>{
+ let calls=0;
+ const r=await calculateBatch({GOOGLE_ROUTES_API_KEY:"test"},points,[[0,1],[2,1],[1,0],[1,2]],{googleRoute:async()=>{calls++;return {state:"unavailable",reason:"quota",http_status:429}}});
+ assert.ok(calls<=2);assert.equal(r.length,4);assert.ok(r.some(x=>x.reason==="quota_cooldown"));
+});
