@@ -61,20 +61,71 @@ function stockState(stock,required){
  if(!stock||keys.some(k=>required[k]>0&&stock.free[k]===null))return "unknown";
  return keys.some(k=>stock.free[k]<required[k])?"insufficient":"sufficient";
 }
+// Normalize the local display format, retaining house number and all address
+// components. Do not replace a missing street address with a city centroid.
+function routingAddress(value){
+ return String(value||"").trim()
+  .replace(/\s+-\s+/g,", ").replace(/\s+\/\s+/g,", ")
+  .replace(/,\s*Brasil\s*$/i,"").replace(/\s*,\s*/g,", ").trim()+", Brasil";
+}
+function unavailable(reason,http_status){
+ return {state:"unavailable",reason,...(http_status?{http_status}:{})};
+}
+async function requestRoute(key,origin,destination,request,timeout=8000){
+ try{
+  const response=await request("https://routes.googleapis.com/directions/v2:computeRoutes",{
+   method:"POST",headers:{"Content-Type":"application/json","X-Goog-Api-Key":key,"X-Goog-FieldMask":"routes.distanceMeters,routes.duration,geocodingResults.origin,geocodingResults.destination"},
+   body:JSON.stringify({origin,destination,travelMode:"DRIVE",routingPreference:"TRAFFIC_UNAWARE",regionCode:"BR",languageCode:"pt-BR",units:"METRIC"}),signal:AbortSignal.timeout(timeout)});
+  if(!response.ok){
+    const code=response.status;
+    return {failure:unavailable(code===429?"quota":code===401||code===403?"authorization":code===400?"invalid_request":code>=500?"provider_temporarily_unavailable":"provider_error",code)};
+  }
+  return {data:await response.json()};
+ }catch(e){return {failure:unavailable(["TimeoutError","AbortError"].includes(e?.name)?"timeout":"network_or_response")};}
+}
+const precise=w=>w?.placeId&&w.partialMatch!==true&&!(w.geocoderStatus?.code)&&Array.isArray(w.type)&&w.type.some(x=>["street_address","premise","subpremise","establishment","point_of_interest"].includes(x));
+function routeMetrics(route,samePlace=false){
+ if(!route)return null;
+ // Only a confirmed matching place may have both proto default scalars omitted.
+ const duration=route.duration??(samePlace?"0s":null);
+ const meters=route.distanceMeters??(samePlace&&duration==="0s"?0:null);
+ if(!Number.isSafeInteger(meters)||meters<0||typeof duration!=="string"||!/^\d+(?:\.\d+)?s$/.test(duration))return null;
+ const seconds=Number(duration.slice(0,-1));
+ if(!Number.isFinite(seconds)||seconds<0||(!samePlace&&meters===0))return null;
+ return {state:"confirmed",distance_meters:meters,duration_seconds:seconds};
+}
 async function roadRoute(key,origin,destination,request=fetch){
- const response=await request("https://routes.googleapis.com/directions/v2:computeRoutes",{
- method:"POST",headers:{"Content-Type":"application/json","X-Goog-Api-Key":key,"X-Goog-FieldMask":"routes.distanceMeters,routes.duration,geocodingResults.origin,geocodingResults.destination"},
- body:JSON.stringify({origin:{address:origin.replace(/,\s*Brasil$/i,"")+", Brasil"},destination:{address:destination},travelMode:"DRIVE",routingPreference:"TRAFFIC_UNAWARE",regionCode:"BR",languageCode:"pt-BR",units:"METRIC"}),signal:AbortSignal.timeout(8000)});
- if(!response.ok)throw Error("Rota indisponível");
- const data=await response.json(),route=data.routes?.[0],geo=data.geocodingResults;
- const precise=w=>w?.placeId&&w.partialMatch!==true&&!(w.geocoderStatus?.code)&&Array.isArray(w.type)&&w.type.some(x=>["street_address","premise","subpremise","establishment","point_of_interest"].includes(x));
+ const from={address:routingAddress(origin)},to={address:routingAddress(destination)};
+ const initial=await requestRoute(key,from,to,request);
+ if(initial.failure){
+  if(!["timeout","network_or_response","provider_temporarily_unavailable"].includes(initial.failure.reason))return initial.failure;
+  // One bounded retry only. Never retry quota or credentials errors.
+  const retry=await requestRoute(key,from,to,request,5000);
+  if(retry.failure)return retry.failure;
+  return resolveRoute(key,retry.data,from,to,request,false);
+ }
+ return resolveRoute(key,initial.data,from,to,request,true);
+}
+async function resolveRoute(key,data,from,to,request,allowFallback){
+ const geo=data?.geocodingResults,route=data?.routes?.[0];
  if(!precise(geo?.origin)||!precise(geo?.destination))return {state:"address_review",address_issue:{origin:!precise(geo?.origin),destination:!precise(geo?.destination)}};
- // Proto3 JSON may omit a zero scalar. Accept that only for a returned route
- // whose two exact geocoded places coincide and whose duration is zero.
  const samePlace=geo.origin.placeId===geo.destination.placeId;
- const meters=route?.distanceMeters??(samePlace&&route?.duration==="0s"?0:null);
- if(!route||!Number.isSafeInteger(meters)||meters<0||!/^\d+(?:\.\d+)?s$/.test(route.duration||""))return {state:"unavailable"};
- return {state:"confirmed",distance_meters:meters,duration_seconds:Number(route.duration.slice(0,-1))};
+ const metrics=routeMetrics(route,samePlace);
+ if(metrics)return metrics;
+ // Exactly the same confirmed geographical point requires no travel between
+ // the two addresses. This is not an estimate of a missing road route.
+ if(samePlace&&!route&&from.address.toLocaleLowerCase("pt-BR")===to.address.toLocaleLowerCase("pt-BR"))
+   return {state:"confirmed",distance_meters:0,duration_seconds:0,basis:"same_confirmed_point"};
+ // Google's place IDs identify the exact geocoded addresses. A single retry
+ // using those IDs avoids ambiguous text parsing and uses the same provider.
+ if(allowFallback&&!samePlace){
+   const fallback=await requestRoute(key,{placeId:geo.origin.placeId},{placeId:geo.destination.placeId},request,5000);
+   if(fallback.failure)return fallback.failure;
+   const recovered=routeMetrics(fallback.data?.routes?.[0]);
+   if(recovered)return {...recovered,basis:"resolved_place_ids"};
+   return unavailable(fallback.data?.routes?.length?"invalid_route_metrics":"no_driving_route");
+ }
+ return unavailable(route?"invalid_route_metrics":"no_driving_route");
 }
 function rank(items){
  const confirmed=x=>x.route.state==="confirmed";
@@ -110,7 +161,8 @@ async function recommend(pool,cfg,input,{stock=new StockClient(cfg),route=roadRo
    // Calculate geographic proximity separately from equipment eligibility.
    // A shortage must not hide a valid route; it still prevents recommendation.
    if(configured&&t.address?.trim()){
-      try{journey=await route(cfg.GOOGLE_ROUTES_API_KEY,t.address.trim(),destination)}catch{journey={state:"unavailable"}}
+      try{journey=await route(cfg.GOOGLE_ROUTES_API_KEY,t.address.trim(),destination)}catch{journey=unavailable("network_or_response")}
+      if(journey.state!=="confirmed")console.warn(JSON.stringify({event:"technician_route_unconfirmed",technician_id:t.id,order_id:orderId||undefined,state:journey.state,reason:journey.reason,http_status:journey.http_status,address_issue:journey.address_issue}));
    }
    let travel_estimate=null;
    if(journey.state==="confirmed")try{travel_estimate=require("./travel-policy").estimate(journey.distance_meters,t)}catch{}
