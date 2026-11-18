@@ -15,7 +15,7 @@ function run(cmd, args, cwd, extra = {}) {
   if (r.status) throw Error(`${cmd} falhou (${r.status}).`);
 }
 for (const [name, commit] of [
-  ["inventario-v2", "b955e93491cf30c996e72359e3bf9dd6a703b95a"],
+  ["inventario-v2", "3e1794f4634a17823dccce3524168e6a564d322f"],
 ]) {
   const dest = path.join(parent, name);
   fs.mkdirSync(dest, { recursive: true });
