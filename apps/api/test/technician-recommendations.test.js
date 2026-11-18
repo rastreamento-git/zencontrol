@@ -46,5 +46,38 @@ test("rota de zero metros aceita omissão do escalar somente com confirmação d
  const request=async()=>({ok:true,json:async()=>({routes:[{duration:"0s"}],geocodingResults:{origin:exact,destination:exact}})});
  assert.deepEqual(await roadRoute("key","Base","Destino",request),{state:"confirmed",distance_meters:0,duration_seconds:0});
  const different=async()=>({ok:true,json:async()=>({routes:[{duration:"0s"}],geocodingResults:{origin:exact,destination:{...exact,placeId:"other"}}})});
- assert.deepEqual(await roadRoute("key","Base","Destino",different),{state:"unavailable"});
+ assert.deepEqual(await roadRoute("key","Base","Destino",different),{state:"unavailable",reason:"invalid_route_metrics"});
+});
+
+test("mesmo ponto exato e endereços iguais não exigem deslocamento, inclusive sem rota retornada",async()=>{
+ const exact={placeId:"same",type:["street_address"]};
+ const request=async()=>({ok:true,json:async()=>({geocodingResults:{origin:exact,destination:exact}})});
+ const result=await roadRoute("key","Alameda Esmeralda, 206 - Jardim Primavera - Duque de Caxias / RJ","Alameda Esmeralda, 206, Jardim Primavera, Duque de Caxias, RJ, Brasil",request);
+ assert.deepEqual(result,{state:"confirmed",distance_meters:0,duration_seconds:0,basis:"same_confirmed_point"});
+});
+test("fallback utiliza os IDs exatos de ambos endereços de Caxias e mantém ranking por distância",async()=>{
+ const origin={placeId:"base-id",type:["premise"]},destination={placeId:"client-id",type:["street_address"]};
+ let calls=0;
+ const request=async(url,opts)=>{
+  const body=JSON.parse(opts.body);
+  calls++;
+  if(calls===1){assert.equal(body.origin.address,"Alameda Esmeralda, 206, Jardim Primavera, Duque de Caxias, RJ, Brasil");return {ok:true,json:async()=>({geocodingResults:{origin,destination}})};}
+  assert.deepEqual(body.origin,{placeId:"base-id"});assert.deepEqual(body.destination,{placeId:"client-id"});
+  return {ok:true,json:async()=>({routes:[{distanceMeters:11400,duration:"1500s"}]})};
+ };
+ const route=await roadRoute("key","Alameda Esmeralda, 206 - Jardim Primavera - Duque de Caxias / RJ","Praça Roberto da Silveira, 31 - Jardim 25 de Agosto - Duque de Caxias / RJ",request);
+ assert.equal(calls,2);
+ assert.deepEqual(route,{state:"confirmed",distance_meters:11400,duration_seconds:1500,basis:"resolved_place_ids"});
+ assert.equal(rank([{id:1,name:"Caxias",route,stock_state:"sufficient"},{id:2,name:"Longe",route:{state:"confirmed",distance_meters:19000,duration_seconds:1100},stock_state:"sufficient"}])[0].id,1);
+});
+test("distingue autorização, cota e falha temporária sem expor resposta bruta ou inventar rota",async()=>{
+ for(const [status,reason] of [[403,"authorization"],[429,"quota"],[400,"invalid_request"]]){
+  let calls=0;
+  const result=await roadRoute("key","Base","Destino",async()=>{calls++;return {ok:false,status}});
+  assert.deepEqual(result,{state:"unavailable",reason,http_status:status});assert.equal(calls,1);
+ }
+ let calls=0;
+ const exact={placeId:"point",type:["street_address"]};
+ const result=await roadRoute("key","Base","Destino",async()=>++calls===1?{ok:false,status:503}:{ok:true,json:async()=>({routes:[{distanceMeters:500,duration:"60s"}],geocodingResults:{origin:exact,destination:{...exact,placeId:"other"}}})});
+ assert.equal(calls,2);assert.equal(result.distance_meters,500);
 });
