@@ -68,13 +68,20 @@ async function roadRoute(key,origin,destination,request=fetch){
  if(!response.ok)throw Error("Rota indisponível");
  const data=await response.json(),route=data.routes?.[0],geo=data.geocodingResults;
  const precise=w=>w?.placeId&&w.partialMatch!==true&&!(w.geocoderStatus?.code)&&Array.isArray(w.type)&&w.type.some(x=>["street_address","premise","subpremise","establishment","point_of_interest"].includes(x));
- if(!precise(geo?.origin)||!precise(geo?.destination))return {state:"address_review"};
- if(!route||!Number.isSafeInteger(route.distanceMeters)||route.distanceMeters<0||!/^\d+(?:\.\d+)?s$/.test(route.duration||""))return {state:"unavailable"};
- return {state:"confirmed",distance_meters:route.distanceMeters,duration_seconds:Number(route.duration.slice(0,-1))};
+ if(!precise(geo?.origin)||!precise(geo?.destination))return {state:"address_review",address_issue:{origin:!precise(geo?.origin),destination:!precise(geo?.destination)}};
+ // Proto3 JSON may omit a zero scalar. Accept that only for a returned route
+ // whose two exact geocoded places coincide and whose duration is zero.
+ const samePlace=geo.origin.placeId===geo.destination.placeId;
+ const meters=route?.distanceMeters??(samePlace&&route?.duration==="0s"?0:null);
+ if(!route||!Number.isSafeInteger(meters)||meters<0||!/^\d+(?:\.\d+)?s$/.test(route.duration||""))return {state:"unavailable"};
+ return {state:"confirmed",distance_meters:meters,duration_seconds:Number(route.duration.slice(0,-1))};
 }
 function rank(items){
- const eligible=x=>["sufficient","not_required"].includes(x.stock_state)&&x.route.state==="confirmed";
- return [...items].sort((a,b)=>Number(eligible(b))-Number(eligible(a))||(eligible(a)&&eligible(b)?a.route.distance_meters-b.route.distance_meters||a.route.duration_seconds-b.route.duration_seconds:0)||a.name.localeCompare(b.name,"pt-BR")).map(x=>({...x,recommended:eligible(x)}));
+ const confirmed=x=>x.route.state==="confirmed";
+ const eligible=x=>["sufficient","not_required"].includes(x.stock_state)&&confirmed(x);
+ const distance=(a,b)=>a.route.distance_meters-b.route.distance_meters||a.route.duration_seconds-b.route.duration_seconds||a.name.localeCompare(b.name,"pt-BR")||a.id-b.id;
+ const nearest=items.filter(confirmed).sort(distance)[0];
+ return [...items].sort((a,b)=>Number(eligible(b))-Number(eligible(a))||Number(confirmed(b))-Number(confirmed(a))||(confirmed(a)&&confirmed(b)?distance(a,b):a.name.localeCompare(b.name,"pt-BR"))).map(x=>({...x,recommended:eligible(x),nearest_geographic:x===nearest}));
 }
 async function mapLimit(items,limit,fn){
  const result=new Array(items.length);let cursor=0;
@@ -100,12 +107,15 @@ async function recommend(pool,cfg,input,{stock=new StockClient(cfg),route=roadRo
    }
    const stock_state=stockState(available,required);
    let journey={state:!configured?"not_configured":!t.address?.trim()?"missing_origin":"not_checked"};
-   if(configured&&t.address?.trim()&&["sufficient","not_required"].includes(stock_state)){
+   // Calculate geographic proximity separately from equipment eligibility.
+   // A shortage must not hide a valid route; it still prevents recommendation.
+   if(configured&&t.address?.trim()){
       try{journey=await route(cfg.GOOGLE_ROUTES_API_KEY,t.address.trim(),destination)}catch{journey={state:"unavailable"}}
    }
    let travel_estimate=null;
    if(journey.state==="confirmed")try{travel_estimate=require("./travel-policy").estimate(journey.distance_meters,t)}catch{}
-   return {id:t.id,name:t.name,stock:available,stock_state,stock_note:stockNote,route:journey,travel_estimate};
+   const shortages=available?keys.filter(k=>required[k]>0&&available.free[k]!==null&&available.free[k]<required[k]).map(k=>({equipment:k,missing:required[k]-available.free[k]})):[];
+   return {id:t.id,name:t.name,stock:available,stock_state,stock_note:stockNote,shortages,route:journey,travel_estimate};
  });
  return {items:rank(rows),required,routing_configured:configured,checked_at:new Date().toISOString(),travel_mode:"DRIVE",traffic:"not_considered",ranking:"distance_then_duration"};
 }
