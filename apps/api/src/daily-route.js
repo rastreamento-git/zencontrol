@@ -40,7 +40,8 @@ async function dailyRoute(pool,cfg,t,input,{route=roadRoute,now=Date.now}={}){
  if(!stops.length)return {...base,state:"empty"};
  if(stops.length>5)return {...base,state:"limit"};
  const routing=require("./routing-providers");
- const allowExternal=rows.every(o=>require("./demo-rj").isDemoOrder(cfg,o));
+ const scope=require("./demo-routing-scope");
+ const allowExternal=scope.demoOrigin(cfg,t)&&rows.every(o=>scope.demoDestination(cfg,o,address(o)));
  const providers=routing.configuredProviders(cfg,allowExternal);
  if(!providers.length)return {...base,state:"not_configured"};
  if(!t.address?.trim())return {...base,state:"missing_origin"};

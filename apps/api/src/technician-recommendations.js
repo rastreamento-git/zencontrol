@@ -151,12 +151,13 @@ async function recommend(pool,cfg,input,{stock=new StockClient(cfg),route=roadRo
  // The new hosted providers are initially limited to the isolated fictional RJ
  // dataset. Existing Google behavior for ordinary orders is unchanged.
  const savedOrder=orderId?await d.one(pool,"SELECT * FROM zc_orders WHERE id=$1 AND deleted_at='' ",[orderId]):null;
- const allowExternal=Boolean(savedOrder&&require("./demo-rj").isDemoOrder(cfg,savedOrder));
- const providers=routing.configuredProviders(cfg,allowExternal);
+ const scope=require("./demo-routing-scope");
+ const fictionalDestination=scope.demoDestination(cfg,savedOrder,destination);
+ const providers=routing.configuredProviders(cfg,fictionalDestination&&technicians.some(t=>scope.demoOrigin(cfg,t)));
  const configured=providers.length>0;
  const seenLinks=new Map();for(const t of technicians)if(t.stock_technician_id)seenLinks.set(t.stock_technician_id,(seenLinks.get(t.stock_technician_id)||0)+1);
  const routable=technicians.filter(t=>t.address?.trim());
- const calculated=configured?(route!==roadRoute?await mapLimit(routable,5,t=>route(cfg.GOOGLE_ROUTES_API_KEY,t.address.trim(),destination)):await routing.calculateBatch(cfg,[...routable.map(t=>t.address.trim()),destination],routable.map((_,i)=>[i,routable.length]),{allowExternal,googleRoute:roadRoute})):[];
+ const calculated=configured?(route!==roadRoute?await mapLimit(routable,5,async t=>{try{return await route(cfg.GOOGLE_ROUTES_API_KEY,t.address.trim(),destination)}catch{return unavailable("network_or_response")}}):await routing.calculateBatch(cfg,[...routable.map(t=>t.address.trim()),destination],routable.map((_,i)=>[i,routable.length]),{allowExternal:([i])=>fictionalDestination&&scope.demoOrigin(cfg,routable[i]),googleRoute:roadRoute})):[];
  const journeys=new Map(routable.map((t,i)=>[t.id,calculated[i]]));
  const rows=await mapLimit(technicians,8,async t=>{
    let available=null,stockNote="";

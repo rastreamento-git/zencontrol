@@ -51,3 +51,20 @@ test("Google permanece alternativa e não é chamado para consultar endereços v
  const [r]=await calculateBatch({ORS_API_KEY:"ors",GOOGLE_ROUTES_API_KEY:"g"},points,[[0,1]],{request:async()=>{throw Error("não deveria chamar")},googleRoute:async()=>({state:"confirmed",distance_meters:1234,duration_seconds:300})});
  assert.equal(r.provider,"google");assert.equal(r.distance_meters,1234);
 });
+
+test("provedores novos não recebem endereço de técnico ou destino que esteja fora do cenário fictício",async()=>{
+ const {dataset}=require("../../../scripts/rj-demo-data.cjs"),{formatAddress}=require("../../../packages/domain/order-fields.mjs"),{demoOrigin,demoDestination}=require("../src/demo-routing-scope"),{actor}=require("../src/demo-rj");
+ const data=dataset(),cfg={DEMO_RJ_ISOLATED:true};
+ const t=data.technicians[9], c=data.customers[46],order={created_by:actor,customer_name:c.name,vehicle:c.vehicle,sga_id:""};
+ assert.equal(demoOrigin(cfg,{name:t.name,address:formatAddress(t.address)}),true);
+ assert.equal(demoOrigin(cfg,{name:t.name,address:"Rua real, 500 - Centro - Rio de Janeiro / RJ"}),false);
+ assert.equal(demoDestination(cfg,order,formatAddress(c.address)),true);
+ assert.equal(demoDestination(cfg,order,"Rua real, 500 - Centro - Rio de Janeiro / RJ"),false);
+ const request=async(url,opts)=>{
+  const u=new URL(url);
+  if(u.pathname.includes("search")){const q=u.searchParams.get("text");assert.ok(!q.includes("Antônio Wilman"));return ok({features:[orsFeatures.find(f=>q.includes(f.properties.street))]});}
+  return ok({distances:[[5000]],durations:[[800]]});
+ };
+ const result=await calculateBatch({ORS_API_KEY:"ors",GOOGLE_ROUTES_API_KEY:"g"},points,[[0,1],[2,1]],{allowExternal:([i])=>i===0,request,googleRoute:async()=>({state:"confirmed",distance_meters:20000,duration_seconds:1000})});
+ assert.deepEqual(result.map(r=>r.provider),["ors","google"]);
+});

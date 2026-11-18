@@ -82,12 +82,14 @@ async function limited(items,concurrency,fn){
 // pairs are indexes into points. A matrix batch is at most 25 unique locations.
 // In dispatch a single destination is shared; in daily planning <=6 locations.
 async function calculateBatch(cfg,points,pairs,{allowExternal=false,googleRoute,request=fetch}={}){
- const order=configuredProviders(cfg,allowExternal);
+ const permitted=typeof allowExternal==="function"?allowExternal:()=>allowExternal===true;
+ const order=configuredProviders(cfg,pairs.some(permitted));
  const results=new Map(),attempts=new Map(),key=([a,b])=>a+":"+b;
  let remaining=[...pairs];
  for(const provider of order){
   if(!remaining.length)break;
-  const current=remaining;
+  const current=provider==="google"?remaining:remaining.filter(permitted);
+  if(!current.length)continue;
   if(provider==="google"){
    const routes=await limited(current,5,async([a,b])=>{
     try{return {...await googleRoute(cfg.GOOGLE_ROUTES_API_KEY,points[a],points[b]),provider};}
@@ -128,7 +130,7 @@ async function calculateBatch(cfg,points,pairs,{allowExternal=false,googleRoute,
     }
    }
   }
-  remaining=current.filter(p=>results.get(key(p))?.state!=="confirmed");
+  remaining=remaining.filter(p=>results.get(key(p))?.state!=="confirmed");
  }
  function record(pair,result){
   const k=key(pair),history=attempts.get(k)||[];
