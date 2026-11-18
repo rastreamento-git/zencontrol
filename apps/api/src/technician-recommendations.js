@@ -147,8 +147,17 @@ async function recommend(pool,cfg,input,{stock=new StockClient(cfg),route=roadRo
  const ids=technicians.map(t=>t.id);
  const orders=await d.rows(pool,"SELECT id,parent_order_id,technician_id,service,status,document_data,tracker_waiver_authorized,sticker_discount_opt_in,stock_sync_state FROM zc_orders WHERE technician_id=ANY($1::int[]) AND deleted_at='' AND status NOT IN ('CONCLUÍDO','CANCELADO')",[ids]);
  const batches=await d.rows(pool,"SELECT technician_id,order_id,imeis FROM zc_batches WHERE technician_id=ANY($1::int[]) AND source<>'bundle' AND state IN ('draft','submitted','approved_sync','stock_failed')",[ids]);
- const configured=Boolean(cfg.GOOGLE_ROUTES_API_KEY);
+ const routing=require("./routing-providers");
+ // The new hosted providers are initially limited to the isolated fictional RJ
+ // dataset. Existing Google behavior for ordinary orders is unchanged.
+ const savedOrder=orderId?await d.one(pool,"SELECT * FROM zc_orders WHERE id=$1 AND deleted_at='' ",[orderId]):null;
+ const allowExternal=Boolean(savedOrder&&require("./demo-rj").isDemoOrder(cfg,savedOrder));
+ const providers=routing.configuredProviders(cfg,allowExternal);
+ const configured=providers.length>0;
  const seenLinks=new Map();for(const t of technicians)if(t.stock_technician_id)seenLinks.set(t.stock_technician_id,(seenLinks.get(t.stock_technician_id)||0)+1);
+ const routable=technicians.filter(t=>t.address?.trim());
+ const calculated=configured?(route!==roadRoute?await mapLimit(routable,5,t=>route(cfg.GOOGLE_ROUTES_API_KEY,t.address.trim(),destination)):await routing.calculateBatch(cfg,[...routable.map(t=>t.address.trim()),destination],routable.map((_,i)=>[i,routable.length]),{allowExternal,googleRoute:roadRoute})):[];
+ const journeys=new Map(routable.map((t,i)=>[t.id,calculated[i]]));
  const rows=await mapLimit(technicians,8,async t=>{
    let available=null,stockNote="";
    if(keys.some(k=>required[k]>0)){
@@ -161,14 +170,14 @@ async function recommend(pool,cfg,input,{stock=new StockClient(cfg),route=roadRo
    // Calculate geographic proximity separately from equipment eligibility.
    // A shortage must not hide a valid route; it still prevents recommendation.
    if(configured&&t.address?.trim()){
-      try{journey=await route(cfg.GOOGLE_ROUTES_API_KEY,t.address.trim(),destination)}catch{journey=unavailable("network_or_response")}
-      if(journey.state!=="confirmed")console.warn(JSON.stringify({event:"technician_route_unconfirmed",technician_id:t.id,order_id:orderId||undefined,state:journey.state,reason:journey.reason,http_status:journey.http_status,address_issue:journey.address_issue}));
+      journey=journeys.get(t.id)||unavailable("network_or_response");
+      if(journey.state!=="confirmed")console.warn(JSON.stringify({event:"technician_route_unconfirmed",technician_id:t.id,order_id:orderId||undefined,state:journey.state,reason:journey.reason,http_status:journey.http_status,address_issue:journey.address_issue,provider:journey.provider,attempts:journey.attempts}));
    }
    let travel_estimate=null;
    if(journey.state==="confirmed")try{travel_estimate=require("./travel-policy").estimate(journey.distance_meters,t)}catch{}
    const shortages=available?keys.filter(k=>required[k]>0&&available.free[k]!==null&&available.free[k]<required[k]).map(k=>({equipment:k,missing:required[k]-available.free[k]})):[];
    return {id:t.id,name:t.name,stock:available,stock_state,stock_note:stockNote,shortages,route:journey,travel_estimate};
  });
- return {items:rank(rows),required,routing_configured:configured,checked_at:new Date().toISOString(),travel_mode:"DRIVE",traffic:"not_considered",ranking:"distance_then_duration"};
+ return {items:rank(rows),required,routing_configured:configured,routing_providers:providers,checked_at:new Date().toISOString(),travel_mode:"DRIVE",traffic:"not_considered",ranking:"distance_then_duration"};
 }
 module.exports={requirements,validateInput,inventory,stockState,roadRoute,rank,recommend};

@@ -11,7 +11,7 @@ function optimize(matrix,n,returnBase){
    for(const to of [...sequence,...(returnBase?[0]:[])]){
      const leg=matrix[from]?.[to];if(!leg||leg.state!=="confirmed")return null;
      meters+=leg.distance_meters;seconds+=leg.duration_seconds;
-     legs.push({from,to,distance_meters:leg.distance_meters,duration_seconds:leg.duration_seconds});from=to;
+     legs.push({from,to,distance_meters:leg.distance_meters,duration_seconds:leg.duration_seconds,...(leg.provider?{provider:leg.provider}:{})});from=to;
    }
    return {sequence,meters,seconds,legs};
  };
@@ -34,12 +34,15 @@ const recent=new Map(),pending=new Set();
 async function dailyRoute(pool,cfg,t,input,{route=roadRoute,now=Date.now}={}){
  const day=date(input?.day),returnBase=input?.return_to_base===true;
  if(day<d.today())fail(400,"Escolha hoje ou uma data futura.");
- const rows=await d.rows(pool,"SELECT id,service,vehicle,scheduled_at,location,document_data FROM zc_orders WHERE technician_id=$1 AND deleted_at='' AND parent_order_id IS NULL AND workflow_mode='controlled' AND status='AGENDADO' AND substring(scheduled_at,1,10)=$2 ORDER BY scheduled_at,id",[t.id,day]);
+ const rows=await d.rows(pool,"SELECT id,service,vehicle,scheduled_at,location,document_data,created_by,customer_name,sga_id,parent_order_id FROM zc_orders WHERE technician_id=$1 AND deleted_at='' AND parent_order_id IS NULL AND workflow_mode='controlled' AND status='AGENDADO' AND substring(scheduled_at,1,10)=$2 ORDER BY scheduled_at,id",[t.id,day]);
  const stops=rows.map((o,i)=>({index:i+1,id:o.id,service:o.service,vehicle:o.vehicle,scheduled_at:o.scheduled_at,address:address(o)}));
  const base={day,return_to_base:returnBase,stops:stops.map(({address,...s})=>s),checked_at:new Date().toISOString()};
  if(!stops.length)return {...base,state:"empty"};
  if(stops.length>5)return {...base,state:"limit"};
- if(!cfg.GOOGLE_ROUTES_API_KEY)return {...base,state:"not_configured"};
+ const routing=require("./routing-providers");
+ const allowExternal=rows.every(o=>require("./demo-rj").isDemoOrder(cfg,o));
+ const providers=routing.configuredProviders(cfg,allowExternal);
+ if(!providers.length)return {...base,state:"not_configured"};
  if(!t.address?.trim())return {...base,state:"missing_origin"};
  if(stops.some(s=>!s.address))return {...base,state:"address_review",invalid_ids:stops.filter(s=>!s.address).map(s=>s.id)};
  const stamp=now();
@@ -49,12 +52,13 @@ async function dailyRoute(pool,cfg,t,input,{route=roadRoute,now=Date.now}={}){
  try{
   const points=[t.address.trim(),...stops.map(s=>s.address)],matrix=points.map(()=>[]),pairs=[];
   for(let i=0;i<points.length;i++)for(let j=0;j<points.length;j++)if(i!==j&&(j!==0||returnBase))pairs.push([i,j]);
-  let cursor=0;
-  await Promise.all(Array.from({length:Math.min(5,pairs.length)},async()=>{while(cursor<pairs.length){const [i,j]=pairs[cursor++];try{matrix[i][j]=await route(cfg.GOOGLE_ROUTES_API_KEY,points[i],points[j].replace(/,\s*Brasil$/i,"")+", Brasil");}catch{matrix[i][j]={state:"unavailable"};}}}));
-  if(pairs.some(([i,j])=>matrix[i][j]?.state!=="confirmed"))return {...base,state:"route_unavailable"};
+  const routes=route===roadRoute?await routing.calculateBatch(cfg,points,pairs,{allowExternal,googleRoute:roadRoute}):await Promise.all(pairs.map(async([i,j])=>{try{return await route(cfg.GOOGLE_ROUTES_API_KEY,points[i],points[j]);}catch{return {state:"unavailable"};}}));
+  pairs.forEach(([i,j],index)=>{matrix[i][j]=routes[index]});
+  const usedProviders=[...new Set(routes.filter(r=>r.state==="confirmed").map(r=>r.provider).filter(Boolean))];
+  if(pairs.some(([i,j])=>matrix[i][j]?.state!=="confirmed"))return {...base,state:"route_unavailable",providers,route_issues:routes.filter(r=>r.state!=="confirmed").map(r=>({provider:r.provider,state:r.state,reason:r.reason}))};
   const result=optimize(matrix,stops.length,returnBase);
   if(!result.scheduled||!result.best)return {...base,state:"route_unavailable"};
-  return {...base,state:"ready",...result,saved_meters:result.scheduled.meters-result.best.meters,changes_order:result.best.sequence.some((n,i)=>n!==i+1)};
+  return {...base,state:"ready",providers:usedProviders,...result,saved_meters:result.scheduled.meters-result.best.meters,changes_order:result.best.sequence.some((n,i)=>n!==i+1)};
  }finally{pending.delete(t.id)}
 }
 module.exports={optimize,dailyRoute,address};
