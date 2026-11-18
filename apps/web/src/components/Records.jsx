@@ -333,7 +333,7 @@ export function OrderEditor({
             doc.vehicle_type=canonicalVehicleType(doc.vehicle_type);
             if (!doc.fipe_region && brazilStates.includes(doc.customer_state)) doc.fipe_region=["SP","RJ"].includes(doc.customer_state)?doc.customer_state:"GERAL";
             setValues({...o.data,document_data:doc});
-            if (syncOnOpen) syncSaved(o.data);
+            if (syncOnOpen&&!o.data.demo_simulation) syncSaved(o.data);
           }
         }
       })
@@ -550,10 +550,12 @@ export function OrderEditor({
     });
   }
   async function syncSaved(saved){
+    if(saved.demo_simulation)return;
     setLookupBusy(true);setBusy(true);setError("");
     try{
       const {data}=await api.post("/orders/"+encodeURIComponent(saved.id)+"/sga-sync",{},{timeout:180000});
       if(data.order_version!==saved.version)throw new Error("A OS mudou. Feche e abra novamente antes de sincronizar.");
+      if(data.demo_simulation){setOrder(v=>v?.id===saved.id?{...v,demo_simulation:true}:v);notify(data.message);return;}
       if(saved.status==="CONCLUÍDO"||saved.parent_order_id){
         setValues(v=>({...v,sga_check:data.sga_check,sga_products:data.sga_products}));
         notify("Consulta atualizada para conferência. Histórico preservado.");
@@ -563,6 +565,7 @@ export function OrderEditor({
     }catch(e){setError(errorMessage(e));}finally{setBusy(false);setLookupBusy(false);}
   }
   async function lookup(){
+    if(order?.demo_simulation)return;
     if(id&&order){
       if(dirty&&!(await confirmAction("Recuperar os dados da OS salva e descartar alterações ainda não salvas?")))return;
       return syncSaved(order);
@@ -734,8 +737,8 @@ export function OrderEditor({
           )}
         <fieldset className="zc-fieldset">
           <legend>01 · Veículo e associado</legend>
-          {order?.created_by==="Demonstração RJ - FICTÍCIO"&&<p className="zc-notice">Simulação RJ — não realizar atendimento ou consultar SGA real. Escolha o técnico sugerido, confirme o horário e salve a OS.</p>}
-          {order?.created_by!=="Demonstração RJ - FICTÍCIO"&&((values.sga_review_required && !values.sga_check?.verified_at) ||
+          {order?.demo_simulation&&<p className="zc-notice">Simulação RJ · SGA não se aplica a este cadastro. Os dados fictícios estão prontos para testar a recomendação de técnicos. Não realizar atendimento real.</p>}
+          {!order?.demo_simulation&&((values.sga_review_required && !values.sga_check?.verified_at) ||
             (!values.sga_check?.verified_at &&
               meta.sga_scheduling_required)) && (
             <p className="zc-notice amber">
@@ -795,12 +798,12 @@ export function OrderEditor({
             </div>
           )}
 
-          <SgaProducts
+          {!order?.demo_simulation&&<SgaProducts
             value={values.sga_products || values.sga_check?.products}
-          />
+          />}
           <div className="zc-form-grid">
             {field("Placa ou chassi", "vehicle", { required: true })}
-            <div className="zc-lookup">
+            {order?.demo_simulation?<div className="zc-lookup"><span>Cadastro fictício</span><small>Não requer consulta ao SGA</small></div>:<div className="zc-lookup">
               <span>Consulta do cadastro</span>
               <button
                 type="button"
@@ -817,7 +820,7 @@ export function OrderEditor({
                   ? "Consultando SGA…"
                   : id ? "Sincronizar dados do SGA" : "Consultar cadastro e situação SGA"}
               </button>
-            </div>
+            </div>}
             <div className="zc-full zc-document-equipment">
               <label className="zc-checkbox">
                 <input

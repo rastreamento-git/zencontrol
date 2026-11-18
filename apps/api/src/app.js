@@ -261,6 +261,7 @@ function createApp(pool, env = process.env) {
     const [order] = await presentOrders(pool, [
       await o.get(pool, req.params.id),
     ]);
+    order.demo_simulation=await require("./demo-rj").isDemoAttendance(pool,cfg,order);
     Object.assign(order, await orderHistory(pool, order));
     order.jobs = await d.rows(
       pool,
@@ -1253,6 +1254,10 @@ function createApp(pool, env = process.env) {
   );
   app.post("/api/orders/:id/sga-sync", admin, async (req,res) => {
     const order=await o.get(pool,req.params.id);
+    if(await require("./demo-rj").isDemoAttendance(pool,cfg,order)){
+      // No provider lookup, no simulated verification token, no changes to the order.
+      return res.json({demo_simulation:true,order_version:order.version,message:"OS fictícia de homologação: consulta ao SGA não realizada. Utilize os dados cadastrados para simular a atribuição."});
+    }
     const data=await sgaClient.lookup({sga_id:order.sga_id,term:order.vehicle,chassis:order.chassis});
     if(order.sga_id && String(data.sga_id)!==String(order.sga_id)) fail(409,"O SGA retornou outro veículo.");
     const identities=[d.vehicle(order.vehicle),d.vehicle(order.chassis)].filter(Boolean);

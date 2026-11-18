@@ -15,7 +15,7 @@ const { configuration } = require("../src/config");
 const { transaction, databaseConfig } = require("../src/database");
 const o = require("../src/orders"),
   d = require("../src/domain");
-let db, pool, server, base, adminToken, operatorToken, tech, folder, cfg, jpg;
+let db, pool, server, base, adminToken, operatorToken, tech, folder, cfg, jpg, appConfig;
 const password = "Senha-ficticia-para-testes-2026";
 async function request(
   route,
@@ -119,6 +119,7 @@ before(async () => {
   pool = db.pool;
   await migrate(pool);
   const app = createApp(pool, cfg);
+  appConfig=app.locals.config;
   await app.locals.ready();
   server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -1293,4 +1294,35 @@ test("demonstração RJ libera atribuição original e permite novo agendamento 
  assert.equal(assigned.technician_id,original.id);assert.equal(assigned.status,"AGENDADO");
  await resetOriginalAssignments(pool);
  assert.equal((await o.get(pool,demo.id)).technician_id,original.id);
+});
+
+test("consulta de OS fictícia não acessa SGA e não fabrica validação; OS normal mantém integração",async(t)=>{
+ const {dataset}=require("../../../scripts/rj-demo-data.cjs"),{actor}=require("../src/demo-rj");
+ const {SGAClient}=require("../src/integrations");
+ const c=dataset().customers[1];
+ const demo=await o.create(pool,{customer_name:c.name,vehicle:c.vehicle,service:"Instalação",status:"PENDENTE",document_data:{equipment_counts:{tracker:1,tag:1}}},actor,{});
+ const child=(await d.rows(pool,"SELECT * FROM zc_orders WHERE parent_order_id=$1",[demo.id]))[0];
+ const regular=await o.create(pool,{customer_name:"Cadastro normal de teste",vehicle:"LKM1N23",service:"Manutenção",status:"PENDENTE"},"Operação",{});
+ const before=await o.get(pool,demo.id);
+ const spy=t.mock.method(SGAClient.prototype,"lookup",async()=>{require("../src/errors").fail(409,"Consulta externa de teste");});
+ const original=appConfig.DEMO_RJ_ISOLATED;
+ try{
+   appConfig.DEMO_RJ_ISOLATED=true;
+   for(const record of [demo,child]){
+     const detail=await request("/api/orders/"+record.id);
+     assert.equal(detail.status,200,JSON.stringify(detail.data));assert.equal(detail.data.demo_simulation,true);
+     const sync=await request("/api/orders/"+record.id+"/sga-sync","POST",{});
+     assert.equal(sync.status,200,JSON.stringify(sync.data));assert.equal(sync.data.demo_simulation,true);
+     assert.equal(sync.data.order_version,record.version);
+     assert.equal(sync.data.sga_verification,undefined);assert.equal(sync.data.sga_check,undefined);
+   }
+   assert.equal(spy.mock.callCount(),0);
+   assert.deepEqual(await o.get(pool,demo.id),before);
+   const real=await request("/api/orders/"+regular.id+"/sga-sync","POST",{});
+   assert.equal(real.status,409);assert.equal(spy.mock.callCount(),1);
+   appConfig.DEMO_RJ_ISOLATED=false;
+   const nonDemo=await request("/api/orders/"+demo.id);assert.equal(nonDemo.data.demo_simulation,false);
+   const normal=await request("/api/orders/"+demo.id+"/sga-sync","POST",{});
+   assert.equal(normal.status,409);assert.equal(spy.mock.callCount(),2);
+ }finally{appConfig.DEMO_RJ_ISOLATED=original;}
 });
