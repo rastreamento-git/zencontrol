@@ -580,8 +580,15 @@ function createApp(pool, env = process.env) {
   app.post("/api/regionals/sga/sync",admin,async(req,res)=>{
     if(regionalsSyncRunning)fail(409,"Já existe uma sincronização de regionais em andamento.");
     regionalsSyncRunning=true;
-    try{res.json(await require("./sga-regionals").synchronize(pool,sgaClient,actor(req)));}
-    finally{regionalsSyncRunning=false;}
+    console.info(JSON.stringify({event:"sga_regionals_sync_start",configured:sgaClient.ready()}));
+    try{
+      const result=await require("./sga-regionals").synchronize(pool,sgaClient,actor(req));
+      console.info(JSON.stringify({event:"sga_regionals_sync_success",received:result.received,created:result.created,updated:result.updated,skipped:result.skipped,source:result.source}));
+      res.json(result);
+    }catch(e){
+      console.warn(JSON.stringify({event:"sga_regionals_sync_failed",status:e.status||null,upstream_status:e.upstreamStatus||null,code:e.code||e.name}));
+      throw e;
+    }finally{regionalsSyncRunning=false;}
   });
   app.get("/api/volunteers", async (req, res) => {
     const p = page(req), q = "%" + String(req.query.q || "").slice(0, 200) + "%";
