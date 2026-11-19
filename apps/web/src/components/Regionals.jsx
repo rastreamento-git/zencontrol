@@ -11,16 +11,17 @@ export default function Regionals({revision,refresh}){
  async function sync(){
   setSyncing(true);setResult(null);setSyncError("");
   try{
-   const {data:summary}=await api.post("/regionals/sga/sync",{},{timeout:90000});
-   setResult(summary);setPage(1);refresh();notify("Regionais sincronizadas.");
-  }catch(e){setSyncError(errorMessage(e));}
+   const {data:summary}=await api.post("/regionals/sga/sync",{},{timeout:200000});
+   if(!summary||typeof summary.received!=="number")throw new Error("Resposta inesperada da API de regionais.");
+   setResult(summary);setPage(1);setStatus("");setQ("");refresh();notify("Regionais sincronizadas.");
+  }catch(e){setSyncError(e.response||e.code?errorMessage(e):e.message||errorMessage(e));}
   finally{setSyncing(false);}
  }
  return <>
   <Intro title="Regionais" subtitle="Catálogo oficial de regionais do SGA. Consulte as unidades ativas e inativas.">
    <button type="button" className="primary-button" disabled={syncing} onClick={sync}><RefreshCw size={16}/>{syncing?"Sincronizando…":"Sincronizar com SGA"}</button>
   </Intro>
-  {syncing&&<p role="status" className="tf-note">Consultando o SGA. A listagem atual permanece disponível.</p>}
+  {syncing&&<p role="status" className="tf-note">Consultando o SGA e verificando as situações disponíveis. A listagem atual permanece disponível.</p>}
   {syncError&&<p role="alert" className="error-banner">{syncError} O catálogo anterior foi preservado.</p>}
   {result&&<div role="status" className="dashboard-panel tf-preview-summary"><strong>Consulta concluída</strong><p>{result.received} recebidas · {result.created} novas · {result.updated} atualizadas · {result.unchanged} sem alterações · {result.skipped} inconsistências ignoradas · {result.duplicates} repetições de código.</p></div>}
   {data?.stats&&<>
