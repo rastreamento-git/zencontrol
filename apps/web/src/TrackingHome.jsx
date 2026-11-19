@@ -153,11 +153,10 @@ export default function TrackingHome() {
               </p>
               <h1 id="tracking-title">
                 Olá, {user.nome?.split(" ")[0] || "bem-vindo"}.
-                <span>Seu espaço de trabalho.</span>
+                <span>Central de operações ZenTracking</span>
               </h1>
               <p className="tracking-description">
-                Acompanhe a operação, a equipe em campo e o estoque no
-                ZenTracking.
+                Acesse as ferramentas de operação, atendimento em campo e logística da Zen Seguros.
               </p>
               <div className="tracking-hero-actions">
                 <a className="primary-button" href="#tracking-apps">
@@ -180,7 +179,7 @@ export default function TrackingHome() {
             >
               <div className="tracking-section-heading">
                 <h2 id="tracking-app-title">Aplicativos</h2>
-                <span>3 ambientes conectados</span>
+                <span>Selecione seu ambiente de trabalho</span>
               </div>
               <div className="tracking-apps">
                 {apps.map((app) => (
