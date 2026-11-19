@@ -64,6 +64,22 @@ export default function Dashboard({
           Nova ordem de serviço
         </button>
       </div>
+      <h3 className="dashboard-section-label">Indicadores operacionais</h3>
+      <div className="stat-grid">
+        {stats.map(([label, value, caption, color]) => (
+          <article className={"stat-card " + color} key={label}>
+            <div className="stat-card-top">
+              <span>{label}</span>
+              <span className="stat-icon">
+                <ArrowUpRight size={18} />
+              </span>
+            </div>
+            <strong className="stat-value">{value || 0}</strong>
+            <span className="stat-caption">{caption}</span>
+          </article>
+        ))}
+      </div>
+      <h3 className="dashboard-section-label">Prioridades da operação</h3>
       <section className="zen-priorities" aria-label="Ações prioritárias">
         <button className="zen-priority" onClick={() => navigate("batches")}>
           <CheckCheck size={23} />
@@ -92,20 +108,6 @@ export default function Dashboard({
           <ArrowRight size={18} />
         </button>
       </section>
-      <div className="stat-grid">
-        {stats.map(([label, value, caption, color]) => (
-          <article className={"stat-card " + color} key={label}>
-            <div className="stat-card-top">
-              <span>{label}</span>
-              <span className="stat-icon">
-                <ArrowUpRight size={18} />
-              </span>
-            </div>
-            <strong className="stat-value">{value || 0}</strong>
-            <span className="stat-caption">{caption}</span>
-          </article>
-        ))}
-      </div>
       <div className="dashboard-columns">
         <Panel
           title="Situação dos atendimentos"

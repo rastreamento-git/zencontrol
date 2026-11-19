@@ -568,3 +568,78 @@ body {
   .tracking-header-inner { flex-wrap: wrap; }
   .tracking-account { margin-inline-start: auto; }
 }
+
+
+/* Zen Workspace · pré-beta. A marca institucional permanece intacta. */
+.zen-shell {
+  --workspace-navy: #10264b;
+  --workspace-hero: linear-gradient(112deg,#10264b 0%,#164786 65%,#195ccd 100%);
+  --workspace-radius: 14px;
+}
+.zen-shell .app-sidebar {
+  --ep-sidebar: #10264b;
+  --ep-text: #f4f8ff;
+  --ep-muted: #b9cce6;
+  --ep-line: #ffffff22;
+  --ep-primary-ink: #b4d6ff;
+  --ep-primary-soft: #ffffff12;
+  --zen-app-accent: #91c6ff;
+  background: #10264b;
+  color: #e4efff;
+  border-color: #ffffff18;
+}
+.zen-shell .app-sidebar :is(.brand strong,.sidebar-footer strong) { color:#f4f8ff; }
+.zen-shell .app-sidebar :is(.brand small,.nav-group > p,.sidebar-footer small) { color:#bed0e8; }
+.zen-shell .app-sidebar .brand { min-height:80px; padding-block:16px; }
+.zen-shell .app-sidebar .nav-item { color:#d7e4f6; min-height:42px; margin-bottom:3px; border-radius:8px; }
+.zen-shell .app-sidebar .nav-item:hover { color:#fff; background:#ffffff12; }
+.zen-shell .app-sidebar .nav-item.is-active { color:#fff; background:#2462b6; box-shadow:inset 3px 0 #a5d3ff; border-color:transparent; }
+.zen-shell .app-sidebar .nav-item.is-active > svg:first-child { color:#fff; }
+.zen-shell .app-sidebar .icon-button { color:#d7e4f6; }
+.zen-shell .app-sidebar .sidebar-footer { border-top-color:#ffffff22; }
+.zen-shell .app-sidebar .sidebar-nav { padding-inline:12px; }
+.zen-shell .app-sidebar .nav-group + .nav-group { margin-top:17px; }
+.zen-shell .topbar { background:var(--ep-surface); min-height:76px; padding-block:12px; }
+.zen-shell .app-content { background:var(--ep-canvas); }
+.zen-shell .sync-toolbar { border-bottom:1px solid var(--ep-line); padding-bottom:10px; }
+.zen-shell :is(.dashboard-panel,.stat-card,.stock-overview,.portal-order,.portal-step,.portal-service-summary,.eco-card) {
+  border-radius:var(--workspace-radius); box-shadow:0 2px 6px #10264b08;
+}
+.zen-shell .stat-card { padding:16px 18px; }
+.zen-shell .stat-card::before { inset:0 auto 0 0; width:3px; height:auto; border-radius:14px 0 0 14px; }
+.zen-shell .stat-value { font-size:clamp(26px,2.6vw,38px); }
+.zen-shell :is(.zc-table,.trace-table) th { background:var(--ep-subtle); color:var(--ep-muted); }
+.zen-shell :is(.zc-table,.trace-table) tbody tr:hover { background:var(--ep-primary-soft); }
+.zen-shell :is(.primary-button,.secondary-button), .tracking-app :is(.primary-button,.secondary-button) { border-radius:9px; }
+.zen-shell :is(.dashboard-intro,.eco-home-hero) { min-width:0; }
+@media screen and (max-width:760px) {
+  .zen-shell .topbar { min-height:64px; padding:12px; }
+  .zen-shell .app-content { padding:12px; }
+  .zen-shell .stat-card { padding:12px; }
+}
+
+/* Portal e painel: composição de workspace, em vez de página promocional. */
+.tracking-app .tracking-hero { padding-block:26px 30px; background:var(--ep-canvas); }
+.tracking-app .tracking-hero::before,.tracking-app .tracking-hero::after { display:none; }
+.tracking-app .tracking-intro { max-width:none; padding:clamp(20px,3vw,36px); border-radius:18px; background:linear-gradient(112deg,#10264b,#195ccd); color:#fff; }
+.tracking-app .tracking-intro :is(h1,h1 span,.tracking-eyebrow,.tracking-description) { color:#fff; }
+.tracking-app .tracking-intro h1 { font-size:clamp(1.8rem,3.3vw,3rem); line-height:1.16; }
+.tracking-app .tracking-intro h1 span { color:#d4e5ff; font-size:.72em; margin-top:5px; }
+.tracking-app .tracking-description { font-size:15px; margin-top:12px; max-width:65ch; color:#e2edff; }
+.tracking-app .tracking-hero-actions { margin-top:16px; }
+.tracking-app .tracking-hero-actions .primary-button { background:#fff; color:#144cab; }
+.tracking-app .tracking-hero-actions .secondary-button { background:#ffffff12; border-color:#ffffff55; color:#fff; }
+.tracking-app .tracking-catalog { margin-top:24px; }
+.tracking-app .tracking-apps { gap:14px; overflow:visible; background:none; border:0; border-radius:0; }
+.tracking-app .tracking-card,.tracking-app .tracking-card + .tracking-card { border:1px solid var(--ep-line); border-top:4px solid var(--card-accent); border-radius:14px; padding:20px; box-shadow:0 3px 12px #10264b0a; }
+.tracking-app .tracking-card-action { padding-top:12px; border-top:1px solid var(--ep-line); margin-top:auto; }
+.tracking-app .tracking-shortcuts { padding-block:24px; }
+.zen-shell-control .dashboard-view > .dashboard-intro { background:var(--workspace-hero); color:#fff; border-radius:16px; padding:22px 24px; margin-bottom:16px; }
+.zen-shell-control .dashboard-view > .dashboard-intro :is(h2,p,.eyebrow) { color:#fff; }
+.zen-shell-control .dashboard-view > .dashboard-intro h2 { font-size:clamp(22px,2.5vw,34px); }
+.zen-shell-control .dashboard-view > .dashboard-intro p { color:#d9e8ff; }
+.zen-shell-control .dashboard-view > .dashboard-intro .primary-button { background:#fff; color:#144cab; }
+.zen-shell-control .dashboard-view > .dashboard-intro .primary-button:hover { background:#e0ecff; }
+.zen-shell-control .zen-priorities { gap:12px; margin-bottom:18px; }
+.zen-shell-control .zen-priority { border-left:3px solid var(--ep-primary); border-radius:10px; }
+.zen-shell-control .dashboard-section-label { font-size:15px; font-weight:700; margin:4px 0 8px; color:var(--ep-text); }
