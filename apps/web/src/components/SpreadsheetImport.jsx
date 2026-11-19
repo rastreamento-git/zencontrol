@@ -30,7 +30,7 @@ const fieldLabels = {
   completed_at: "Conclusão",
   technician_name: "Técnico de origem",
   location: "Região",
-  volunteer: "Voluntário",
+  volunteer: "Consultor",
   fipe_value: "Valor FIPE original",
   fipe_risk: "Classificação FIPE original",
   created_by: "Incluiu (origem)",
