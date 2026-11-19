@@ -144,18 +144,23 @@ export function TechnicianForm({ technician, onSaved, onClose }) {
       ? [[currentStockId, "Vínculo atual"]]
       : []),
   ];
+  const base = technician?.operational_base || {};
+  const structured = Boolean(base.street);
+  const states = "AC AL AP AM BA CE DF ES GO MA MT MS MG PA PB PE PI RJ RN RS RO RR SC SP SE TO".split(" ");
   return (
     <FormModal
       title={technician ? "Editar cadastro técnico" : "Cadastrar técnico"}
       description={
         technician
-          ? "Atualize os contatos, a região e os valores de atendimento."
-          : "Ao salvar, você recebe os dados de primeiro acesso ao ZenField."
+          ? "Atualize identificação, base de partida e vínculo de estoque. Tarifas e acordos são administrados no financeiro."
+          : "Cadastre os dados de trabalho. O acesso ao ZenField será criado ao salvar."
       }
       wide
       initial={{
         active: true,
         ...technician,
+        ...Object.fromEntries(Object.entries(base).map(([k,v]) => ["base_"+k,v??""])),
+        base_mode: structured || !technician ? "structured" : "legacy",
         ...(technician &&
           Object.fromEntries(
             rates.map(([key]) => [
@@ -164,7 +169,7 @@ export function TechnicianForm({ technician, onSaved, onClose }) {
             ]),
           )),
       }}
-      fields={[
+      fields={(values) => [
         { name: "name", label: "Nome", required: true, full: true },
         ...(!technician
           ? [
@@ -179,7 +184,25 @@ export function TechnicianForm({ technician, onSaved, onClose }) {
           : []),
         { name: "phone", label: "Telefone com DDI e DDD" },
         { name: "tags", label: "Habilidades" },
-        { name: "address", label: "Endereço completo de partida (rua, número, bairro, cidade e UF)", full: true },
+        { name: "base_mode", label: "Base de partida para os trajetos", full: true, options: [
+          ["structured", "Endereço estruturado"],
+          ...(technician && !structured ? [["legacy", "Manter endereço anterior (não validado)"]] : []),
+          ["none", "Sem base definida por enquanto"],
+        ] },
+        ...(values.base_mode === "legacy" ? [
+          { name: "address", label: "Endereço anterior (somente leitura)", full: true, disabled: true },
+        ] : values.base_mode === "structured" ? [
+          { name: "base_cep", label: "CEP", required: true, pattern: "[0-9]{5}-?[0-9]{3}", maxLength: 9 },
+          { name: "base_street", label: "Logradouro", required: true, full: true, maxLength: 160 },
+          { name: "base_number", label: "Número", required: true, pattern: "[0-9]+[A-Za-z]?", maxLength: 12 },
+          { name: "base_complement", label: "Complemento (opcional)", maxLength: 100 },
+          { name: "base_district", label: "Bairro", required: true, maxLength: 100 },
+          { name: "base_city", label: "Município", required: true, maxLength: 100 },
+          { name: "base_state", label: "UF", required: true, options: [["","Selecione"],...states.map(uf=>[uf,uf])] },
+          { name: "base_transport", label: "Meio de transporte", options: [["","Não informado"],["car","Automóvel"],["moto","Motocicleta"],["other","Outro"]] },
+          { name: "base_radius_km", label: "Raio preferencial (km)", type: "number" },
+          { name: "base_municipalities", label: "Municípios atendidos (informativo)", full: true, maxLength: 500 },
+        ] : []),
         {
           name: "stock_technician_id",
           label: "Cadastro correspondente no Estoque Pro",
@@ -187,7 +210,7 @@ export function TechnicianForm({ technician, onSaved, onClose }) {
           options: stockOptions,
           disabled: loading || Boolean(error),
         },
-        ...rates.map(([name, label]) => ({ name, label, type: "number" })),
+        ...(!technician ? rates.map(([name, label]) => ({ name, label, type: "number" })) : []),
         ...(technician
           ? [
               {
@@ -206,13 +229,20 @@ export function TechnicianForm({ technician, onSaved, onClose }) {
             "phone",
             "stock_technician_id",
             "tags",
-            "address",
             ...(!technician ? ["recovery_email"] : []),
-            ...rates.map(([key]) => key),
+            ...(!technician ? rates.map(([key]) => key) : []),
           ]
             .filter((key) => values[key] !== undefined)
             .map((key) => [key, values[key]]),
         );
+        if (values.base_mode === "structured") {
+          payload.operational_base = Object.fromEntries(
+            ["cep","street","number","complement","district","city","state","transport","radius_km","municipalities"].map(k=>[k,values["base_"+k]??""])
+          );
+        } else if (values.base_mode === "none") {
+          payload.address = "";
+          payload.operational_base = null;
+        }
         // Sending an unchanged active flag would revoke or re-enable the linked account.
         if (!technician || values.active !== technician.active)
           payload.active = values.active;
@@ -225,6 +255,7 @@ export function TechnicianForm({ technician, onSaved, onClose }) {
         onSaved(data.access);
       }}
     >
+      <p className="dialog-description">O endereço estruturado será usado como ponto de partida estimado. A confirmação geográfica ocorre na consulta de rotas; raio e municípios são informativos, não bloqueiam a operação.</p>
       {error && (
         <p className="dialog-description">
           O Estoque Pro está indisponível. Você pode salvar os outros dados; o

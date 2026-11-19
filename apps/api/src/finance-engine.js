@@ -503,8 +503,8 @@ async function overview(db){
   for(const t of technicians){
     const totals=await accountTotals(db,t.id),cycle=await policyFor(db,t.id);
     const settlement=await d.one(db,
-      "SELECT COALESCE(sum(paid),0) paid,COALESCE(sum(balance) FILTER(WHERE state IN ('approved','awaiting_payment','partial') AND due_on<>'' AND due_on<$2),0) overdue,MIN(due_on) FILTER(WHERE state IN ('approved','awaiting_payment','partial') AND balance>0 AND due_on<>'') next_due FROM (SELECT s.state,s.due_on,COALESCE((SELECT sum(p.amount_cents) FROM zc_payments p WHERE p.settlement_id=s.id),0) paid,s.total_cents-COALESCE((SELECT sum(p.amount_cents) FROM zc_payments p WHERE p.settlement_id=s.id),0) balance FROM zc_settlements s WHERE s.technician_id=$1) q",[t.id,d.today()]);
-    items.push({...t,...totals,cycle,paid_cents:Number(settlement.paid),overdue_cents:Number(settlement.overdue),next_due:settlement.next_due||""});
+      "SELECT COALESCE(sum(paid),0) paid,count(*) FILTER(WHERE state IN ('draft','legacy_unverified'))::int review_count,COALESCE(sum(balance) FILTER(WHERE state IN ('approved','awaiting_payment','partial') AND due_on<>'' AND due_on<$2),0) overdue,MIN(due_on) FILTER(WHERE state IN ('approved','awaiting_payment','partial') AND balance>0 AND due_on<>'') next_due FROM (SELECT s.state,s.due_on,COALESCE((SELECT sum(p.amount_cents) FROM zc_payments p WHERE p.settlement_id=s.id),0) paid,s.total_cents-COALESCE((SELECT sum(p.amount_cents) FROM zc_payments p WHERE p.settlement_id=s.id),0) balance FROM zc_settlements s WHERE s.technician_id=$1) q",[t.id,d.today()]);
+    items.push({...t,...totals,cycle,paid_cents:Number(settlement.paid),overdue_cents:Number(settlement.overdue),next_due:settlement.next_due||"",review_count:Number(settlement.review_count||0)});
   }
   const keys=["estimated_cents","confirmed_cents","pending_closing_cents","balance_cents","unverified_cents","paid_cents","overdue_cents"];
   return {items,totals:Object.fromEntries(keys.map(key=>[key,items.reduce((sum,t)=>sum+t[key],0)])),as_of:d.today()};

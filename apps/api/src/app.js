@@ -423,6 +423,7 @@ function createApp(pool, env = process.env) {
     );
     for (const t of list) {
       delete t.extra_info;
+      if (!["admin", "operador"].includes(req.user.papel)) delete t.operational_base;
       if (!["admin", "operador"].includes(req.user.papel))
         for (const k of [
           "price_install",
@@ -448,6 +449,15 @@ function createApp(pool, env = process.env) {
     }))
       if (req.body[key] !== undefined)
         data[key] = d.string(req.body[key], key, max, key === "name");
+    if (req.body.operational_base !== undefined) {
+      if (req.body.operational_base === null) {
+        data.operational_base = {};
+      } else {
+        const normalized = require("./technician-base").normalizeBase(req.body.operational_base);
+        data.operational_base = normalized.base;
+        data.address = normalized.address;
+      }
+    }
     if (req.body.stock_technician_id !== undefined)
       data.stock_technician_id =
         req.body.stock_technician_id === null ||
@@ -499,6 +509,9 @@ function createApp(pool, env = process.env) {
             409,
             "Aguarde a confirmação do estoque antes de alterar o vínculo.",
           );
+        // Older clients can edit the legacy address; do not retain contradictory structured data.
+        if (data.operational_base === undefined && data.address !== undefined && data.address !== old.address)
+          data.operational_base = {};
         rateChanged = [
           "price_install",
           "price_maintenance",
