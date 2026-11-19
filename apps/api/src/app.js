@@ -569,6 +569,20 @@ function createApp(pool, env = process.env) {
   };
   app.post("/api/technicians", admin, saveTech);
   app.patch("/api/technicians/:id", admin, saveTech);
+  app.get("/api/regionals", admin, async (req,res)=>{
+    const p=page(req),q="%"+String(req.query.q||"").slice(0,200)+"%",status=String(req.query.status||"");
+    if(!["","ATIVO","INATIVO","UNKNOWN"].includes(status))fail(400,"Situação inválida.");
+    const where="(name ILIKE $1 OR sga_code ILIKE $1) AND ($2='' OR sga_status=$2 OR ($2='UNKNOWN' AND sga_status=''))";
+    const stats=await d.one(pool,"SELECT count(*)::int total,count(*) FILTER(WHERE sga_status='ATIVO')::int active,count(*) FILTER(WHERE sga_status='INATIVO')::int inactive,count(*) FILTER(WHERE sga_status='')::int unknown,max(sga_synced_at) last_sync FROM zc_sga_regionals");
+    res.json({items:await d.rows(pool,"SELECT * FROM zc_sga_regionals WHERE "+where+" ORDER BY name,sga_code LIMIT $3 OFFSET $4",[q,status,p.limit,(p.page-1)*p.limit]),total:Number((await d.one(pool,"SELECT count(*) n FROM zc_sga_regionals WHERE "+where,[q,status])).n),stats,...p});
+  });
+  let regionalsSyncRunning=false;
+  app.post("/api/regionals/sga/sync",admin,async(req,res)=>{
+    if(regionalsSyncRunning)fail(409,"Já existe uma sincronização de regionais em andamento.");
+    regionalsSyncRunning=true;
+    try{res.json(await require("./sga-regionals").synchronize(pool,sgaClient,actor(req)));}
+    finally{regionalsSyncRunning=false;}
+  });
   app.get("/api/volunteers", async (req, res) => {
     const p = page(req), q = "%" + String(req.query.q || "").slice(0, 200) + "%";
     const status = String(req.query.status || "");
@@ -582,7 +596,7 @@ function createApp(pool, env = process.env) {
   });
   let volunteersSyncRunning=false;
   app.post("/api/volunteers/sga/sync", admin, async (req,res)=>{
-    if(volunteersSyncRunning)fail(409,"Já existe uma sincronização de corretores em andamento.");
+    if(volunteersSyncRunning)fail(409,"Já existe uma sincronização de consultores em andamento.");
     volunteersSyncRunning=true;
     try{
       res.json(await require("./sga-volunteers").synchronize(pool,sgaClient,actor(req)));
@@ -593,7 +607,7 @@ function createApp(pool, env = process.env) {
       await db.query("LOCK TABLE zc_volunteers IN SHARE ROW EXCLUSIVE MODE");
       const name=d.string(req.body.name,"Nome",200,true),sga_code=d.string(req.body.sga_code||"","Código SGA",50);
       if(sga_code&&!/^\d{1,20}$/.test(sga_code))fail(400,"Código SGA inválido.");
-      if(await d.one(db,"SELECT id FROM zc_volunteers WHERE lower(trim(name))=lower(trim($1)) OR ($2<>'' AND sga_code=$2)",[name,sga_code]))fail(409,"Já existe um corretor com esse nome ou código SGA.");
+      if(await d.one(db,"SELECT id FROM zc_volunteers WHERE lower(trim(name))=lower(trim($1)) OR ($2<>'' AND sga_code=$2)",[name,sga_code]))fail(409,"Já existe um consultor com esse nome ou código SGA.");
       const row=await o.insert(db,"zc_volunteers",{name,sga_code});
       await d.audit(db,actor(req),"created","volunteer",row.id);
       return row;
@@ -604,8 +618,8 @@ function createApp(pool, env = process.env) {
     await transaction(pool,async db=>{
       await db.query("LOCK TABLE zc_volunteers IN SHARE ROW EXCLUSIVE MODE");
       const v=await d.one(db,"SELECT * FROM zc_volunteers WHERE id=$1",[req.params.id]);
-      if(!v)fail(404,"Corretor não encontrado.");
-      if(v.sga_synced_at)fail(409,"Corretores sincronizados são administrados no SGA.");
+      if(!v)fail(404,"Consultor não encontrado.");
+      if(v.sga_synced_at)fail(409,"Consultores sincronizados são administrados no SGA.");
       await db.query("DELETE FROM zc_volunteers WHERE id=$1",[v.id]);
       await d.audit(db,actor(req),"deleted","volunteer",v.id);
     });

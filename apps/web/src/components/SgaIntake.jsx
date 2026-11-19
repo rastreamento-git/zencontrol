@@ -460,7 +460,7 @@ export default function SgaIntake({
               <label>Associado<input readOnly value={selected.customer_name}/></label>
               {field("Contato","contact")}{field("CPF / CNPJ","cpf_cnpj",true)}{field("RG","rg",true)}
               <label>Placa ou chassi<input readOnly value={selected.vehicle}/></label><label>Chassi<input readOnly value={selected.chassis || ""}/></label>
-              {field("Renavam","renavam",true)}{field("Marca","brand",true)}{field("Modelo","model",true)}{field("Ano","year",true)}{field("Cor","color",true)}{field("Categoria","category",true)}{field("Voluntário","volunteer")}
+              {field("Renavam","renavam",true)}{field("Marca","brand",true)}{field("Modelo","model",true)}{field("Ano","year",true)}{field("Cor","color",true)}{field("Categoria","category",true)}{field("Consultor","volunteer")}
             </div></fieldset>
             <fieldset className="zc-fieldset"><legend>02 · Endereço do associado</legend><div className="zc-form-grid">{addressFields.map(([key,label]) => field(label,"customer_"+key,true))}</div></fieldset>
             <fieldset className="zc-fieldset"><legend>03 · FIPE e produtos</legend><div className="zc-form-grid">

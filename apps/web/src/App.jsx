@@ -33,6 +33,7 @@ import {
   Download,
   FileUp,
   Heart,
+  MapPin,
   ShieldCheck,
 } from "lucide-react";
 import { useSession } from "@zen/ui/lib/session";
@@ -42,6 +43,7 @@ import AppFooter from "@zen/ui/components/AppFooter";
 import Dashboard from "./components/Dashboard";
 import { Orders, OrderEditor, Volunteers } from "./components/Records";
 import TeamAccess from "./components/TeamAccess";
+import Regionals from "./components/Regionals";
 import {
   Batches,
   SettingsPage,
@@ -66,7 +68,8 @@ const groups = [
   {
     label: "Gestão",
     items: [
-      ["volunteers", "Corretores", Heart],
+      ["volunteers", "Consultores", Heart],
+      ["regionals", "Regionais", MapPin, true],
       ["finance", "Financeiro", Wallet, true],
       ["history", "Histórico", History, true],
       ["users", "Equipe e acessos", Users, true],
@@ -422,6 +425,8 @@ export default function App() {
               />
             ) : tab === "volunteers" ? (
               <Volunteers {...props} />
+            ) : tab === "regionals" && admin ? (
+              <Regionals {...props} />
             ) : tab === "users" && admin ? (
               <TeamAccess revision={revision} refresh={refresh} />
             ) : tab === "batches" ? (

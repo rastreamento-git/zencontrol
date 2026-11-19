@@ -882,7 +882,7 @@ export function OrderEditor({
             })}
             {documentField("Tipo FIPE","fipe_override",{options:[["","Automático · "+(fipe.label||"Não classificado")],...fipeCategories.map(x=>[x,x])]})}
             <div className="zc-fipe-result zc-full sga-fipe-note"><small>{documentData.fipe_override?"Classificação manual: "+documentData.fipe_override+" · cálculo original: "+(fipe.label||"não classificado"):fipe.message}</small></div>
-            {field("Voluntário", "volunteer")}
+            {field("Consultor", "volunteer")}
             <div className="zc-full zc-document-equipment">
               <label className="zc-checkbox">
                 <input
@@ -1535,13 +1535,13 @@ export function Volunteers({ user, revision, refresh }) {
     setSyncing(true);setSyncError("");setSyncResult(null);
     try{
       const {data:result}=await api.post("/volunteers/sga/sync",{},{timeout:180000});
-      setSyncResult(result);setPage(1);refresh();notify("Listagem de corretores sincronizada.");
+      setSyncResult(result);setPage(1);refresh();notify("Listagem de consultores sincronizada.");
     }catch(e){setSyncError(errorMessage(e));}finally{setSyncing(false);}
   }
   return (
     <>
       <Intro
-        title="Corretores (voluntários)"
+        title="Consultores"
         subtitle="Cadastro local sincronizado com os voluntários do SGA. O SGA permanece a fonte oficial."
       >
         {canManage&&<div className="tf-actions"><button className="secondary-button" disabled={syncing} onClick={()=>setEdit(true)}><Plus size={16}/> Cadastro local</button><button type="button" className="primary-button" disabled={syncing} onClick={sync}>{syncing?"Sincronizando SGA…":"Sincronizar com SGA"}</button></div>}
@@ -1556,7 +1556,7 @@ export function Volunteers({ user, revision, refresh }) {
             <Search size={17} />
             <input
               placeholder="Buscar nome ou código SGA…"
-              aria-label="Buscar voluntários"
+              aria-label="Buscar consultores"
               value={q}
               onChange={(e) => {
                 setQ(e.target.value);
@@ -1564,7 +1564,7 @@ export function Volunteers({ user, revision, refresh }) {
               }}
             />
           </div>
-          <select aria-label="Situação do corretor" value={status} onChange={e=>{setStatus(e.target.value);setPage(1)}}><option value="">Todos</option><option value="ATIVO">Ativos no SGA</option><option value="INATIVO">Inativos no SGA</option><option value="LOCAL">Somente locais</option></select>
+          <select aria-label="Situação do consultor" value={status} onChange={e=>{setStatus(e.target.value);setPage(1)}}><option value="">Todos</option><option value="ATIVO">Ativos no SGA</option><option value="INATIVO">Inativos no SGA</option><option value="LOCAL">Somente locais</option></select>
         </div>
         {loading || error ? (
           <Loading error={error} />
@@ -1574,7 +1574,7 @@ export function Volunteers({ user, revision, refresh }) {
               <table className="zc-table zc-responsive-table">
                 <thead>
                   <tr>
-                    <th>CORRETOR</th>
+                    <th>CONSULTOR</th>
                     <th>CÓDIGO SGA</th><th>SITUAÇÃO</th><th>ORIGEM</th>
                     <th />
                   </tr>
@@ -1582,7 +1582,7 @@ export function Volunteers({ user, revision, refresh }) {
                 <tbody>
                   {data.items.map((v) => (
                     <tr key={v.id}>
-                      <td data-label="Corretor">
+                      <td data-label="Consultor">
                         <strong>{v.name}</strong>
                       </td>
                       <td data-label="Código SGA">{v.sga_code || "Não informado"}</td><td data-label="Situação"><span className={"zc-badge "+(v.sga_status==="ATIVO"?"mint":"gray")}>{v.sga_status==="ATIVO"?"Ativo":v.sga_status==="INATIVO"?"Inativo":"Não confirmada"}</span></td><td data-label="Origem">{v.sga_synced_at?"SGA":"Local"}</td>
@@ -1621,7 +1621,7 @@ export function Volunteers({ user, revision, refresh }) {
       </Panel>
       {edit && (
         <FormModal
-          title="Cadastrar corretor local"
+          title="Cadastrar consultor local"
           fields={[
             { name: "name", label: "Nome", required: true, full: true },
             { name: "sga_code", label: "Código no SGA", full: true },
@@ -1631,7 +1631,7 @@ export function Volunteers({ user, revision, refresh }) {
             await api.post("/volunteers", v);
             setEdit(false);
             refresh();
-            notify("Corretor local cadastrado.");
+            notify("Consultor local cadastrado.");
           }}
         />
       )}
