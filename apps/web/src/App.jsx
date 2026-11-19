@@ -66,7 +66,7 @@ const groups = [
   {
     label: "Gestão",
     items: [
-      ["volunteers", "Voluntários", Heart],
+      ["volunteers", "Corretores", Heart],
       ["finance", "Financeiro", Wallet, true],
       ["history", "Histórico", History, true],
       ["users", "Equipe e acessos", Users, true],
