@@ -525,6 +525,45 @@ async function main() {
     assert.equal(await menu.getAttribute("aria-expanded"), "false");
     await page.context().close();
   });
+  await check("ZenField: navegação móvel não cobre o conteúdo", async () => {
+    const page = await field();
+    try {
+      for (const width of [320, 390, 600, 760]) {
+        await page.setViewportSize({ width, height: 844 });
+        const geometry = await page.locator(".eco-nav.portal-areas").evaluate((nav) => {
+          const main = nav.closest(".portal-main");
+          const buttons = Array.from(nav.querySelectorAll("button"));
+          return {
+            navHeight: nav.getBoundingClientRect().height,
+            padding: parseFloat(getComputedStyle(main).paddingBottom),
+            minFont: Math.min(...buttons.map(b => parseFloat(getComputedStyle(b).fontSize))),
+            horizontalOverflow: document.documentElement.scrollWidth > innerWidth + 1,
+          };
+        });
+        assert.ok(geometry.padding >= geometry.navHeight, "Conteúdo coberto pela navegação em " + width);
+        assert.ok(geometry.minFont >= 12, "Rótulos pequenos em " + width);
+        assert.equal(geometry.horizontalOverflow, false, "Rolagem horizontal em " + width);
+      }
+    } finally {
+      await page.context().close();
+    }
+  });
+  await check("ZenControl: modal de equipe cabe no viewport", async () => {
+    const page = await pageFor(4320, centralToken, "zencontrol.session", "/zencontrol");
+    try {
+      await page.getByRole("button", { name: "Equipe e acessos", exact: true }).click();
+      await page.getByRole("button", { name: "Adicionar pessoa", exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: "Adicionar pessoa" });
+      for (const width of [320, 390, 1366]) {
+        await page.setViewportSize({ width, height: 640 });
+        const bounds = await dialog.boundingBox();
+        assert.ok(bounds && bounds.x >= -1 && bounds.x + bounds.width <= width + 1, "Modal fora da largura");
+        assert.ok(bounds.y >= -1 && bounds.y + bounds.height <= 641, "Modal fora da altura");
+      }
+    } finally {
+      await page.context().close();
+    }
+  });
   assert.deepEqual(pageErrors, [], "Erros de execução no navegador");
   console.log(JSON.stringify({ results, pageErrors }, null, 2));
   if (results.some((r) => !r.passed)) process.exitCode = 1;

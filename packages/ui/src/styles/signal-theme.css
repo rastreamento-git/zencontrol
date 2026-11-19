@@ -487,3 +487,84 @@ body {
     border-block-start: 1px solid var(--ep-line);
   }
 }
+
+
+/* Zen UI · refinamento de homologação. Preserva as fontes e cores Signal. */
+:root[data-theme="dark"] { color-scheme: dark; }
+:root[data-theme="light"] { color-scheme: light; }
+
+.zen-shell :is(.app-main, .app-content, .topbar-context, .topbar-actions,
+  .dashboard-panel, .stat-card, .portal-step, .portal-service-summary, .eco-card),
+.tracking-app :is(.tracking-account, .tracking-card, .tracking-intro) {
+  min-inline-size: 0;
+}
+.zen-shell :is(.page-intro, .dashboard-intro, .portal-intro) :is(h1,h2,p),
+.tracking-app :is(.tracking-card-description, .tracking-card-name) {
+  overflow-wrap: anywhere;
+}
+.zen-shell :is(.zc-table-scroll, .trace-table-wrap, .table-scroll) {
+  max-inline-size: 100%;
+  overscroll-behavior-inline: contain;
+}
+.zen-shell :is(button,a,input,select,textarea):focus-visible,
+.tracking-app :is(button,a,input,select,textarea):focus-visible,
+.pro-dialog :is(button,a,input,select,textarea):focus-visible {
+  outline: 2px solid var(--ep-primary-ink);
+  outline-offset: 3px;
+}
+.zen-shell :is(.primary-button,.secondary-button), 
+.tracking-app :is(.primary-button,.secondary-button) {
+  min-height: 40px;
+  line-height: 1.35;
+}
+.pro-dialog {
+  max-block-size: calc(100dvh - 32px);
+  overscroll-behavior: contain;
+}
+.pro-dialog .dialog-heading h2 {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+.pro-dialog .dialog-heading .icon-button { min-width: 44px; min-height: 44px; }
+.zen-chat :is(.zen-chat-layout,.zen-chat-title,.zen-chat-person,.zen-chat-scroll) {
+  min-inline-size: 0;
+}
+.zen-chat :is(.zen-chat-scroll,.zen-chat-threads) { overscroll-behavior: contain; }
+.zen-chat :is(.zen-chat-file span,.zen-chat-messages p) { overflow-wrap: anywhere; }
+
+@media screen and (max-width: 760px) {
+  .zen-shell .topbar { flex-wrap: wrap; }
+  .zen-shell .topbar-actions { flex-wrap: wrap; max-width: 100%; }
+  .pro-dialog, .pro-dialog.is-wide {
+    width: calc(100% - 20px);
+    max-block-size: calc(100dvh - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    border-radius: 14px;
+  }
+  .pro-dialog .dialog-heading { padding: 12px 16px; gap: 10px; }
+  .pro-dialog > form, .pro-dialog .dialog-description { padding: 16px; }
+  .pro-dialog .dialog-actions { padding: 12px 16px; }
+  .pro-dialog :is(input:not([type="checkbox"]):not([type="radio"]),select,textarea),
+  .zen-chat textarea { font-size: 16px; }
+  .zen-chat :is(.zen-chat-actions,.zen-chat-gallery-nav) button { min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .zen-shell *, .tracking-app *, .pro-dialog *, .zen-chat * {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Operação: mais espaço útil em notebook e acesso sem corte aos controles. */
+.zen-shell :is(.zc-table,.trace-table) th { vertical-align: middle; }
+.zen-shell :is(.zc-table,.trace-table) td { overflow-wrap: anywhere; }
+.tracking-app .tracking-card { min-height: 0; }
+.tracking-app .tracking-card:focus-visible { outline-offset: -4px; }
+@media screen and (min-width: 761px) and (max-height: 820px) {
+  .zen-shell .topbar { padding-block: 10px; }
+  .zen-shell .app-content { padding-block: 18px; }
+}
+@media screen and (max-width: 440px) {
+  .tracking-header-inner { flex-wrap: wrap; }
+  .tracking-account { margin-inline-start: auto; }
+}
