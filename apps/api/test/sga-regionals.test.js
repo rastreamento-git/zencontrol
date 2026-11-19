@@ -19,3 +19,18 @@ test("consulta apenas leitura e separa conflitos",async()=>{
 test("não interpreta erro de permissão como catálogo vazio",async()=>{
  await assert.rejects(()=>collect({request:async()=>{throw Object.assign(Error("HTTP 406"),{upstreamStatus:406})}}),/406/);
 });
+
+test("consulta ativo e inativo quando todos retorna vazio",async()=>{
+ const paths=[];
+ const r=await collect({request:async(path,payload,mutation)=>{
+  paths.push(path);assert.equal(mutation,false);
+  if(path.endsWith("/todos"))return [];
+  if(path.endsWith("/ativo"))return {regionais:[{codigo_regional:"21",nome:"Regional A"}]};
+  return {"0":{codigo_regional:"22",nome_regional:"Regional B"}};
+ }});
+ assert.deepEqual(paths,["/listar/regional/todos","/listar/regional/ativo","/listar/regional/inativo"]);
+ assert.deepEqual(r.items,[{code:"21",name:"Regional A",status:"ATIVO"},{code:"22",name:"Regional B",status:"INATIVO"}]);
+});
+test("resposta não vazia inválida não vira sincronização bem sucedida",async()=>{
+ await assert.rejects(()=>collect({request:async()=>[{codigo_regional:"1"}]}),/nenhuma regional/i);
+});
