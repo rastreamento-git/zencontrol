@@ -423,6 +423,7 @@ function createApp(pool, env = process.env) {
     );
     for (const t of list) {
       delete t.extra_info;
+      if (!["admin", "operador"].includes(req.user.papel)) delete t.operational_base;
       if (!["admin", "operador"].includes(req.user.papel))
         for (const k of [
           "price_install",
