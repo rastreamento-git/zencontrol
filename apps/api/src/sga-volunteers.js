@@ -51,8 +51,11 @@ async function synchronize(pool,client,actor){
   const add=(map,k,v)=>{if(k)map.set(k,[...(map.get(k)||[]),v]);};
   for(const v of local){add(byCode,v.sga_code,v);add(byName,nameKey(v.name),v);}
   const summary={received:received.items.length,created:0,updated:0,unchanged:0,linked:0,skipped:received.invalid+received.conflicts,duplicates:received.duplicates,pages:received.pages};
+  const sourceNames=new Map();
+  for(const item of received.items)add(sourceNames,nameKey(item.name),item);
   const stamp=new Date().toISOString();
   for(const item of received.items){
+   if(sourceNames.get(nameKey(item.name)).length>1){summary.skipped++;continue;}
    const matches=byCode.get(item.code)||[],names=byName.get(nameKey(item.name))||[];
    if(matches.length>1){summary.skipped++;continue;}
    const existing=matches[0]||(names.length===1&&!names[0].sga_code?names[0]:null);
