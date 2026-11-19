@@ -1525,22 +1525,31 @@ const auditValue = (value) =>
 export function Volunteers({ user, revision, refresh }) {
   const [q, setQ] = useState(""),
     [page, setPage] = useState(1),
-    [edit, setEdit] = useState(false);
+    [edit, setEdit] = useState(false), [status,setStatus]=useState(""), [syncing,setSyncing]=useState(false), [syncResult,setSyncResult]=useState(null), [syncError,setSyncError]=useState("");
   const { data, loading, error } = useLoad(
-    "/volunteers?" + new URLSearchParams({ q, page, limit: 25 }),
+    "/volunteers?" + new URLSearchParams({ q, page, status, limit: 25 }),
     revision,
   );
+  const canManage=["admin","operador"].includes(user.papel);
+  async function sync(){
+    setSyncing(true);setSyncError("");setSyncResult(null);
+    try{
+      const {data:result}=await api.post("/volunteers/sga/sync",{},{timeout:180000});
+      setSyncResult(result);setPage(1);refresh();notify("Listagem de corretores sincronizada.");
+    }catch(e){setSyncError(errorMessage(e));}finally{setSyncing(false);}
+  }
   return (
     <>
       <Intro
-        title="Vínculos dos associados."
-        subtitle="Mantenha os voluntários e seus códigos SGA organizados."
+        title="Corretores (voluntários)"
+        subtitle="Cadastro local sincronizado com os voluntários do SGA. O SGA permanece a fonte oficial."
       >
-        <button className="primary-button" onClick={() => setEdit(true)}>
-          <Plus size={16} />
-          Cadastrar voluntário
-        </button>
+        {canManage&&<div className="tf-actions"><button className="secondary-button" disabled={syncing} onClick={()=>setEdit(true)}><Plus size={16}/> Cadastro local</button><button type="button" className="primary-button" disabled={syncing} onClick={sync}>{syncing?"Sincronizando SGA…":"Sincronizar com SGA"}</button></div>}
       </Intro>
+      {syncing&&<p role="status" className="tf-note">Consultando as páginas do SGA. A listagem existente continua disponível.</p>}
+      {syncError&&<p role="alert" className="error-banner">{syncError} Nenhuma exclusão é realizada durante a sincronização.</p>}
+      {syncResult&&<div role="status" className="dashboard-panel tf-preview-summary"><strong>Sincronização concluída</strong><p>{syncResult.received} recebidos · {syncResult.created} novos · {syncResult.updated} atualizados · {syncResult.linked} vinculados · {syncResult.unchanged} sem alterações · {syncResult.skipped} inconsistências ignoradas · {syncResult.duplicates} repetições de código</p>{syncResult.skipped>0&&<small>Registros com conflito de nome/código ou dados inválidos não foram alterados. Confira no SGA e no cadastro local.</small>}</div>}
+      {data?.stats&&<><div className="tf-task-metrics">{[["Todos",data.stats.total,""],["Ativos no SGA",data.stats.active,"ATIVO"],["Inativos no SGA",data.stats.inactive,"INATIVO"],["Somente locais",data.stats.local,"LOCAL"]].map(([label,n,key])=><button type="button" key={label} className="dashboard-panel tf-metric tf-task" aria-pressed={status===key} onClick={()=>{setStatus(key);setPage(1)}}><small>{label}</small><strong>{n}</strong></button>)}</div><small className="zc-muted">Último registro sincronizado: {data.stats.last_sync?new Date(data.stats.last_sync).toLocaleString("pt-BR",{timeZone:"America/Sao_Paulo"}):"Nenhuma sincronização registrada"}</small></>}
       <Panel>
         <div className="zc-filters">
           <div className="trace-search">
@@ -1555,29 +1564,30 @@ export function Volunteers({ user, revision, refresh }) {
               }}
             />
           </div>
+          <select aria-label="Situação do corretor" value={status} onChange={e=>{setStatus(e.target.value);setPage(1)}}><option value="">Todos</option><option value="ATIVO">Ativos no SGA</option><option value="INATIVO">Inativos no SGA</option><option value="LOCAL">Somente locais</option></select>
         </div>
         {loading || error ? (
           <Loading error={error} />
         ) : (
           <>
             <div className="zc-table-scroll">
-              <table className="zc-table">
+              <table className="zc-table zc-responsive-table">
                 <thead>
                   <tr>
-                    <th>VOLUNTÁRIO</th>
-                    <th>CÓDIGO SGA</th>
+                    <th>CORRETOR</th>
+                    <th>CÓDIGO SGA</th><th>SITUAÇÃO</th><th>ORIGEM</th>
                     <th />
                   </tr>
                 </thead>
                 <tbody>
                   {data.items.map((v) => (
                     <tr key={v.id}>
-                      <td>
+                      <td data-label="Corretor">
                         <strong>{v.name}</strong>
                       </td>
-                      <td>{v.sga_code || "Não informado"}</td>
-                      <td>
-                        {["admin", "operador"].includes(user.papel) && (
+                      <td data-label="Código SGA">{v.sga_code || "Não informado"}</td><td data-label="Situação"><span className={"zc-badge "+(v.sga_status==="ATIVO"?"mint":"gray")}>{v.sga_status==="ATIVO"?"Ativo":v.sga_status==="INATIVO"?"Inativo":"Não confirmada"}</span></td><td data-label="Origem">{v.sga_synced_at?"SGA":"Local"}</td>
+                      <td data-label="Ações">
+                        {canManage&&!v.sga_synced_at && (
                           <button
                             className="icon-button"
                             aria-label={"Remover " + v.name}
@@ -1611,7 +1621,7 @@ export function Volunteers({ user, revision, refresh }) {
       </Panel>
       {edit && (
         <FormModal
-          title="Cadastrar voluntário"
+          title="Cadastrar corretor local"
           fields={[
             { name: "name", label: "Nome", required: true, full: true },
             { name: "sga_code", label: "Código no SGA", full: true },
@@ -1621,7 +1631,7 @@ export function Volunteers({ user, revision, refresh }) {
             await api.post("/volunteers", v);
             setEdit(false);
             refresh();
-            notify("Voluntário cadastrado.");
+            notify("Corretor local cadastrado.");
           }}
         />
       )}
