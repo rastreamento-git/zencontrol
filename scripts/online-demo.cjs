@@ -73,7 +73,8 @@ function proxy(port, strip = "") {
     );
     upstream.setTimeout(
       req.originalUrl.startsWith("/api/sga/lookup") ||
-        req.originalUrl.startsWith("/api/sga/catalogs/")
+        req.originalUrl.startsWith("/api/sga/catalogs/") ||
+        req.originalUrl.startsWith("/api/regionals/sga/sync")
         ? 200000
         : 90000,
       () => upstream.destroy(),
