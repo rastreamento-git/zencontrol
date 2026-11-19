@@ -2,3 +2,19 @@
 .tf-agreement-summary{display:grid;gap:6px;padding:12px;border:1px solid var(--ep-line);border-radius:8px;background:var(--ep-subtle);font-size:13px;line-height:1.5}.tf-agreement-summary p{margin:0;color:var(--ep-text)}.tf-agreement-summary strong{font-weight:600}
 
 .tf-workspace{gap:10px}.tf-form{gap:9px;padding:10px 14px}.tf-form .zc-form-grid{gap:8px 10px}.tf-metric{padding:10px 12px;gap:3px}.tf-agreement-summary{padding:9px;gap:4px}.tf-agreements{gap:10px}.tf-workspace .zc-table td,.tf-workspace .zc-table th{padding:9px 11px}
+
+/* Operação financeira: indicadores acionáveis e conferência progressiva. */
+.tf-task-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.tf-task{min-width:0;text-align:left;border:1px solid var(--ep-line);border-radius:12px;min-height:94px;background:var(--ep-surface);color:var(--ep-text)}
+.tf-task:hover,.tf-task[aria-pressed=true]{border-color:var(--ep-primary-ink);background:var(--ep-primary-soft)}
+.tf-task[aria-pressed=true]{box-shadow:inset 0 0 0 1px var(--ep-primary-ink)}
+.tf-task:last-child strong{color:var(--ep-red-ink)}
+.tf-task strong{overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.tf-preview-summary{padding:14px;border-top:1px solid var(--ep-line);display:grid;gap:8px}
+.tf-preview-summary h3{font-size:16px;font-weight:700;margin:0}
+.tf-preview-summary p{font-size:13px;color:var(--ep-muted)}
+.tf-workspace .tf-expand{margin:8px 14px}
+.tf-workspace .tf-expand summary{cursor:pointer;padding:10px;color:var(--ep-primary-ink)}
+.tf-workspace .zc-table td .secondary-button{white-space:normal;text-align:left}
+@media(max-width:1000px){.tf-task-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:380px){.tf-task-metrics{grid-template-columns:1fr}}
