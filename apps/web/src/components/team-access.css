@@ -1,0 +1,244 @@
+.team-page,
+.team-groups {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.team-page .page-intro {
+  margin-bottom: 0;
+}
+
+.team-categories {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.team-categories button,
+.team-profile-options button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  min-height: 46px;
+  padding: 10px 12px;
+  border: 1px solid var(--ep-line);
+  border-radius: 10px;
+  background: var(--ep-surface);
+  color: var(--ep-text);
+  font: inherit;
+  font-size: 0.875rem;
+  text-align: left;
+}
+
+.team-categories button[aria-pressed="true"],
+.team-profile-options button:hover {
+  border-color: var(--ep-primary);
+  background: var(--ep-primary-soft);
+  color: var(--ep-primary-ink);
+}
+
+.team-categories svg,
+.team-profile-options svg,
+.team-identity .avatar {
+  flex-shrink: 0;
+}
+
+.team-categories span {
+  overflow-wrap: anywhere;
+}
+
+.team-categories b {
+  margin-left: auto;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.team-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(12rem, 15rem);
+  gap: 12px;
+  max-width: 48rem;
+}
+
+.team-filter-field {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.team-filter-field .trace-search {
+  width: 100%;
+  min-width: 0;
+  min-height: 46px;
+  margin: 0;
+  padding: 0 12px;
+}
+
+.team-filter-field input {
+  min-width: 0;
+}
+
+.team-filter-field select {
+  width: 100%;
+  height: 46px;
+}
+
+.team-count {
+  margin: 0;
+  color: var(--ep-muted);
+  font-size: 0.8rem;
+}
+
+.dashboard-panel.team-group {
+  min-width: 0;
+  padding: 0;
+}
+
+.team-group-heading {
+  padding: 16px;
+  border-bottom: 1px solid var(--ep-line);
+}
+
+.team-group-heading h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.team-group-heading p {
+  margin: 4px 0 0;
+  color: var(--ep-muted);
+  font-size: 0.8rem;
+}
+
+.team-people {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.team-access-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+}
+
+.team-access-row + .team-access-row {
+  border-top: 1px solid var(--ep-line);
+}
+
+.team-identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.team-identity .avatar {
+  width: 34px;
+  height: 34px;
+}
+
+.team-identity strong,
+.team-identity small,
+.team-profile-options strong,
+.team-profile-options small {
+  display: block;
+}
+
+.team-identity small,
+.team-profile-options small {
+  margin-top: 3px;
+  color: var(--ep-muted);
+  font-size: 0.78rem;
+}
+
+.team-access-row .zc-badge {
+  justify-self: start;
+}
+
+.team-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  justify-content: flex-end;
+}
+
+.team-access-action {
+  color: var(--ep-primary-ink);
+}
+
+.team-profile-options {
+  display: grid;
+  gap: 8px;
+}
+
+.team-profile-options button {
+  padding: 13px;
+}
+
+.team-profile-options svg {
+  color: var(--ep-primary-ink);
+}
+
+.team-access-details {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 16px;
+  padding: 14px;
+  border: 1px solid var(--ep-line);
+  border-radius: 10px;
+  background: var(--ep-subtle);
+  overflow-wrap: anywhere;
+}
+
+.team-access-details dt {
+  color: var(--ep-muted);
+  font-size: 0.8rem;
+}
+
+.team-access-details dd {
+  margin: 2px 0 0;
+  font-weight: 600;
+}
+
+@media (max-width: 880px) {
+  .team-categories {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .team-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .team-access-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 9px;
+  }
+
+  .team-row-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 420px) {
+  .team-categories button {
+    gap: 5px;
+    padding: 8px;
+    font-size: 0.8rem;
+  }
+
+  .team-categories svg {
+    display: none;
+  }
+}

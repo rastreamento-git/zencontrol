@@ -44,7 +44,7 @@ async function store(db, s, sender, hub, reason = "") {
   if (!s.text && !s.message_ids.length) return null;
   const list = await d.rows(
     db,
-    "SELECT * FROM zc_orders WHERE technician_id=$1 AND deleted_at='' AND status NOT IN ('CONCLUÍDO','CANCELADO')",
+    "SELECT * FROM zc_orders WHERE technician_id=$1 AND workflow_mode='legacy' AND deleted_at='' AND status NOT IN ('CONCLUÍDO','CANCELADO')",
     [s.technician_id],
   );
   const explicit = s.text.toUpperCase().match(/\bOS\s*:\s*([A-Z0-9_-]+)/);

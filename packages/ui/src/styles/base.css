@@ -2175,6 +2175,7 @@ button:disabled {
   gap: 10px;
   width: min(430px, calc(100vw - 44px));
   z-index: 5000;
+  pointer-events: none;
 }
 .pro-toast {
   display: flex;
@@ -2195,6 +2196,9 @@ button:disabled {
 .pro-toast > svg {
   flex-shrink: 0;
   color: #2ea37e;
+}
+.pro-toast > .icon-button {
+  pointer-events: auto;
 }
 .pro-toast.error {
   border-color: #f1c9d0;

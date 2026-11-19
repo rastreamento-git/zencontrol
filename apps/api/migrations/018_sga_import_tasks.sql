@@ -1,0 +1,12 @@
+CREATE TABLE zc_sga_import_tasks (
+ batch_id UUID PRIMARY KEY REFERENCES zc_spreadsheet_imports(id) ON DELETE CASCADE,
+ run_id UUID NOT NULL,
+ review_token TEXT NOT NULL,
+ state TEXT NOT NULL,
+ total INTEGER NOT NULL DEFAULT 0,
+ processed INTEGER NOT NULL DEFAULT 0,
+ filled INTEGER NOT NULL DEFAULT 0,
+ conflicts INTEGER NOT NULL DEFAULT 0,
+ updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ message TEXT NOT NULL DEFAULT ''
+);

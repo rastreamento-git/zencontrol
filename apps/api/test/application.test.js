@@ -15,7 +15,7 @@ const { configuration } = require("../src/config");
 const { transaction, databaseConfig } = require("../src/database");
 const o = require("../src/orders"),
   d = require("../src/domain");
-let db, pool, server, base, adminToken, operatorToken, tech, folder, cfg, jpg;
+let db, pool, server, base, adminToken, operatorToken, tech, folder, cfg, jpg, appConfig;
 const password = "Senha-ficticia-para-testes-2026";
 async function request(
   route,
@@ -119,6 +119,7 @@ before(async () => {
   pool = db.pool;
   await migrate(pool);
   const app = createApp(pool, cfg);
+  appConfig=app.locals.config;
   await app.locals.ready();
   server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -235,10 +236,14 @@ test("trocar o técnico ou o veículo após o recebimento impede baixa automáti
   }
 });
 test("migrações são idempotentes e rollback não deixa gravações parciais", async () => {
+  const before = await d.rows(
+    pool,
+    "SELECT name FROM schema_migrations ORDER BY name",
+  );
   await migrate(pool);
-  assert.equal(
-    Number((await d.one(pool, "SELECT count(*) n FROM schema_migrations")).n),
-    3,
+  assert.deepEqual(
+    await d.rows(pool, "SELECT name FROM schema_migrations ORDER BY name"),
+    before,
   );
   await assert.rejects(
     transaction(pool, async (tx) => {
@@ -287,7 +292,7 @@ test("origens não autorizadas e corpo JSON em formato indevido são bloqueados"
     410,
   );
 });
-test("permissões administrativas também são aplicadas na API", async () => {
+test("administrador e operador têm acesso completo às funções da central", async () => {
   for (const route of [
     "/api/users",
     "/api/finance/settlements",
@@ -297,7 +302,7 @@ test("permissões administrativas também são aplicadas na API", async () => {
   ])
     assert.equal(
       (await request(route, "GET", undefined, operatorToken)).status,
-      403,
+      200,
       route,
     );
   assert.equal(
@@ -305,16 +310,16 @@ test("permissões administrativas também são aplicadas na API", async () => {
       await request(
         "/api/technicians",
         "POST",
-        { name: "Não autorizado" },
+        { name: "Operador autorizado" },
         operatorToken,
       )
     ).status,
-    403,
+    200,
   );
   const techs = (
     await request("/api/technicians", "GET", undefined, operatorToken)
   ).data.items;
-  assert.equal(techs[0].price_install, undefined);
+  assert.ok(techs.every((t) => Number.isSafeInteger(t.price_install)));
   assert.equal(
     (await request("/api/meta", "GET", undefined, operatorToken)).status,
     200,
@@ -351,8 +356,8 @@ test("cadastro valida campos e preserva agendamento e adicional separado", async
   assert.equal(row.vehicle, "ABC1A23");
   assert.equal(row.status, "AGENDADO");
   assert.equal(
-    (await fresh(row.id + "_EXTRA")).service,
-    "Instalação (Adicional)",
+    (await fresh(row.additional_orders[0].id)).service,
+    "Instalação (Equipamento adicional)",
   );
   assert.equal(row.raw_legacy, undefined);
   assert.equal(
@@ -373,7 +378,7 @@ test("edições simultâneas têm uma confirmação e um conflito", async () => 
   assert.deepEqual(responses.map((r) => r.status).sort(), [200, 409]);
   assert.equal((await fresh(row.id)).version, row.version + 1);
 });
-test("baixa exige técnico e motivo, e reabertura exige administrador", async () => {
+test("baixa exige técnico e motivo, e reabertura exige acesso da central", async () => {
   const row = await create();
   assert.equal(
     (
@@ -411,7 +416,7 @@ test("baixa exige técnico e motivo, e reabertura exige administrador", async ()
         operatorToken,
       )
     ).status,
-    403,
+    200,
   );
   assert.equal(
     (
@@ -420,7 +425,7 @@ test("baixa exige técnico e motivo, e reabertura exige administrador", async ()
         reason: "Correção administrativa.",
       })
     ).status,
-    200,
+    409,
   );
   assert.equal((await fresh(row.id)).completed_at, "");
   const noTech = await create({ technician_id: null, scheduled_at: "" });
@@ -483,17 +488,17 @@ test("documento complementar é persistido, mascara dados e restringe a versão 
       )
     ).bytes,
   );
-  assert.ok(!limited.text.includes(fixture.document_data.cpf_cnpj));
+  assert.ok(limited.text.includes(fixture.document_data.cpf_cnpj));
   assert.equal(
     (
       await request(
         "/api/orders/" + row.id + "/dispatch",
         "POST",
-        { version: saved.version, masked: false },
+        { version: saved.version - 1, masked: false },
         operatorToken,
       )
     ).status,
-    403,
+    409,
   );
   const bad = await request("/api/orders/" + row.id, "PATCH", {
     version: saved.version,
@@ -604,11 +609,11 @@ test("envio sem resposta confirmada não é repetido automaticamente", async () 
       await request(
         "/api/jobs/" + queued.data.job_id + "/retry",
         "POST",
-        { confirmed_no_effect: true },
+        { confirmed_no_effect: false },
         operatorToken,
       )
     ).status,
-    403,
+    400,
   );
   assert.equal(
     (
@@ -861,6 +866,7 @@ test("classificação SGA só é gravada depois da resposta confirmada", async (
     o.complete(tx, row.id, "Teste", "Baixa conferida para SGA.", {
       ...cfg,
       SGA_SYNC_ENABLED: true,
+      SGA_COMPLETED_CODE: "1",
     }),
   );
   assert.equal((await fresh(row.id)).sga_classification, "");
@@ -875,7 +881,7 @@ test("classificação SGA só é gravada depois da resposta confirmada", async (
         },
       },
     },
-    { ...cfg, SGA_SYNC_ENABLED: true },
+    { ...cfg, SGA_SYNC_ENABLED: true, SGA_COMPLETED_CODE: "1" },
   );
   assert.equal(calls, 1);
   assert.equal((await fresh(row.id)).sga_classification, "Concluído");
@@ -984,9 +990,11 @@ test("fechamento usa centavos, prévia consistente e impede pagamento duplicado"
 test("arquivamento mensal simula antes de aplicar e mantém ordens abertas no HOT", async () => {
   const row = await create({ vehicle: "ARQA123" });
   await pool.query(
-    "UPDATE zc_orders SET created_date='2020-01-01',archive='COLD' WHERE id=$1",
+    "UPDATE zc_orders SET created_date='2020-01-01' WHERE id=$1",
     [row.id],
   );
+  // Simulate a stale storage tier left by an older deployment.
+  await pool.query("UPDATE zc_orders SET archive='COLD' WHERE id=$1",[row.id]);
   const simulated = await request("/api/archive-month", "POST", {
     month: d.today().slice(0, 7),
   });
@@ -1015,6 +1023,192 @@ test("exportação CSV neutraliza fórmulas e backup não contém contas ou segr
   assert.equal(backup.status, 200);
   assert.equal(backup.bytes.subarray(0, 2).toString(), "PK");
 });
+
+test("relatório executivo XLSX e CSV respeitam período, estilo e acesso",async()=>{
+  const row=await create({vehicle:"EXE1A23",customer_name:"Exemplo executivo",fipe_value:"R$ 30.000,00"});
+  await pool.query("UPDATE zc_orders SET created_date='2026-01-15',imei='000007260510340',notes=$2 WHERE id=$1",[row.id,"P: Observação inicial\nQ: Outra observação\nR: Retorno\nS: Último registro"]);
+  const query="?start=2026-01-15&end=2026-01-15&reference=created";
+  // Preserve the existing central access contract: administrator and operator.
+  // Anonymous requests must never obtain a report.
+  for (const extension of ["xlsx", "csv"]) {
+    const route = "/api/export/orders."+extension+query;
+    assert.equal((await request(route,"GET",undefined,null)).status,401);
+    assert.equal((await request(route,"GET",undefined,operatorToken)).status,200);
+  }
+  assert.equal((await request("/api/export/orders.csv?start=2026-01-15")).status,400);
+  const csv=await request("/api/export/orders.csv"+query);
+  assert.equal(csv.status,200);
+  assert.match(csv.bytes.toString(),/Exemplo executivo/);
+  assert.match(csv.bytes.toString(),/000007260510340/);
+  assert.ok(!csv.bytes.toString().includes('"archive"'));
+  const result=await request("/api/export/orders.xlsx"+query);
+  assert.equal(result.status,200);
+  const workbook=new (require("exceljs").Workbook)();
+  await workbook.xlsx.load(result.bytes);
+  const sheet=workbook.getWorksheet("Ordens de serviço");
+  assert.ok(sheet);
+  assert.deepEqual(sheet.getRow(3).values.slice(1,20),["NÚMERO DA OS","SERVIÇOS","NOME DO ASSOCIADO","PLACA / CHASSI","IMEI","OS EMITIDA","DATA DE CONCLUSÃO","TÉCNICO","REGIÃO","VOLUNTÁRIO","VALOR FIPE","CLASSIFICAÇÃO FIPE","INCLUÍDO POR","CONCLUÍDO POR","SITUAÇÃO","OBSERVAÇÃO 1","OBSERVAÇÃO 2","OBSERVAÇÃO 3","OBSERVAÇÃO 4"]);
+  const record=sheet.getRows(4,sheet.rowCount-3).find(r=>r.getCell(1).value===row.id);
+  assert.ok(record);
+  assert.equal(record.getCell(5).value,"000007260510340");
+  assert.equal(record.getCell(11).value,30000);
+  assert.deepEqual([16,17,18,19].map(i=>record.getCell(i).value),["Observação inicial","Outra observação","Retorno","Último registro"]);
+  assert.ok(sheet.getRow(3).getCell(1).fill.fgColor);
+  assert.ok(workbook.getWorksheet("Resumo"));
+  await pool.query("UPDATE zc_orders SET status='CONCLUÍDO',completed_at='2026-01-15' WHERE id=$1",[row.id]);
+  assert.equal((await fresh(row.id)).archive,require("../src/storage-policy").tier({status:"CONCLUÍDO",created_date:"2026-01-15",completed_at:"2026-01-15"}));
+  await pool.query("UPDATE zc_orders SET status='REAGENDAR' WHERE id=$1",[row.id]);
+  assert.equal((await fresh(row.id)).archive,"HOT");
+});
+test("cadastro e troca aceitam oito caracteres completos e recusam cada categoria ausente", async () => {
+  const payload = {
+    login: "senha.oito",
+    nome: "Teste de política de senha",
+    papel: "operador",
+  };
+  for (const value of [
+    "Aa1!aaa",
+    "abcdef1!",
+    "ABCDEF1!",
+    "Abcdefg!",
+    "Abcdefg1",
+    "Abcdef1 ",
+  ]) {
+    const rejected = await request("/api/users", "POST", {
+      ...payload,
+      password: value,
+    });
+    assert.equal(rejected.status, 400, JSON.stringify(rejected.data));
+  }
+  const created = await request("/api/users", "POST", {
+    ...payload,
+    password: "Ab1!cdef",
+  });
+  assert.equal(created.status, 200, JSON.stringify(created.data));
+  const signed = await request(
+    "/api/auth/login",
+    "POST",
+    { login: payload.login, password: "Ab1!cdef" },
+    null,
+  );
+  assert.equal(signed.status, 200);
+  const token = signed.data.token;
+  const rejected = await request(
+    "/api/auth/password",
+    "POST",
+    { current_password: "Ab1!cdef", new_password: "Abcdefg1" },
+    token,
+  );
+  assert.equal(rejected.status, 400);
+  assert.equal(
+    (await request("/api/meta", "GET", undefined, token)).status,
+    200,
+  );
+  const changed = await request(
+    "/api/auth/password",
+    "POST",
+    { current_password: "Ab1!cdef", new_password: "Xy2@mnop" },
+    token,
+  );
+  assert.equal(changed.status, 200, JSON.stringify(changed.data));
+  assert.equal(
+    (await request("/api/meta", "GET", undefined, token)).status,
+    401,
+  );
+  const again = await request(
+    "/api/auth/login",
+    "POST",
+    { login: payload.login, password: "Xy2@mnop" },
+    null,
+  );
+  assert.equal(again.status, 200);
+});
+test("FIPE is authoritative, electric indication persists independently, and edits log friendly names and before/after values", async () => {
+  const made = await request(
+    "/api/orders",
+    "POST",
+    {
+      vehicle: "FIP1A23",
+      service: "Instalação",
+      customer_name: "Cliente FIPE",
+      fipe_value: "R$ 40.000,00",
+      fipe_risk: "Categoria forjada",
+      term: "Termo removido",
+      document_data: {
+        vehicle_type: "Automóvel",
+        fipe_region: "SP",
+        vehicle_electric: true,
+      },
+    },
+    operatorToken,
+  );
+  assert.equal(made.status, 201, JSON.stringify(made.data));
+  assert.equal(made.data.fipe_risk, "Média SP");
+  assert.equal(made.data.document_data.vehicle_electric, true);
+  assert.equal(made.data.tracker_waiver_authorized, false);
+  assert.equal(made.data.term, undefined);
+  const edited = await request(
+    "/api/orders/" + made.data.id,
+    "PATCH",
+    {
+      version: made.data.version,
+      fipe_value: "80.000,01",
+      notes: "Cliente consultado sobre instalação.",
+    },
+    operatorToken,
+  );
+  assert.equal(edited.status, 200, JSON.stringify(edited.data));
+  assert.equal(edited.data.fipe_risk, "Alta");
+  const detail = await fresh(made.data.id);
+  assert.equal(detail.audit_summary.opened_by, "Operador de teste");
+  assert.equal(
+    detail.audit_summary.opened_at,
+    detail.history.find((e) => e.action === "created").created_at,
+  );
+  assert.equal(detail.audit_summary.last_modified_by, "Operador de teste");
+  assert.equal(detail.history[0].detail.changes.fipe_risk.before, "Média SP");
+  assert.equal(detail.history[0].detail.changes.fipe_risk.after, "Alta");
+  assert.equal(detail.history[0].detail.user.name, "Operador de teste");
+  assert.equal(
+    (
+      await request("/api/orders/" + detail.id, "PATCH", {
+        version: detail.version,
+        imei: "123456789012345",
+      })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await request("/api/orders/" + detail.id, "PATCH", {
+        version: detail.version,
+        fipe_value: "-1",
+      })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await request("/api/orders/" + detail.id, "PATCH", {
+        version: detail.version,
+        document_data: { vehicle_electric: "true" },
+      })
+    ).status,
+    400,
+  );
+  // Unknown historical labels survive unrelated edits until the classification inputs change.
+  await pool.query(
+    "UPDATE zc_orders SET fipe_value='',fipe_risk='Classificação histórica',document_data='{}'::jsonb WHERE id=$1",
+    [detail.id],
+  );
+  const historical = await request("/api/orders/" + detail.id, "PATCH", {
+    version: detail.version,
+    notes: "Ajuste de contato legado.",
+  });
+  assert.equal(historical.status, 200, JSON.stringify(historical.data));
+  assert.equal(historical.data.fipe_risk, "Classificação histórica");
+});
+
 test("alteração de senha revoga a sessão anterior e não afeta outras contas", async () => {
   assert.equal(
     (
@@ -1043,4 +1237,92 @@ test("alteração de senha revoga a sessão anterior e não afeta outras contas"
     401,
   );
   assert.equal((await request("/api/meta")).status, 200);
+});
+
+test("classificação FIPE manual explícita é persistida e pode voltar ao cálculo",async()=>{
+ const row=await create({vehicle:"OVR1A23",fipe_value:"40000",document_data:{vehicle_type:"Automóvel",fipe_region:"RJ"}});
+ assert.equal(row.fipe_risk,"Média RJ");
+ const changed=await request("/api/orders/"+row.id,"PATCH",{version:row.version,document_data:{fipe_override:"Alta"},sga_classification:"Revisão manual",sga_status:"Ativo"});
+ assert.equal(changed.status,200,JSON.stringify(changed.data));assert.equal(changed.data.fipe_risk,"Alta");
+ const reverted=await request("/api/orders/"+row.id,"PATCH",{version:changed.data.version,document_data:{fipe_override:""}});
+ assert.equal(reverted.status,200,JSON.stringify(reverted.data));assert.equal(reverted.data.fipe_risk,"Média RJ");
+ const invalid=await request("/api/orders/"+row.id,"PATCH",{version:reverted.data.version,document_data:{fipe_override:"Inexistente"}});
+ assert.equal(invalid.status,400);
+});
+
+test("agenda consolida atendimentos por serviço e técnico em todas as páginas",async()=>{
+ const day="2030-01-10";
+ const first=await create({vehicle:"AGD1A23",scheduled_at:day+"T08:00",service:"Instalação",document_data:{equipment_counts:{tracker:1,tag:1}}});
+ await create({vehicle:"AGD2A23",scheduled_at:day+"T10:00",service:"Manutenção"});
+ // Exercise the standalone BI endpoint first, then the paginated agenda.
+ const summary=await request("/api/agenda/summary?agenda_from="+day+"&agenda_to="+day+"&technician_id="+tech.id);
+ assert.equal(summary.status,200,JSON.stringify(summary.data));
+ assert.equal(summary.data.totals.appointments,2);
+ assert.equal(summary.data.totals.additional_orders,1);
+ assert.ok(summary.data.rows.every(row=>row.day===day&&row.technician_id===tech.id));
+ const r=await request("/api/orders?day="+day+"&technician_id="+tech.id+"&limit=1");
+ assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(r.data.total,2);assert.equal(r.data.items.length,1);
+ assert.equal(r.data.summary.totals.appointments,2);assert.equal(r.data.summary.totals.additional_orders,1);
+ assert.equal(r.data.summary.by_technician[0].appointments,2);
+ const filtered=await request("/api/agenda/summary?day="+day+"&technician_id="+tech.id+"&service_type=Instalação");
+ assert.equal(filtered.status,200);assert.equal(filtered.data.totals.appointments,1);
+ assert.equal(filtered.data.rows[0].service_type,"Instalação");
+ const page2=await request("/api/orders?day="+day+"&technician_id="+tech.id+"&limit=1&page=2");
+ assert.equal(page2.status,200,JSON.stringify(page2.data));
+ assert.equal(page2.data.items.length,1);
+ assert.notEqual(page2.data.items[0].id,r.data.items[0].id);
+ assert.deepEqual(page2.data.summary,r.data.summary);
+ const empty=await request("/api/agenda/summary?day="+day+"&technician_id="+tech.id+"&service_type=Retirada");
+ assert.equal(empty.status,200,JSON.stringify(empty.data));assert.equal(empty.data.totals.appointments,0);assert.equal(empty.data.rows.length,0);
+});
+
+test("demonstração RJ libera atribuição original e permite novo agendamento sem consultar SGA real",async()=>{
+ const {dataset}=require("../../../scripts/rj-demo-data.cjs"),{resetOriginalAssignments}=require("../../../scripts/rj-demo-seed.cjs"),{actor}=require("../src/demo-rj");
+ const {technicians,customers}=dataset(),customer=customers[0];
+ const original=await o.insert(pool,"zc_technicians",{name:technicians[0].name});
+ const demo=await o.create(pool,{customer_name:customer.name,vehicle:customer.vehicle,service:"Instalação",technician_id:original.id,status:"AGENDADO",scheduled_at:d.today()+"T10:30",document_data:{equipment_counts:{tracker:1,tag:1}}},actor,{});
+ const other=await o.create(pool,{customer_name:"Outro atendimento",vehicle:"RJT9S87",service:"Manutenção",technician_id:original.id,status:"AGENDADO",scheduled_at:d.today()+"T11:30"},"Operação",{});
+ await resetOriginalAssignments(pool);
+ let released=await o.get(pool,demo.id);
+ assert.equal(released.technician_id,null);assert.equal(released.status,"PENDENTE");assert.equal(released.scheduled_at,demo.scheduled_at);
+ const children=await d.rows(pool,"SELECT * FROM zc_orders WHERE parent_order_id=$1",[demo.id]);
+ assert.equal(children.length,1);assert.equal(children[0].technician_id,null);assert.equal(children[0].status,"PENDENTE");
+ assert.equal((await o.get(pool,other.id)).technician_id,original.id);
+ const assignment={version:released.version,technician_id:original.id,status:"AGENDADO"};
+ await assert.rejects(o.edit(pool,demo.id,assignment,"Operação",{SGA_SCHEDULING_GUARD:true}));
+ const assigned=await o.edit(pool,demo.id,assignment,"Operação",{SGA_SCHEDULING_GUARD:true,DEMO_RJ_ISOLATED:true});
+ assert.equal(assigned.technician_id,original.id);assert.equal(assigned.status,"AGENDADO");
+ await resetOriginalAssignments(pool);
+ assert.equal((await o.get(pool,demo.id)).technician_id,original.id);
+});
+
+test("consulta de OS fictícia não acessa SGA e não fabrica validação; OS normal mantém integração",async(t)=>{
+ const {dataset}=require("../../../scripts/rj-demo-data.cjs"),{actor}=require("../src/demo-rj");
+ const {SGAClient}=require("../src/integrations");
+ const c=dataset().customers[1];
+ const demo=await o.create(pool,{customer_name:c.name,vehicle:c.vehicle,service:"Instalação",status:"PENDENTE",document_data:{equipment_counts:{tracker:1,tag:1}}},actor,{});
+ const child=(await d.rows(pool,"SELECT * FROM zc_orders WHERE parent_order_id=$1",[demo.id]))[0];
+ const regular=await o.create(pool,{customer_name:"Cadastro normal de teste",vehicle:"LKM1N23",service:"Manutenção",status:"PENDENTE"},"Operação",{});
+ const before=await o.get(pool,demo.id);
+ const spy=t.mock.method(SGAClient.prototype,"lookup",async()=>{require("../src/errors").fail(409,"Consulta externa de teste");});
+ const original=appConfig.DEMO_RJ_ISOLATED;
+ try{
+   appConfig.DEMO_RJ_ISOLATED=true;
+   for(const record of [demo,child]){
+     const detail=await request("/api/orders/"+record.id);
+     assert.equal(detail.status,200,JSON.stringify(detail.data));assert.equal(detail.data.demo_simulation,true);
+     const sync=await request("/api/orders/"+record.id+"/sga-sync","POST",{});
+     assert.equal(sync.status,200,JSON.stringify(sync.data));assert.equal(sync.data.demo_simulation,true);
+     assert.equal(sync.data.order_version,record.version);
+     assert.equal(sync.data.sga_verification,undefined);assert.equal(sync.data.sga_check,undefined);
+   }
+   assert.equal(spy.mock.callCount(),0);
+   assert.deepEqual(await o.get(pool,demo.id),before);
+   const real=await request("/api/orders/"+regular.id+"/sga-sync","POST",{});
+   assert.equal(real.status,409);assert.equal(spy.mock.callCount(),1);
+   appConfig.DEMO_RJ_ISOLATED=false;
+   const nonDemo=await request("/api/orders/"+demo.id);assert.equal(nonDemo.data.demo_simulation,false);
+   const normal=await request("/api/orders/"+demo.id+"/sga-sync","POST",{});
+   assert.equal(normal.status,409);assert.equal(spy.mock.callCount(),2);
+ }finally{appConfig.DEMO_RJ_ISOLATED=original;}
 });

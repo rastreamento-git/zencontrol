@@ -76,6 +76,7 @@ function createApp(pool, env = process.env) {
   );
   configureAdmin(app, pool, auth);
   configureTrace(app, pool);
+  require("./adesivos").configureAdesivos(app, pool);
   const get = (route, sql) =>
     app.get(`/api/${route}`, async (req, res) =>
       res.json((await pool.query(sql)).rows),

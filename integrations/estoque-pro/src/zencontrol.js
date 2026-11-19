@@ -44,10 +44,53 @@ function configureZenControl(app, pool, env) {
     )
       fail(404, "Técnico ativo não encontrado.");
     res.json({
+      consumables: [
+        {
+          sga_product_code: "2371",
+          name: "Adesivo Perfurado",
+          quantity: Number(
+            (
+              await pool.query(
+                "SELECT quantidade FROM adesivo_saldos WHERE tecnico_id=$1",
+                [tid],
+              )
+            ).rows[0]?.quantidade || 0,
+          ),
+        },
+      ],
       items: (
         await pool.query(
-          "SELECT e.codigo_serial,e.produto_id,e.tecnico_id,p.nome produto,p.categoria FROM equipamentos_seriais e JOIN produtos p ON p.id=e.produto_id WHERE e.tecnico_id=$1 AND e.status='TECNICO' AND NOT e.arquivado ORDER BY p.nome,e.codigo_serial",
+          "SELECT e.codigo_serial,e.produto_id,e.tecnico_id,e.status,e.data_atualizacao,p.nome produto,p.categoria FROM equipamentos_seriais e JOIN produtos p ON p.id=e.produto_id WHERE e.tecnico_id=$1 AND e.status='TECNICO' AND NOT e.arquivado ORDER BY p.nome,e.codigo_serial",
           [tid],
+        )
+      ).rows,
+    });
+  });
+  app.get(base + "/technicians/:id/history", authorize, async (req, res) => {
+    const tid = integer(req.params.id, "Técnico"),
+      page = integer(req.query.page || 1, "Página");
+    if (
+      !(
+        await pool.query("SELECT 1 FROM tecnicos WHERE id=$1 AND ativo=true", [
+          tid,
+        ])
+      ).rowCount
+    )
+      fail(404, "Técnico ativo não encontrado.");
+    const result = await pool.query(
+      "SELECT e.id,e.codigo_serial,e.status_anterior,e.status_novo,e.data,COALESCE(m.tipo,CASE WHEN e.status_anterior='INSTALADO' AND e.status_novo='INSTALADO' THEN 'REINSTALACAO' END) tipo,p.nome modelo,p.categoria,NULLIF(e.zen_order_id,'') order_id FROM eventos_seriais e LEFT JOIN movimentacoes m ON m.id=e.movimentacao_id LEFT JOIN produtos p ON p.id=e.produto_id WHERE e.tecnico_id=$1 ORDER BY e.data DESC,e.id DESC LIMIT 50 OFFSET $2",
+      [tid, (page - 1) * 50],
+    );
+    res.json({ items: result.rows, page, limit: 50 });
+  });
+  app.post(base + "/reusable-items", authorize, async (req, res) => {
+    const codes = serials(req.body?.serials);
+    if (codes.length > 40) fail(400, "Limite de 40 códigos por consulta.");
+    res.json({
+      items: (
+        await pool.query(
+          "SELECT e.codigo_serial,e.produto_id,e.tecnico_id,e.status,p.nome produto,p.categoria FROM equipamentos_seriais e JOIN produtos p ON p.id=e.produto_id WHERE e.codigo_serial=ANY($1::text[]) AND e.status='INSTALADO' AND NOT e.arquivado ORDER BY e.codigo_serial",
+          [codes],
         )
       ).rows,
     });
@@ -56,14 +99,35 @@ function configureZenControl(app, pool, env) {
     const body = req.body || {},
       key = text(req.get("Idempotency-Key"), "Idempotência", 160);
     if (key.length < 12) fail(400, "Chave de idempotência inválida.");
+    if (body.reuse !== undefined && typeof body.reuse !== "boolean")
+      fail(400, "Reaproveitamento deve ser verdadeiro ou falso.");
     const payload = {
       source_system: text(body.source_system, "Origem", 80),
       order_id: text(body.order_id, "OS", 100),
       submission_id: text(body.submission_id, "Envio", 100),
       technician_id: integer(body.technician_id, "Técnico"),
-      serials: serials(body.serials).sort(),
+      serials:
+        Array.isArray(body.serials) &&
+        body.serials.length === 0 &&
+        body.consumables?.length
+          ? []
+          : serials(body.serials).sort(),
       operator: text(body.operator, "Operador", 200),
+      ...(body.reuse === true ? { reuse: true } : {}),
     };
+    if (body.consumables !== undefined) {
+      if (
+        !Array.isArray(body.consumables) ||
+        body.consumables.length !== 1 ||
+        String(body.consumables[0]?.sga_product_code) !== "2371" ||
+        body.consumables[0]?.quantity !== 1
+      )
+        fail(
+          400,
+          "Material de aplicação inválido. Informe uma unidade do adesivo Perfurado 2371.",
+        );
+      payload.consumables = [{ sga_product_code: "2371", quantity: 1 }];
+    }
     if (payload.serials.length > 20)
       fail(400, "Limite de 20 equipamentos por serviço.");
     const fingerprint = hash(JSON.stringify(payload)).toString("hex");
@@ -113,26 +177,75 @@ function configureZenControl(app, pool, env) {
             items.length !== payload.serials.length ||
             items.some(
               (e) =>
-                e.status !== "TECNICO" ||
-                e.tecnico_id !== payload.technician_id ||
+                e.status !== (payload.reuse ? "INSTALADO" : "TECNICO") ||
+                (!payload.reuse && e.tecnico_id !== payload.technician_id) ||
                 e.arquivado,
             )
           )
             fail(
               409,
-              "Todos os IMEIs precisam estar disponíveis na carga do técnico responsável. Nenhuma instalação foi registrada.",
+              payload.reuse
+                ? "O reaproveitamento exige equipamentos já instalados e não arquivados. Nenhuma alteração foi registrada."
+                : "Todos os IMEIs precisam estar disponíveis na carga do técnico responsável. Nenhuma instalação foi registrada.",
             );
-          const models = [...new Set(items.map((e) => e.produto_id))].sort(
-            (a, b) => a - b,
-          );
-          for (const id of models)
-            await moveWithin(client, "instalar", {
-              produto_id: id,
-              tecnico_id: payload.technician_id,
-              seriais: items
-                .filter((e) => e.produto_id === id)
-                .map((e) => e.codigo_serial),
-            });
+          if (payload.reuse) {
+            if (
+              !(
+                await client.query(
+                  "SELECT 1 FROM tecnicos WHERE id=$1 AND ativo=true",
+                  [payload.technician_id],
+                )
+              ).rowCount
+            )
+              fail(409, "Técnico inativo ou inexistente.");
+            // A reuse is a technical service, without a second stock consumption.
+            for (const item of items)
+              await client.query(
+                "INSERT INTO eventos_seriais(codigo_serial,produto_id,tecnico_id,status_anterior,status_novo,zen_source,zen_order_id) VALUES($1,$2,$3,'INSTALADO','INSTALADO',$4,$5)",
+                [
+                  item.codigo_serial,
+                  item.produto_id,
+                  payload.technician_id,
+                  payload.source_system,
+                  payload.order_id,
+                ],
+              );
+            await client.query(
+              "UPDATE equipamentos_seriais SET tecnico_id=$1,data_atualizacao=CURRENT_TIMESTAMP WHERE codigo_serial=ANY($2::text[])",
+              [payload.technician_id, payload.serials],
+            );
+          } else {
+            const models = [...new Set(items.map((e) => e.produto_id))].sort(
+              (a, b) => a - b,
+            );
+            for (const id of models)
+              await moveWithin(client, "instalar", {
+                produto_id: id,
+                tecnico_id: payload.technician_id,
+                seriais: items
+                  .filter((e) => e.produto_id === id)
+                  .map((e) => e.codigo_serial),
+              });
+            // Link only the installation events just written while serial rows are locked.
+            // Joining receipts by serial would misattribute a later reinstallation to an older OS.
+            await client.query(
+              "UPDATE eventos_seriais SET zen_source=$1,zen_order_id=$2 WHERE id IN(SELECT max(id) FROM eventos_seriais WHERE codigo_serial=ANY($3::text[]) AND status_novo='INSTALADO' GROUP BY codigo_serial)",
+              [payload.source_system, payload.order_id, payload.serials],
+            );
+          }
+          if (payload.consumables?.length)
+            await require("./adesivos").movement(
+              client,
+              {
+                type: "APLICACAO",
+                quantity: 1,
+                technician_id: payload.technician_id,
+                order_id: payload.order_id,
+                source_system: payload.source_system,
+              },
+              key + ":adesivo",
+              "ZenControl: " + payload.operator,
+            );
           const result = {
             success: true,
             receipt_id: receiptId,
@@ -143,7 +256,13 @@ function configureZenControl(app, pool, env) {
             technician_id: payload.technician_id,
             serials: payload.serials,
             status: "INSTALADO",
+            ...(payload.consumables
+              ? { consumables: payload.consumables }
+              : {}),
             confirmed_at: new Date().toISOString(),
+            ...(payload.reuse
+              ? { reused: true, operator: payload.operator }
+              : {}),
           };
           await client.query(
             "UPDATE zencontrol_installations SET result=$1::jsonb WHERE id=$2",
