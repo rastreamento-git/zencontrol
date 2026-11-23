@@ -145,7 +145,7 @@ async function main() {
     await page.getByLabel("Senha de acesso").fill(password);
     await page.getByRole("button", { name: "Entrar", exact: true }).click();
     await page
-      .getByRole("heading", { name: /Seu espaço de trabalho/, level: 1 })
+      .getByRole("heading", { name: /Central de operações ZenTracking/, level: 1 })
       .waitFor();
     await page.getByLabel("Aparência", { exact: true }).selectOption("dark");
     await checkAppearance(page, "dark");
@@ -220,7 +220,7 @@ async function main() {
     assert.equal(
       await page
         .getByRole("heading", {
-          name: /Seu espaço de trabalho/,
+          name: /Central de operações ZenTracking/,
           level: 1,
         })
         .count(),

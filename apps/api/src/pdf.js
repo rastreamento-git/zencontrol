@@ -28,7 +28,22 @@ const clean = (value) =>
     .replace(/\s+/g, " ")
     .trim();
 
-function settlementPdf(snapshot) {
+const closingStates = {
+  draft: "Em conferência",
+  legacy_unverified: "Histórico a conferir",
+  approved: "Aguardando pagamento",
+  awaiting_payment: "Aguardando pagamento",
+  partial: "Pagamento parcial",
+  paid: "Quitado",
+  no_payment_due: "Sem valor a pagar",
+  cancelled: "Cancelado",
+};
+
+function detailParts(value) {
+  return clean(value).match(/.{1,320}(?: |$)|.{1,320}/gu) || [""];
+}
+
+function settlementPdf(snapshot, state) {
   return new Promise((resolve, reject) => {
     const title = "Fechamento de serviços";
     const doc = new PDFDocument({
@@ -100,6 +115,11 @@ function settlementPdf(snapshot) {
           width,
         });
         text(name, left, doc.y + 4, { size: 14, bold: true, width });
+        if (state) {
+          text(closingStates[state] || "Situação não informada", left, doc.y + 4, {
+            bold: true, color: palette.blue, width,
+          });
+        }
         y = doc.y + 15;
 
         doc.roundedRect(left, y, width, 76, 8).fill(palette.background);
@@ -171,10 +191,10 @@ function settlementPdf(snapshot) {
       y += 25;
     }
 
-    function startSection(title, nextColumns) {
+    function startSection(title, nextColumns, firstRowHeight = 66) {
       section = title;
       columns = nextColumns;
-      if (y + 112 > bottom) {
+      if (y + 52 + firstRowHeight > bottom) {
         doc.addPage();
         header(false);
       }
@@ -238,7 +258,9 @@ function settlementPdf(snapshot) {
             "Ajuste · " + (adjustment.reason || "Sem descrição"),
             adjustment.amount_cents,
           ]),
-        ];
+        ].flatMap(([label, cents]) =>
+          detailParts(label).map((part, index) => [part, index ? null : cents]),
+        );
         const firstDetailHeight = details.length
           ? Math.max(12, heightOf(details[0][0], detailWidth)) + 7
           : 0;
@@ -276,7 +298,7 @@ function settlementPdf(snapshot) {
             y += 24;
           }
           text(label, service.x, y - 2, { ...noteOptions, width: detailWidth });
-          text(brl(cents), valueX, y - 2, {
+          if (cents != null) text(brl(cents), valueX, y - 2, {
             ...noteOptions,
             ...currencyOptions,
           });
@@ -293,23 +315,29 @@ function settlementPdf(snapshot) {
         x: service.x,
         width: detailWidth,
       };
+      const adjustmentHeight = (part) =>
+        Math.max(12, heightOf(part, description.width, 10)) + 18;
       startSection("Ajustes de períodos anteriores", [
         { ...os, label: "ORDEM" },
         description,
         { ...amount, label: "VALOR DO AJUSTE" },
-      ]);
+      ], adjustmentHeight(detailParts(carry[0].reason || "Ajuste")[0]));
       for (const adjustment of carry) {
-        const reason = adjustment.reason || "Ajuste";
-        const height =
-          Math.max(12, heightOf(reason, description.width, 10)) + 18;
-        ensureRoom(height);
-        text(adjustment.order_id, os.x, y + 9, { width: os.width, bold: true });
-        text(reason, description.x, y + 9, { width: description.width });
-        text(brl(adjustment.amount_cents), valueX, y + 9, {
-          ...currencyOptions,
-          bold: true,
-        });
-        y += height;
+        const parts = detailParts(adjustment.reason || "Ajuste");
+        for (const [index, part] of parts.entries()) {
+          const height = adjustmentHeight(part);
+          const pageChanged = ensureRoom(height);
+          if (!index || pageChanged) {
+            text(adjustment.order_id, os.x, y + 9, { width: os.width, bold: true });
+          }
+          if (!index) {
+            text(brl(adjustment.amount_cents), valueX, y + 9, {
+              ...currencyOptions, bold: true,
+            });
+          }
+          text(part, description.x, y + 9, { width: description.width });
+          y += height;
+        }
         line(y);
       }
     }

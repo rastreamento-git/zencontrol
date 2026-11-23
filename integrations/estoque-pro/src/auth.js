@@ -112,14 +112,7 @@ function configureAuth(app, env, pool) {
       .digest("base64url");
   async function valid(req) {
     if (federation.enabled) return federation.valid(req);
-    if (!enabled)
-      return {
-        id: null,
-        login: "desenvolvimento",
-        nome: "Desenvolvimento",
-        papel: "admin",
-        ativo: true,
-      };
+    if (!enabled) return null;
     const parts = (req.headers.authorization || "")
       .replace(/^Bearer /, "")
       .split(".");

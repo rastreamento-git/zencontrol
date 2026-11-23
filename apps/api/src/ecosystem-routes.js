@@ -171,7 +171,7 @@ function configureEcosystem(app, pool, cfg, auth) {
     res.json({ ok: true });
   });
   app.get("/api/technician/finance", async (req, res) =>
-    res.json(await f.summary(pool, (await mine(req)).id)),
+    res.json(await f.summary(pool, (await mine(req)).id, { technicianView: true })),
   );
   app.get("/api/technician/rates", async (req, res) => {
     const t = await mine(req);
@@ -638,7 +638,7 @@ function configureEcosystem(app, pool, cfg, auth) {
     res
       .type("pdf")
       .attachment("Fechamento-" + s.id + ".pdf")
-      .send(await settlementPdf(s.snapshot));
+      .send(await settlementPdf(s.snapshot, s.state));
   });
   app.get("/api/finance-v2/closings/:id/export", async (req, res) => {
     const s = await visibleClosing(req);
@@ -646,7 +646,9 @@ function configureEcosystem(app, pool, cfg, auth) {
       id: s.id,
       state: s.state,
       due_on: s.due_on,
-      snapshot: s.snapshot,
+      snapshot: req.user.papel === "tecnico" || inField()
+        ? f.technicianSnapshot(s.snapshot)
+        : s.snapshot,
     });
   });
   app.get("/api/payments/:id/receipt", async (req, res) => {

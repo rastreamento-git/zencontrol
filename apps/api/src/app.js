@@ -1206,14 +1206,14 @@ function createApp(pool, env = process.env) {
   app.get("/api/finance/settlements/:id/pdf", admin, async (req, res) => {
     const s = await d.one(
       pool,
-      "SELECT snapshot FROM zc_settlements WHERE id=$1",
+      "SELECT snapshot,state FROM zc_settlements WHERE id=$1",
       [req.params.id],
     );
     if (!s) fail(404, "Fechamento não encontrado.");
     res
       .type("pdf")
       .attachment("Fechamento-" + req.params.id + ".pdf")
-      .send(await settlementPdf(s.snapshot));
+      .send(await settlementPdf(s.snapshot, s.state));
   });
   app.get("/api/audit", admin, async (req, res) => {
     const p = page(req);

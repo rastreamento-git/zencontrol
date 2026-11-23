@@ -25,7 +25,7 @@ O rascunho referencia uma versão da OS. Mudanças de veículo, serviço ou atri
 | Manutenção / retirada | Placa/chassi e serviço realizado | Não gera instalação automática |
 | Visita / improdutiva | Placa/chassi e evidência do atendimento | Não gera instalação automática |
 
-As quantidades e tipos de foto são configuráveis pela administração, com até 30 fotos por serviço. A foto da etiqueta permanece obrigatória em instalações. Esses valores são a configuração inicial da nova plataforma; ajustes operacionais devem ser feitos em Configurações.
+A tabela descreve as evidências de referência. No fluxo atual do ZenField, fotos gerais como placa/chassi e atendimento são opcionais. O envio exige checklist assinado e, nas instalações com equipamento novo, foto da etiqueta vinculada a cada código. A configuração central de mínimos de fotos gerais não torna essas fotos obrigatórias no ZenField. O limite é de 30 anexos por serviço.
 
 Leitura usa o mesmo componente, scanner, confirmação de quadros e worker ZXing do inventário. Código detectado precisa ser conferido por uma pessoa. O domínio preserva zeros iniciais e admite os seriais alfanuméricos já aceitos pelo Estoque Pro. Ler uma etiqueta identifica um candidato; apenas a carga oficial do estoque confirma sua disponibilidade.
 

@@ -76,3 +76,17 @@ test("transaction never sends statements through pool.query and releases connect
   ]);
   assert.equal(released, true);
 });
+
+test("missing credentials never imply an administrator session", async () => {
+  const app = createApp({}, { NODE_ENV: "development" });
+  const server = app.listen(0, "127.0.0.1");
+  try {
+    await new Promise((resolve) => server.once("listening", resolve));
+    const response = await fetch(
+      "http://127.0.0.1:" + server.address().port + "/api/produtos",
+    );
+    assert.equal(response.status, 401);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
