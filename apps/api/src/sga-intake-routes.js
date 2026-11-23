@@ -101,6 +101,9 @@ function configureSgaIntake(app, pool, cfg, client) {
       }),
     });
   });
+  app.post("/api/sga-intake/coverage", staff, async (req, res) =>
+    res.json(await require("./sga-coverage").simulate(pool, cfg, req.body.ids)),
+  );
   app.post("/api/sga-intake/entries/clear", staff, async (req, res) =>
     res.json(await intake.clearEntries(pool, req.body, actor(req))),
   );

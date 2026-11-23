@@ -67,6 +67,11 @@ after(async () => {
 });
 test("adapter authenticates its own secret and limits available inventory by technician", async () => {
   assert.equal((await request("/catalog", null, null, "invalid")).status, 401);
+  assert.equal((await request("/matrix", null, null, "invalid")).status, 401);
+  assert.deepEqual((await request("/matrix")).data, {
+    RASTREADOR: 0, TAG: 0, PERFURADO: 0,
+  });
+
   const catalog = await request("/catalog");
   assert.equal(catalog.status, 200);
   assert.equal(catalog.data.technicians.length, 2);

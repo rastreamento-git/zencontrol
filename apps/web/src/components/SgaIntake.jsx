@@ -5,6 +5,7 @@ import { api, errorMessage, format, Empty, Loading, Pager, Badge } from "./commo
 import { notify } from "@zen/ui/lib/feedback";
 import SgaProducts from "./SgaProducts";
 import TechnicianRecommendations from "./TechnicianRecommendations";
+import SgaCoverage from "./SgaCoverage";
 import { classifyFipe, fipeRegions, fipeCents, canonicalVehicleType, fipeCategories } from "@zen/domain/fipe.mjs";
 import { brazilStates, addressFields } from "@zen/domain/order-fields.mjs";
 import "./sga-intake.css";
@@ -150,6 +151,7 @@ export default function SgaIntake({
       setBusy(false);
     }
   }
+  const [coverageIds, setCoverageIds] = useState(null);
   async function select(entry) {
     await action(async () => {
       const [{ data }, { data: technicians }] = await Promise.all([
@@ -160,9 +162,9 @@ export default function SgaIntake({
       setTechs(technicians.items.filter((t) => t.active));
       setAssignment({
         technician_id: "",
-        scheduled_at: "",
-        electric: "",
-        customer_choice: "",
+        scheduled_at: data.data.coverage_scheduled_at || "",
+        electric: data.data.coverage_choices?.electric || "",
+        customer_choice: data.data.coverage_choices?.customer_choice || "",
         fipe_value:"",vehicle_type:canonicalVehicleType(data.data.document_data?.vehicle_type),fipe_region:data.data.document_data?.fipe_region||"",fipe_override:data.data.document_data?.fipe_override||"",sga_classification:data.data.sga_classification||"",sga_status:data.data.sga_status||"",contact:"",volunteer:"",document_data:{},
         sticker_discount_opt_in:data.data.sticker_discount_opt_in??(data.data.sga_products?.perfurado===true),
       });
@@ -208,6 +210,7 @@ export default function SgaIntake({
   };
   return (
     <section className={settings ? "sga-intake sga-import-view" : "dashboard-panel zc-service-list sga-queue-panel"} aria-label="Instalações pendentes do SGA">
+      {coverageIds && <SgaCoverage ids={coverageIds} onClose={() => setCoverageIds(null)} />}
       {settings && <div className="sga-intake-heading">
         <div><h2>Instalações pendentes do SGA</h2><p className="sga-intake-subtitle">Importação automática ou por período.</p></div>
         <button className="secondary-button" onClick={() => onOpenQueue?.()}><ArrowRight size={16}/> Abrir Controle de OS</button>
@@ -387,6 +390,10 @@ export default function SgaIntake({
             {queue.items.length>0&&<>
               <label className="sga-select-page-mobile"><input type="checkbox" aria-label="Selecionar página no celular" checked={allMarked} disabled={busy||loading||filterPending||!!historyError} onChange={e=>setMarked(e.target.checked?pageIds:[])}/> Selecionar página</label>
               <button type="button" className="secondary-button" disabled={busy||loading||filterPending||!!historyError||!queue.items.some(incomplete)} onClick={()=>setMarked(queue.items.filter(incomplete).map(e=>e.id))}>Selecionar incompletos</button>
+              {selectedIds.length > 0 && <button type="button" className="secondary-button"
+                disabled={busy || selectedIds.length > 5}
+                onClick={() => setCoverageIds([...selectedIds])}>Simular cobertura</button>}
+              {selectedIds.length > 5 && <small>Selecione até 5 pendências para simular a cobertura.</small>}
               {selectedIds.length>0&&<button type="button" className="secondary-button" disabled={busy} onClick={()=>setMarked([])}>Desmarcar</button>}
               <button type="button" className="secondary-button sga-bulk-remove" disabled={busy||loading||filterPending||!!historyError||collecting||!selectedIds.length} onClick={()=>{setClearReason("reimport");setClearDialog(true);}}><Trash2 size={15}/> Limpar selecionados</button>
             </>}
