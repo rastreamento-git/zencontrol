@@ -81,6 +81,15 @@ async function saveDraft(pool, id, input, actor) {
     if (!entry) fail(404,"Pendência não encontrada.");
     if (entry.order_id) fail(409,"Esta pendência já foi atribuída.");
     const data = completeDraft(preparedData(entry), input || {});
+    if (["yes", "no"].includes(input?.electric)) {
+      data.coverage_choices = {
+        electric: input.electric,
+        customer_choice: input.electric === "yes" && ["tracker", "tag_only"].includes(input.customer_choice)
+          ? input.customer_choice : "",
+      };
+    }
+    if (input?.scheduled_at && d.date(input.scheduled_at, true))
+      data.coverage_scheduled_at = d.date(input.scheduled_at, true);
     await db.query("UPDATE zc_sga_intake SET data=$2 WHERE id=$1",[id,JSON.stringify(data)]);
     await d.audit(db,actor,"sga_intake_draft_completed","sga_intake",id);
     return { ...entry, data: preparedData({...entry,data}) };

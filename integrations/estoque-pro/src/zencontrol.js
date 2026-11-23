@@ -33,6 +33,22 @@ function configureZenControl(app, pool, env) {
       ).rows,
     }),
   );
+  app.get(base + "/matrix", authorize, async (req, res) => {
+    const { rows } = await pool.query(
+      `SELECT p.categoria, count(*)::int AS quantity
+       FROM equipamentos_seriais e JOIN produtos p ON p.id=e.produto_id
+       WHERE e.status='MATRIZ' AND NOT e.arquivado
+         AND p.categoria IN ('RASTREADOR','TAG')
+       GROUP BY p.categoria
+       UNION ALL
+       SELECT 'PERFURADO', COALESCE(sum(quantidade),0)::int
+       FROM adesivo_saldos WHERE titular='MATRIZ'`,
+    );
+    res.json({
+      RASTREADOR: 0, TAG: 0, PERFURADO: 0,
+      ...Object.fromEntries(rows.map(row => [row.categoria, row.quantity])),
+    });
+  });
   app.get(base + "/technicians/:id/items", authorize, async (req, res) => {
     const tid = integer(req.params.id, "Técnico");
     if (

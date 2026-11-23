@@ -73,6 +73,9 @@ class StockClient {
       );
     return data;
   }
+  matrix() {
+    return this.request("/matrix");
+  }
   catalog() {
     return this.request("/catalog");
   }
