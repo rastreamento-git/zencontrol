@@ -136,8 +136,9 @@ async function main() {
       "/zencontrol",
     );
     await page.getByRole("button", { name: "Financeiro", exact: true }).click();
-    await page.getByRole("button", { name: tab, exact: true }).click();
-    await page.getByLabel("Técnico", { exact: true }).waitFor();
+    await page.getByRole("navigation", { name: "Áreas do financeiro" })
+      .getByRole("button", { name: tab, exact: true }).click();
+    await page.locator(".tf-selector select").waitFor();
     return page;
   }
   const fieldToken = await tokenFor("zenfield", 4317);
@@ -189,12 +190,9 @@ async function main() {
           /* A requisição cancelada já não tem consumidor. */
         }
       });
-      await page.getByLabel("Técnico", { exact: true }).selectOption("1");
+      await page.locator(".tf-selector select").selectOption("1");
       await until(() => started, "A consulta de tarifas não iniciou.");
-      await page.getByLabel("Técnico", { exact: true }).selectOption("2");
-      await page
-        .getByRole("button", { name: "Configurações", exact: true })
-        .click();
+      await page.locator(".tf-selector select").selectOption("2");
       const price = page.getByLabel("Instalação (R$)", { exact: true });
       await until(
         async () => (await price.inputValue().catch(() => "")) === "200",
@@ -210,7 +208,7 @@ async function main() {
     "Troca de técnico encerra o formulário de pagamento anterior",
     async () => {
       const page = await finance("Pagamentos");
-      await page.getByLabel("Técnico", { exact: true }).selectOption("1");
+      await page.locator(".tf-selector select").selectOption("1");
       await page
         .getByRole("button", {
           name: "Registrar pagamento externo",
@@ -228,7 +226,7 @@ async function main() {
         page.waitForResponse(
           (r) => new URL(r.url()).pathname === "/api/finance-v2/technicians/2",
         ),
-        page.getByLabel("Técnico", { exact: true }).selectOption("2"),
+        page.locator(".tf-selector select").selectOption("2"),
       ]);
       await page.waitForTimeout(100);
       assert.equal(
