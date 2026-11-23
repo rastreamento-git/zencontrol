@@ -340,6 +340,13 @@ test("technician financial documents and notifications remain scoped during staf
     a.id,
   );
   assert.equal(view.snapshot.technician.id, a.id);
+  assert.equal(view.snapshot.preview_hash, undefined);
+  assert.equal(view.snapshot.policy, undefined);
+  assert.equal(view.snapshot.reason, undefined);
+  assert.ok(view.snapshot.orders.every((order) => !Object.hasOwn(order, "rate_id")));
+  const finance = await req("/technician/finance", "GET", undefined, operator, a.id);
+  assert.ok(finance.settlements.some((entry) => entry.id === closing.id));
+  assert.ok(finance.settlements.every((entry) => !Object.hasOwn(entry, "snapshot")));
   const notifications = await req(
     "/notifications",
     "GET",

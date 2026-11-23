@@ -444,7 +444,29 @@ async function payment(db, id, input, actor, receipt = {}) {
   );
   return row;
 }
-async function summary(db, tid, {includeOutstanding=false}={}) {
+const publicExtra = ({ type, description, amount_cents }) => ({ type, description, amount_cents });
+const publicAdjustment = ({ order_id, reason, amount_cents }) => ({ order_id, reason, amount_cents });
+
+function technicianSnapshot(snapshot) {
+  const { technician, start, end, due_on, total_cents } = snapshot;
+  return {
+    technician: { id: technician.id, name: technician.name },
+    start, end, due_on, total_cents,
+    orders: snapshot.orders.map((order) => {
+      const { id, vehicle, service, executed_on, completed_at, base_cents,
+        total_cents, late, original_competence } = order;
+      return {
+        id, vehicle, service, executed_on, completed_at, base_cents,
+        total_cents, late, original_competence,
+        extras: (order.extras || []).map(publicExtra),
+        adjustments: (order.adjustments || []).map(publicAdjustment),
+      };
+    }),
+    carry_adjustments: (snapshot.carry_adjustments || []).map(publicAdjustment),
+  };
+}
+
+async function summary(db, tid, {includeOutstanding=false, technicianView=false}={}) {
   const cycle = await policyFor(db, tid);
   const ledger = await d.rows(
     db,
@@ -470,7 +492,29 @@ async function summary(db, tid, {includeOutstanding=false}={}) {
     "SELECT a.* FROM zc_adjustments a JOIN zc_financial_ledger l ON l.order_id=a.order_id JOIN zc_orders o ON o.id=l.order_id WHERE o.tracker_waiver_authorized=false AND l.technician_id=$1 ORDER BY a.created_at DESC LIMIT 200",
     [tid],
   );
-  return {cycle,ledger,settlements,adjustments,...await accountTotals(db,tid)};
+  const totals = await accountTotals(db, tid);
+  if (!technicianView) return { cycle, ledger, settlements, adjustments, ...totals };
+  return {
+    cycle,
+    ledger: ledger.map((entry) => {
+      const { order_id, vehicle, service, executed_on, base_cents, total_cents,
+        state, status, eligible_on, adjustment_cents, settlement_id } = entry;
+      return { order_id, vehicle, service, executed_on, base_cents, total_cents,
+        state, status, eligible_on, adjustment_cents, settlement_id,
+        // Older deployed ZenField versions call slice() on this field.
+        rate_id: "", extras: (entry.extras || []).map(publicExtra) };
+    }),
+    settlements: settlements.map((entry) => {
+      const { id, start_date, end_date, total_cents, due_on, state,
+        paid_cents, balance_cents, payments } = entry;
+      return { id, start_date, end_date, total_cents, due_on, state,
+        paid_cents, balance_cents, payments };
+    }),
+    adjustments: adjustments.map((entry) => ({
+      ...publicAdjustment(entry), id: entry.id, settlement_id: entry.settlement_id,
+    })),
+    ...totals,
+  };
 }
 async function accountTotals(db,tid){
   // Totals cover the entire account, independently of display limits above.
@@ -511,6 +555,7 @@ async function overview(db){
 }
 
 module.exports = {
+  technicianSnapshot,
   prices,
   travelCharge,
   travelForDate,

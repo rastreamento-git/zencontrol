@@ -44,7 +44,7 @@ async function check(name, run) {
     await run();
     results.push({ name, passed: true });
   } catch (error) {
-    results.push({ name, passed: false, error: error.message.split("\n")[0] });
+    results.push({ name, passed: false, error: error.message.split("\n").slice(0, 6).join("\n") });
   }
 }
 async function main() {
@@ -128,7 +128,7 @@ async function main() {
     await page.goto(`http://127.0.0.1:${port}${suffix}`);
     return page;
   }
-  async function finance() {
+  async function finance(tab) {
     const page = await pageFor(
       4320,
       centralToken,
@@ -136,6 +136,7 @@ async function main() {
       "/zencontrol",
     );
     await page.getByRole("button", { name: "Financeiro", exact: true }).click();
+    await page.getByRole("button", { name: tab, exact: true }).click();
     await page.getByLabel("Técnico", { exact: true }).waitFor();
     return page;
   }
@@ -157,7 +158,7 @@ async function main() {
   await check(
     "Tarifa de resposta atrasada não substitui o técnico atual",
     async () => {
-      const page = await finance();
+      const page = await finance("Configurações");
       let release,
         started = false;
       const gate = new Promise((resolve) => {
@@ -192,7 +193,7 @@ async function main() {
       await until(() => started, "A consulta de tarifas não iniciou.");
       await page.getByLabel("Técnico", { exact: true }).selectOption("2");
       await page
-        .getByText("Política de fechamento e tarifas", { exact: true })
+        .getByRole("button", { name: "Configurações", exact: true })
         .click();
       const price = page.getByLabel("Instalação (R$)", { exact: true });
       await until(
@@ -208,7 +209,7 @@ async function main() {
   await check(
     "Troca de técnico encerra o formulário de pagamento anterior",
     async () => {
-      const page = await finance();
+      const page = await finance("Pagamentos");
       await page.getByLabel("Técnico", { exact: true }).selectOption("1");
       await page
         .getByRole("button", {
@@ -219,7 +220,7 @@ async function main() {
         .click();
       await page
         .getByRole("heading", {
-          name: "Registrar pagamento já efetuado",
+          name: "Registrar pagamento externo",
           exact: true,
         })
         .waitFor();
@@ -233,7 +234,7 @@ async function main() {
       assert.equal(
         await page
           .getByRole("heading", {
-            name: "Registrar pagamento já efetuado",
+            name: "Registrar pagamento externo",
             exact: true,
           })
           .count(),
@@ -436,6 +437,7 @@ async function main() {
         await techForm
           .getByLabel("Nome", { exact: true })
           .fill("Técnica de teste");
+        await techForm.getByLabel("Base de partida para os trajetos").selectOption("none");
         await techForm
           .getByLabel("Instalação (R$)", { exact: true })
           .fill("95");
@@ -474,13 +476,16 @@ async function main() {
         const cadastro = page.getByRole("dialog", {
           name: "Editar cadastro técnico",
         });
-        await cadastro
-          .getByLabel("Endereço / região base", { exact: true })
-          .fill("Niterói");
+        await cadastro.getByLabel("Base de partida para os trajetos").selectOption("structured");
+        for (const [field, value] of [
+          ["CEP", "24000-000"], ["Logradouro", "Rua fictícia"], ["Número", "10"],
+          ["Bairro", "Centro"], ["Município", "Niterói"],
+        ]) await cadastro.getByLabel(field, { exact: true }).fill(value);
+        await cadastro.getByLabel("UF", { exact: true }).selectOption("RJ");
         await cadastro
           .getByRole("button", { name: "Salvar", exact: true })
           .click();
-        await row.getByText("Niterói", { exact: true }).waitFor();
+        await row.getByText(/Niterói/).waitFor();
         await page.getByLabel("Status do acesso").selectOption("inactive");
         await row.getByText("Desativado", { exact: true }).waitFor();
         assert.equal(await techs.getByRole("listitem").count(), 1);

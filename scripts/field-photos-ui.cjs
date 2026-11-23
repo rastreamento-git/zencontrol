@@ -266,6 +266,12 @@ async function main() {
       exact: true,
     })
     .check();
+  await page.getByRole("navigation", { name: "Áreas do portal" })
+    .getByRole("button", { name: "Meu estoque" }).click();
+  const leave = page.getByRole("dialog", { name: "Sair do atendimento" });
+  await leave.getByRole("button", { name: "Cancelar" }).click();
+  assert.match(await page.getByLabel("Observações do técnico (obrigatórias)").inputValue(),
+    /Instalação realizada/);
   await page
     .getByLabel("Conferi a OS, as fotos e os equipamentos deste atendimento.", {
       exact: true,
@@ -559,6 +565,7 @@ async function main() {
   await central
     .getByRole("button", { name: "Financeiro", exact: true })
     .click();
+  await central.getByRole("button", { name: "Solicitações", exact: true }).click();
   const centralExpense = central
     .locator("article.eco-card")
     .filter({ has: central.getByText(description, { exact: true }) });

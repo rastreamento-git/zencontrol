@@ -1434,7 +1434,7 @@ export function FinancePanel({ technical = false }) {
                     <td>{l.service}</td>
                     <td>
                       {brl(l.base_cents)}
-                      <small>Versão {l.rate_id.slice(0, 12)}</small>
+                      {!technical && l.rate_id && <small>Versão {l.rate_id.slice(0, 12)}</small>}
                     </td>
                     <td>
                       {l.extras.map((x, i) => (
@@ -1486,7 +1486,8 @@ export function FinancePanel({ technical = false }) {
                 </strong>
               </p>
               <p>
-                Vencimento: {s.due_on || "Legado"} · Responsável: {s.created_by}
+                Vencimento: {s.due_on || "Legado"}
+                {!technical && s.created_by && " · Responsável: " + s.created_by}
               </p>
               <div className="eco-row">
                 <button
