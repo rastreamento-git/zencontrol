@@ -30,7 +30,7 @@ function identity(env, pool, publicUser) {
       throw Error("Configure o segredo da integração de identidade.");
     base = u.origin;
   }
-  async function remote(action, body) {
+  async function remote(action, body, timeout = 10000) {
     let r;
     try {
       r = await fetch(base + "/api/auth/sso/" + action, {
@@ -40,7 +40,7 @@ function identity(env, pool, publicUser) {
           "x-zen-sso-secret": env.ZENCONTROL_INTEGRATION_SECRET,
         },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(timeout),
         redirect: "error",
       });
     } catch {
@@ -52,7 +52,8 @@ function identity(env, pool, publicUser) {
     const data = await r.json().catch(() => ({}));
     if (!r.ok)
       fail(
-        r.status === 401 || r.status === 403 ? r.status : 503,
+        ([401, 403].includes(r.status) ||
+          (action === "stock-planning" && [400, 409, 429].includes(r.status))) ? r.status : 503,
         data.error || "Não foi possível validar a conta ZEN.",
       );
     return data;
@@ -109,6 +110,10 @@ function identity(env, pool, publicUser) {
     reauthenticate: (req) =>
       remote("reauth", { token: token(req), password: req.body.password }),
     logout: (req) => remote("logout", { token: token(req) }),
+    stockPlanning(req, input) {
+      if (!enabled) fail(503, "O planejamento SGA exige o acesso unificado ZEN.");
+      return remote("stock-planning", { ...input, token: token(req) }, input.ids ? 180000 : 10000);
+    },
   };
 }
 module.exports = { identity };

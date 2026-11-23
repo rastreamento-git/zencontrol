@@ -319,3 +319,32 @@ test("expired inventory sessions can leave the local app", async () => {
     200,
   );
 });
+
+test("stock planning lists pending installation demand through a stock session", async () => {
+  const entry = "72c57256-7ef9-4170-a557-8c895fa36dce";
+  await db.pool.query(
+    "INSERT INTO zc_sga_intake_runs(id,run_key,day,state,config,actor,created_at) VALUES('planning-test','planning-test','2026-11-23','completed','{}','fictício','2026-11-23')",
+  );
+  const data = {
+    sga_id: "999999", vehicle: "FIC9A99", sga_classification: "Instalação Pendente",
+    customer_name: "Pessoa fictícia", fipe_value: "65000",
+    document_data: { vehicle_type: "Automóvel", fipe_region: "SP", fipe_override: "Alta" },
+    coverage_choices: { electric: "no" }, sticker_discount_opt_in: false,
+  };
+  await db.pool.query(
+    "INSERT INTO zc_sga_intake(id,sga_vehicle_id,customer_key,vehicle_key,customer_name,vehicle,movement_at,received_at,run_id,data,raw_source) VALUES($1,'999999','planning-customer','planning-car','Pessoa fictícia','FIC9A99','2026-11-23','2026-11-23','planning-test',$2,'{}')",
+    [entry, JSON.stringify(data)],
+  );
+  const route = "/api/compras/instalacoes-pendentes";
+  assert.equal((await req(sbase, route, undefined, technical)).status, 401);
+  const { token } = await grant(await login("operador"));
+  const response = await req(sbase, route, undefined, token);
+  assert.equal(response.status, 200);
+  const item = response.data.items.find((row) => row.id === entry);
+  assert.equal(item.classification, "Instalação Pendente");
+  assert.deepEqual(item.required, { RASTREADOR: 1, TAG: 1, PERFURADO: 0 });
+  assert.ok(!JSON.stringify(response.data).includes(data.customer_name));
+  const simulation = await req(sbase, route + "/cobertura", { ids: [entry] }, token);
+  assert.equal(simulation.status, 200);
+  assert.equal(simulation.data.items[0].state, "route_pending");
+});
