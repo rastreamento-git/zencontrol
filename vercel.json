@@ -40,6 +40,7 @@
   ],
   "git": {
     "deploymentEnabled": {
+      "fix/atualiza-estoque-demo": false,
       "fix/auditoria-zencontrol": false,
       "feat/ecossistema-homologacao": true,
       "fix/pdf-fechamento-zen": false
