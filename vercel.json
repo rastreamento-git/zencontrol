@@ -40,6 +40,7 @@
   ],
   "git": {
     "deploymentEnabled": {
+      "fix/publica-compras-sga": false,
       "feat/consulta-sga-compras": false,
       "fix/publica-saldo-matriz": false,
       "feat/cobertura-sga": false,
