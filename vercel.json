@@ -40,7 +40,8 @@
   ],
   "git": {
     "deploymentEnabled": {
-      "feat/ecossistema-homologacao": true
+      "feat/ecossistema-homologacao": true,
+      "fix/pdf-fechamento-zen": false
     }
   }
 }
