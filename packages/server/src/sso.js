@@ -37,7 +37,7 @@ function configureSso(
   app,
   env,
   pool,
-  { valid, issueToken, publicUser, checkPassword, googleClientId },
+  { valid, issueToken, publicUser, checkPassword, googleClientId, stockPlanning },
 ) {
   const loginUrl = origin(env.SSO_LOGIN_URL);
   const apps = {
@@ -225,6 +225,12 @@ function configureSso(
       ...(target === "stock" ? { token: grantToken } : issueToken(row)),
     });
   });
+  if (stockPlanning) {
+    app.post("/api/auth/sso/stock-planning", limited, async (req, res) => {
+      await stockIdentity(req);
+      res.set("Cache-Control", "no-store").json(await stockPlanning(req.body));
+    });
+  }
   app.post("/api/auth/sso/validate", async (req, res) =>
     res.json({ user: publicUser(await stockIdentity(req)) }),
   );

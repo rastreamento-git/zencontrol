@@ -134,7 +134,9 @@ function createApp(pool, env = process.env) {
     next();
   });
   configurePasswordRecovery(app, pool, cfg);
-  const auth = configureAuth(app, cfg, pool, configureGoogleAccess);
+  const stockPlanning = require("./sga-stock-planning");
+  const auth = configureAuth(app, cfg, pool, configureGoogleAccess,
+    (input) => stockPlanning.read(pool, cfg, input));
   app.locals.ready = async () => {
     await createMediaStore(cfg).ready();
     await auth.ready();

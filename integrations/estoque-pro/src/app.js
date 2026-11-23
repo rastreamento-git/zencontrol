@@ -323,6 +323,13 @@ function createApp(pool, env = process.env) {
       })),
     });
   });
+  app.get("/api/compras/instalacoes-pendentes", auth.requireAdmin, async (req, res) =>
+    res.json(await auth.stockPlanning(req, { page: Number(req.query.page ?? 1) })),
+  );
+  app.post("/api/compras/instalacoes-pendentes/cobertura", auth.requireAdmin, async (req, res) => {
+    if (!Array.isArray(req.body.ids)) fail(400, "Selecione as pendências.");
+    res.json(await auth.stockPlanning(req, { ids: req.body.ids }));
+  });
   app.get("/api/previsao-compras", async (req, res) => {
     const result =
       await pool.query(`SELECT p.id,p.nome,p.categoria,p.estoque_minimo,p.quantidade_matriz,COALESCE(SUM(m.quantidade),0)::integer AS uso_30_dias

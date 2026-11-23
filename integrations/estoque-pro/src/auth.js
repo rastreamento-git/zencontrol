@@ -271,6 +271,7 @@ function configureAuth(app, env, pool) {
     reauthenticate,
     enabled,
     federated: federation.enabled,
+    stockPlanning: federation.stockPlanning,
   };
 }
 module.exports = {

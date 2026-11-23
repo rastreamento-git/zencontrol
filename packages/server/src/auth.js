@@ -78,7 +78,7 @@ function publicUser(row) {
     criado_em: row.criado_em,
   };
 }
-function configureAuth(app, env, pool, configurePublicAuth) {
+function configureAuth(app, env, pool, configurePublicAuth, stockPlanning) {
   const enabled = Boolean(env.APP_PASSWORD);
   if (
     env.NODE_ENV === "production" &&
@@ -361,6 +361,7 @@ function configureAuth(app, env, pool, configurePublicAuth) {
   require("./sso").configureSso(app, env, pool, {
     ...handlers,
     ...publicConfig,
+    stockPlanning,
   });
   app.use("/api", async (req, res, next) => {
     const user = await valid(req);
