@@ -134,9 +134,10 @@ function createApp(pool, env = process.env) {
     next();
   });
   configurePasswordRecovery(app, pool, cfg);
+  const sgaClient = new SGAClient(cfg);
   const stockPlanning = require("./sga-stock-planning");
   const auth = configureAuth(app, cfg, pool, configureGoogleAccess,
-    (input) => stockPlanning.read(pool, cfg, input));
+    (input, user) => stockPlanning.handle(pool, cfg, sgaClient, user, input));
   app.locals.ready = async () => {
     await createMediaStore(cfg).ready();
     await auth.ready();
@@ -148,7 +149,6 @@ function createApp(pool, env = process.env) {
   require("./operational-routes").configureOperational(app, pool, auth);
   require("./ecosystem-routes").configureEcosystem(app, pool, cfg, auth);
   configurePortal(app, pool, cfg, auth);
-  const sgaClient = new SGAClient(cfg);
   require("./sga-intake-routes").configureSgaIntake(app, pool, cfg, sgaClient);
   require("./spreadsheet-import").configureSpreadsheetImport(
     app,

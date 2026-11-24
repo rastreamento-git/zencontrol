@@ -227,8 +227,8 @@ function configureSso(
   });
   if (stockPlanning) {
     app.post("/api/auth/sso/stock-planning", limited, async (req, res) => {
-      await stockIdentity(req);
-      res.set("Cache-Control", "no-store").json(await stockPlanning(req.body));
+      const user = await stockIdentity(req);
+      res.set("Cache-Control", "no-store").json(await stockPlanning(req.body, user));
     });
   }
   app.post("/api/auth/sso/validate", async (req, res) =>
