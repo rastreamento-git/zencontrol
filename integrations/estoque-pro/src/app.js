@@ -76,6 +76,7 @@ function createApp(pool, env = process.env) {
   );
   configureAdmin(app, pool, auth);
   configureTrace(app, pool);
+  require("./adesivos").configureAdesivos(app, pool);
   const get = (route, sql) =>
     app.get(`/api/${route}`, async (req, res) =>
       res.json((await pool.query(sql)).rows),
@@ -321,6 +322,24 @@ function createApp(pool, env = process.env) {
         media_diaria: Number(t.media_diaria),
       })),
     });
+  });
+  app.get("/api/compras/instalacoes-pendentes", auth.requireAdmin, async (req, res) =>
+    res.json(await auth.stockPlanning(req, { page: Number(req.query.page ?? 1), runId: req.query.coleta })),
+  );
+  app.post("/api/compras/instalacoes-pendentes/coletas", auth.requireAdmin, async (req, res) => {
+    const { start, end, confirmed } = req.body;
+    const run = await auth.stockPlanning(req, { action: "collect", start, end, confirmed });
+    res.status(202).json(run);
+  });
+  app.get("/api/compras/instalacoes-pendentes/coletas", auth.requireAdmin, async (req, res) =>
+    res.json(await auth.stockPlanning(req, { action: "run", start: req.query.start, end: req.query.end })),
+  );
+  app.get("/api/compras/instalacoes-pendentes/coletas/:id", auth.requireAdmin, async (req, res) =>
+    res.json(await auth.stockPlanning(req, { action: "run", runId: req.params.id })),
+  );
+  app.post("/api/compras/instalacoes-pendentes/cobertura", auth.requireAdmin, async (req, res) => {
+    if (!Array.isArray(req.body.ids)) fail(400, "Selecione as pendências.");
+    res.json(await auth.stockPlanning(req, { ids: req.body.ids, runId: req.body.coleta }));
   });
   app.get("/api/previsao-compras", async (req, res) => {
     const result =

@@ -1,22 +1,62 @@
+const { abortable } = require("./abortable");
 class IntegrationError extends Error {
   constructor(message, uncertain = false) {
     super(message);
+    this.name = "IntegrationError";
     this.uncertain = uncertain;
   }
 }
-async function http(url, payload, headers = {}, mutation = false, raw = false) {
+async function http(
+  url,
+  payload,
+  headers = {},
+  mutation = false,
+  raw = false,
+  signal,
+  timeoutMs = 40000,
+) {
   try {
     const response = await fetch(url, {
       method: payload === undefined ? "GET" : "POST",
       headers: { "Content-Type": "application/json", ...headers },
       body: payload === undefined ? undefined : JSON.stringify(payload),
-      signal: AbortSignal.timeout(40000),
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+        : AbortSignal.timeout(timeoutMs),
     });
-    if (!response.ok)
-      throw new IntegrationError(
+    if (!response.ok) {
+      const error = new IntegrationError(
         "Serviço externo respondeu HTTP " + response.status,
         mutation && response.status >= 500,
       );
+      error.upstreamStatus = response.status;
+      // Only recognize an explicitly documented empty-result message, never
+      // expose arbitrary upstream bodies (which may contain personal data).
+      if (response.status === 406 && !mutation) {
+        try {
+          const reader = response.body?.getReader();
+          const chunks = [];
+          let bytes = 0;
+          if (reader) {
+            try {
+              for (;;) {
+                const { value, done } = await reader.read();
+                if (done) {
+                  const body = JSON.parse(Buffer.concat(chunks).toString());
+                  const messages = [body.error, body.erro, body.errors, body.mensagem].flat().filter(v => typeof v === "string");
+                  error.noRecords = messages.some(v => /^(nenhum registro encontrado(?: para o filtro informado)?|nenhuma movimenta[cç][aã]o encontrada)[.!]?$/i.test(v.trim()));
+                  break;
+                }
+                bytes += value.length;
+                if (bytes > 16384) { await reader.cancel(); break; }
+                chunks.push(Buffer.from(value));
+              }
+            } finally { reader.releaseLock(); }
+          }
+        } catch { /* unknown 406 remains a failure */ }
+      }
+      throw error;
+    }
     let size = 0;
     const chunks = [];
     for await (const chunk of response.body) {
@@ -37,10 +77,9 @@ async function http(url, payload, headers = {}, mutation = false, raw = false) {
     }
   } catch (e) {
     if (e instanceof IntegrationError) throw e;
-    throw new IntegrationError(
-      "Não foi possível confirmar a resposta do serviço externo.",
-      mutation,
-    );
+    const error = new IntegrationError(e.name === "TimeoutError" || e.name === "AbortError" ? "Tempo limite ou interrupção na requisição externa." : "Não foi possível confirmar a resposta do serviço externo.", mutation);
+    error.retryable = true;
+    throw error;
   }
 }
 class WPPClient {
@@ -109,14 +148,69 @@ class WPPClient {
 class SGAClient {
   constructor(cfg) {
     this.cfg = cfg;
+    this.cachedToken = null;
+    this.catalogCache = null;
+  }
+  ready() {
+    return !!(
+      (this.cfg.SGA_READ_ENABLED || this.cfg.INTEGRATIONS_ENABLED) &&
+      [
+        this.cfg.HINOVA_TOKEN_ASSOC,
+        this.cfg.HINOVA_USER,
+        this.cfg.HINOVA_PASS,
+      ].every(Boolean)
+    );
+  }
+  async catalogs(force = false) {
+    if (!force && this.catalogCache && this.catalogCache.expires > Date.now())
+      return this.catalogCache;
+    const { definitions, catalogRows } = require("./sga-reference");
+    if (this.catalogPromise) return this.catalogPromise;
+    this.catalogPromise = (async () => {
+      const result = {
+        fetched_at: new Date().toISOString(),
+        expires: Date.now() + 900000,
+        items: {},
+        errors: [],
+      };
+      const token = await this.token();
+      for (const [name, definition] of Object.entries(definitions))
+        try {
+          result.items[name] = catalogRows(
+            await this.request(definition.path, undefined, false, token),
+            definition,
+          );
+        } catch {
+          result.items[name] = [];
+          result.errors.push(name);
+        }
+      this.catalogCache = result;
+      return result;
+    })();
+    try {
+      return await this.catalogPromise;
+    } finally {
+      this.catalogPromise = null;
+    }
   }
   async token() {
     const c = this.cfg;
     if (
-      !c.INTEGRATIONS_ENABLED ||
+      !(c.INTEGRATIONS_ENABLED || c.SGA_READ_ENABLED) ||
       ![c.HINOVA_TOKEN_ASSOC, c.HINOVA_USER, c.HINOVA_PASS].every(Boolean)
     )
       throw new IntegrationError("SGA desativado ou incompleto.");
+    if (this.cachedToken?.expires > Date.now()) return this.cachedToken.value;
+    if (this.tokenPromise) return this.tokenPromise;
+    this.tokenPromise = this.authenticate();
+    try {
+      return await this.tokenPromise;
+    } finally {
+      this.tokenPromise = null;
+    }
+  }
+  async authenticate() {
+    const c = this.cfg;
     const p = await http(
       c.HINOVA_API_URL + "/usuario/autenticar",
       { usuario: c.HINOVA_USER, senha: c.HINOVA_PASS },
@@ -124,15 +218,22 @@ class SGAClient {
     );
     if (!p.token_usuario)
       throw new IntegrationError("O SGA recusou a autenticação.");
+    this.cachedToken = { value: p.token_usuario, expires: Date.now() + 240000 };
     return p.token_usuario;
   }
-  async request(endpoint, payload, mutation = false, token) {
-    const p = await http(
-      this.cfg.HINOVA_API_URL + endpoint,
-      payload,
-      { Authorization: "Bearer " + (token || (await this.token())) },
-      mutation,
-    );
+  async request(endpoint, payload, mutation = false, token, signal) {
+    if (mutation && !this.cfg.INTEGRATIONS_ENABLED)
+      throw new IntegrationError("Alterações no SGA estão desativadas.");
+    signal?.throwIfAborted();
+    const authToken = token || (await abortable(this.token(), signal));
+    const send = (value) => http(this.cfg.HINOVA_API_URL + endpoint, payload, { Authorization: "Bearer " + value, Accept: "application/json" }, mutation, false, signal, endpoint === "/listar/alteracao-veiculos" ? 90000 : 40000);
+    let p;
+    try { p = await send(authToken); } catch (error) {
+      signal?.throwIfAborted();
+      if (mutation || error.upstreamStatus !== 401) throw error;
+      if (this.cachedToken?.value === authToken) this.cachedToken = null;
+      p = await send(await abortable(this.token(), signal));
+    }
     if (
       p?.erro ||
       p?.errors ||
@@ -142,22 +243,25 @@ class SGAClient {
       throw new IntegrationError("O SGA recusou a operação.", mutation);
     return p;
   }
-  async lookup(input) {
+  async lookup(input, { signal, includeRaw = false, includeAssessment = true } = {}) {
+    signal?.throwIfAborted();
     const query = typeof input === "string" ? { term: input } : input || {};
     const d = require("./domain"),
       { mapSgaVehicle } = require("./order-document");
     const id = String(query.sga_id || "").trim(),
       term = String(query.term || "").trim();
     const routes = [];
+    const codeRoutes = (code) => ["/veiculo/buscar/" + code + "/id", "/veiculo/buscar/" + code + "/codigo"];
+    const isCodeRoute = (route) => /\/(id|codigo)$/.test(route);
     if (id) {
       if (!/^\d{1,20}$/.test(id))
         throw new IntegrationError("Código SGA inválido.");
-      routes.push("/veiculo/buscar/" + id + "/id");
+      routes.push(...codeRoutes(id));
     }
     if (term) {
       const key = d.vehicle(term);
       if (/^\d{1,20}$/.test(term))
-        routes.push("/veiculo/buscar/" + term + "/id");
+        routes.push(...codeRoutes(term));
       else if (key.length >= 7 && key.length <= 30)
         routes.push(
           "/veiculo/buscar/" +
@@ -178,81 +282,342 @@ class SGAClient {
     }
     if (!routes.length)
       throw new IntegrationError("Informe código SGA, placa ou chassi.");
-    const token = await this.token();
+    const token = await abortable(this.token(), signal);
+    signal?.throwIfAborted();
     const nonempty = (value) =>
       Object.fromEntries(
         Object.entries(value).filter(
           ([, v]) => v !== null && v !== undefined && String(v).trim() !== "",
         ),
       );
-    const record = (data) => {
-      const value = Array.isArray(data) ? data[0] : data;
-      return value &&
-        typeof value === "object" &&
-        !Array.isArray(value) &&
-        Object.keys(value).length
-        ? nonempty(value)
-        : null;
+    const record = (data, route) => {
+      const { records } = require("./sga-reference");
+      const parts = route.split("/"),
+        expected = decodeURIComponent(parts.at(-2)),
+        kind = parts.at(-1);
+      const key =
+        isCodeRoute(route)
+          ? "codigo_veiculo"
+          : kind === "chassi"
+            ? "chassi"
+            : "placa";
+      const found = records(data).filter(
+        (v) =>
+          v &&
+          typeof v === "object" &&
+          d.vehicle(v[key]) === d.vehicle(expected),
+      );
+      if (
+        new Set(found.map((v) => String(v.codigo_veiculo || v[key]))).size > 1
+      )
+        throw new IntegrationError(
+          "Mais de um veículo corresponde ao identificador. Revise no SGA.",
+        );
+      return found.length ? nonempty(found[0]) : null;
     };
     let vehicle = null,
-      used = "";
+      used = "", lookupError = null;
     for (const route of new Set(routes)) {
       try {
-        vehicle = record(await this.request(route, undefined, false, token));
+        vehicle = record(
+          await this.request(route, undefined, false, token, signal),
+          route,
+        );
         if (vehicle) {
           used = route;
           break;
         }
       } catch (error) {
-        if (!(error instanceof IntegrationError)) throw error;
+        signal?.throwIfAborted();
+        if (
+          !(error instanceof IntegrationError) ||
+          error.message.startsWith("Mais de um")
+        )
+          throw error;
+        lookupError = error;
       }
     }
-    if (!vehicle)
-      throw new IntegrationError(
-        "Veículo não encontrado ou consulta indisponível.",
-      );
+    if (!vehicle) {
+      if (lookupError) {
+        if ([404, 406].includes(lookupError.upstreamStatus)) lookupError.reasonCode = "vehicle_not_found";
+        throw lookupError;
+      }
+      const error = new IntegrationError("Veículo não encontrado na resposta SGA. Confira o identificador e o formato retornado.");
+      error.reasonCode = "vehicle_not_found";
+      throw error;
+    }
     const code = String(vehicle.codigo_veiculo || "");
-    if (/^\d{1,20}$/.test(code) && used !== "/veiculo/buscar/" + code + "/id") {
-      try {
-        const full = record(
-          await this.request(
-            "/veiculo/buscar/" + code + "/id",
-            undefined,
-            false,
-            token,
-          ),
-        );
-        if (full) vehicle = { ...vehicle, ...full };
-      } catch (error) {
-        if (!(error instanceof IntegrationError)) throw error;
+    if (/^\d{1,20}$/.test(code) && !isCodeRoute(used)) {
+      for (const route of codeRoutes(code)) {
+        // Do not repeat a code query that was already tried before the plate/chassis result.
+        if (routes.includes(route)) continue;
+        try {
+          const full = record(
+            await this.request(route, undefined, false, token, signal),
+            route,
+          );
+          if (full) {
+            vehicle = { ...vehicle, ...full };
+            break;
+          }
+        } catch (error) {
+          signal?.throwIfAborted();
+          if (!(error instanceof IntegrationError) || error.message.startsWith("Mais de um")) throw error;
+          if (![404, 406].includes(error.upstreamStatus)) break;
+        }
       }
     }
+    // Validate every supplied identity after loading the full record.
+    for (const route of routes) {
+      const parts = route.split("/"),
+        expected = parts.at(-2),
+        kind = parts.at(-1),
+        field =
+          isCodeRoute(route)
+            ? "codigo_veiculo"
+            : kind === "chassi"
+              ? "chassi"
+              : "placa";
+      if (d.vehicle(vehicle[field]) !== d.vehicle(expected))
+        throw new IntegrationError(
+          "Os identificadores consultados não correspondem ao mesmo veículo no SGA.",
+        );
+    }
+    const sourceVehicle = includeRaw
+      ? require("./sga-products").businessPayload(vehicle)
+      : null;
     const volunteer = String(vehicle.codigo_voluntario || "");
     if (/^\d{1,20}$/.test(volunteer)) {
       try {
-        const full = record(
+        const { records } = require("./sga-reference");
+        const found = records(
           await this.request(
             "/buscar/voluntario/" + volunteer,
             undefined,
             false,
             token,
+            signal,
           ),
         );
+        const full =
+          found.length === 1
+            ? found[0]
+            : found.find((v) => String(v.codigo_voluntario) === volunteer);
         if (full?.nome) vehicle.voluntario_real = full.nome;
       } catch (error) {
+        signal?.throwIfAborted();
         if (!(error instanceof IntegrationError)) throw error;
       }
     }
-    return mapSgaVehicle(vehicle);
+    const catalogs = await abortable(this.catalogs(), signal);
+    const label = (kind, code) =>
+      catalogs.items[kind]?.find((r) => r.code === String(code))?.label;
+    vehicle.classificacao_real =
+      label("classifications", vehicle.codigo_classificacao || vehicle.codigo_classificacao_veiculo || vehicle.id_classificacao) ||
+      vehicle.descricao_classificacao;
+    vehicle.situacao_real =
+      label(
+        "statuses",
+        vehicle.codigo_situacao_veiculo || vehicle.codigo_situacao,
+      ) || vehicle.descricao_situacao;
+    vehicle.marca = vehicle.marca || label("brands", vehicle.codigo_marca);
+    vehicle.cor = vehicle.cor || label("colors", vehicle.codigo_cor);
+    vehicle.tipo_veiculo_catalogo = label("vehicle_types", vehicle.codigo_tipo_veiculo);
+    const mapped = mapSgaVehicle(vehicle);
+    mapped.sga_source = {
+      classification_code: String(vehicle.codigo_classificacao || vehicle.codigo_classificacao_veiculo || vehicle.id_classificacao || ""),
+      status_code: String(
+        vehicle.codigo_situacao_veiculo || vehicle.codigo_situacao || "",
+      ),
+    };
+    try {
+      const raw = await this.request(
+        "/produto-vinculado-veiculo/listar/" + encodeURIComponent(code),
+        undefined,
+        false,
+        token,
+        signal,
+      );
+      const { records } = require("./sga-reference");
+      const matching = records(raw).filter(row => String(row?.codigo_veiculo) === code && Array.isArray(row.produtos));
+      mapped.sga_products = require("./sga-products").productsSnapshot(
+        matching.length === 1 ? matching[0] : raw,
+        code,
+      );
+      if (includeRaw)
+        mapped.raw_products = require("./sga-products").businessPayload(raw);
+    } catch (error) {
+      signal?.throwIfAborted();
+      mapped.sga_products = {
+        state: "unavailable",
+        checked_at: d.now(),
+        items: [],
+        perfurado: null,
+      };
+    }
+    if (includeRaw) mapped.raw_vehicle = sourceVehicle;
+    if (includeAssessment && this.cfg.SGA_SCHEDULING_GUARD) {
+      const { records } = require("./sga-reference");
+      const cpf = String(
+        vehicle.cpf || vehicle.cnpj || vehicle.cpf_cnpj || "",
+      ).replace(/\D/g, "");
+      const associate = String(vehicle.codigo_associado || "");
+      const optional = async (path) => {
+        try {
+          return records(
+            await this.request(path, undefined, false, token, signal),
+          );
+        } catch (error) {
+          signal?.throwIfAborted();
+          return [];
+        }
+      };
+      const [finance, customer, customerSituation] = await Promise.all([
+        optional(
+          "/buscar/situacao-financeira-veiculo/" +
+            encodeURIComponent(code || mapped.vehicle),
+        ),
+        /^\d+$/.test(associate)
+          ? optional("/associado/buscar/" + associate + "/codigo")
+          : Promise.resolve([]),
+        [11, 14].includes(cpf.length)
+          ? optional("/buscar/situacao-associado/" + cpf)
+          : Promise.resolve([]),
+      ]);
+      const financial =
+        finance.find(
+          (v) =>
+            String(v.codigo_veiculo) === code &&
+            (!v.placa ||
+              !vehicle.placa ||
+              d.vehicle(v.placa) === d.vehicle(vehicle.placa)),
+        ) || {};
+      const owner =
+        customer.find(
+          (v) =>
+            String(v.codigo_associado) === associate &&
+            (!cpf || !v.cpf || String(v.cpf).replace(/\D/g, "") === cpf),
+        ) || {};
+      const ownerState =
+        customerSituation.find(
+          (v) => String(v.codigo_associado) === associate,
+        ) || {};
+      mapped.sga_assessment = require("./sga-eligibility").evaluate({
+        checked_at: d.now(),
+        vehicle_status: mapped.sga_status,
+        vehicle_classification: mapped.sga_classification,
+        customer_status: String(
+          ownerState.descricao || owner.descricao_situacao || "",
+        ),
+        customer_classification:
+          owner.descricao_classificacao ||
+          label("customer_classifications", owner.codigo_classificacao) ||
+          (owner.codigo_classificacao
+            ? "Cód: " + owner.codigo_classificacao
+            : ""),
+        financial_status: String(financial.situacao_financeira || ""),
+      });
+    }
+    return mapped;
   }
-  classification(id, code) {
+  async pendingMovements(day, kind, pendingCode, { signal } = {}) {
+    const { records } = require("./sga-reference");
+    const field =
+      kind === "statuses" ? "codigo_situacao" : "codigo_classificacao";
+    const date = day.split("-").reverse().join("/");
+    const all = [],
+      seen = new Set();
+    for (let page = 0; page < 100; page++) {
+      const query = () => this.request(
+        "/listar/alteracao-veiculos",
+        {
+          data_inicial: date,
+          data_final: date,
+          ultima_alteracao: "N",
+          campos: [field],
+          valor_posterior: [Number(pendingCode)],
+          inicio_paginacao: page,
+          quantidade_por_pagina: 100,
+        },
+        false,
+        undefined,
+        signal,
+      );
+      let result;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try { result = await query(); break; } catch (error) {
+          signal?.throwIfAborted();
+          if (error.upstreamStatus === 406 && error.noRecords) return all;
+          if (attempt === 2 || !(error.retryable || error.upstreamStatus === 429 || error.upstreamStatus >= 500)) throw error;
+          await abortable(new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1))), signal);
+        }
+      }
+      const rows = Array.isArray(result)
+        ? result
+        : Array.isArray(result?.resultado)
+          ? result.resultado
+          : records(result);
+      if (
+        !Array.isArray(result) &&
+        !Array.isArray(result?.resultado) &&
+        !Array.isArray(result?.dados) &&
+        !Array.isArray(result?.data)
+      )
+        throw new IntegrationError(
+          "O SGA retornou um histórico de movimentações em formato desconhecido.",
+        );
+      let added = 0;
+      for (const row of rows) {
+        const key = JSON.stringify(row);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        all.push(row);
+        added++;
+      }
+      if (rows.length < 100 && !Number(result?.numero_paginas)) return all;
+      if (
+        Number(result?.numero_paginas) &&
+        page + 1 >= Number(result.numero_paginas)
+      )
+        return all;
+      if (rows.length && page && !added)
+        throw new IntegrationError(
+          "O SGA repetiu a paginação. A coleta precisa ser revisada.",
+        );
+      if (!rows.length) return all;
+    }
+    throw new IntegrationError(
+      "Histórico acima do limite seguro de coleta. Nenhum registro desta consulta foi presumido.",
+    );
+  }
+  async classification(id, code) {
+    if (!this.cfg.INTEGRATIONS_ENABLED)
+      throw new IntegrationError("Alterações no SGA estão desativadas.");
+    const catalogs = await this.catalogs();
+    if (
+      !catalogs.items.classifications?.some(
+        (r) => r.code === String(code) && r.active,
+      )
+    )
+      throw new IntegrationError(
+        "Configure uma classificação ativa e atual do SGA.",
+      );
     return this.request(
       "/alterar/veiculo",
       { codigo_veiculo: Number(id), codigo_classificacao: Number(code) },
       true,
     );
   }
-  upload(id, photos, operator) {
+  async upload(id, photos, operator) {
+    if (!this.cfg.INTEGRATIONS_ENABLED)
+      throw new IntegrationError("Alterações no SGA estão desativadas.");
+    const catalogs = await this.catalogs();
+    if (
+      !catalogs.items.photo_types?.some(
+        (r) => r.code === String(this.cfg.SGA_PHOTO_TYPE_CODE) && r.active,
+      )
+    )
+      throw new IntegrationError("Configure o tipo de foto atual do SGA.");
     const tag = require("node:crypto").randomBytes(5).toString("hex");
     return this.request(
       "/veiculo/foto/cadastrar",
@@ -260,7 +625,7 @@ class SGAClient {
         codigo_veiculo: Number(id),
         foto: photos.map((p, i) => ({
           nome_arquivo: `zc${id}${tag}${i}.jpg`,
-          codigo_tipo: 9,
+          codigo_tipo: Number(this.cfg.SGA_PHOTO_TYPE_CODE),
           binario: p.toString("base64"),
           observacao: "Validação ZenControl: " + operator,
         })),

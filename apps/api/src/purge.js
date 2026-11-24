@@ -3,7 +3,12 @@ const path = require("node:path");
 const { transaction } = require("./database");
 const { fail } = require("./errors");
 const { tables: backupTables } = require("./backup");
-const tables = [...backupTables, "zc_technician_accounts"];
+const tables = [
+  "zc_chat_messages",
+  ...backupTables,
+  "zc_technician_accounts",
+  "zc_notification_reads",
+];
 const d = require("./domain");
 
 const quote = (value) => '"' + value.replaceAll('"', '""') + '"';

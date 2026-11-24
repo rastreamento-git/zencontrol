@@ -6,6 +6,21 @@ const path = require("node:path");
 const { createMediaStore } = require("./media-store");
 const sharp = require("sharp");
 const { configureAuth, hashPassword, username, publicUser } = require("./auth");
+const {
+  configureGoogleAccess,
+  googleSettings,
+  googleOrigin,
+} = require("./google-access");
+const { configureProfile } = require("./profile-routes");
+const {
+  configurePasswordRecovery,
+  recoveryEmail,
+} = require("./password-recovery");
+const {
+  configureChat,
+  directoryVersion: chatDirectoryVersion,
+} = require("./chat-routes");
+const { chatPhotoVersion } = require("./chat-photos");
 const { transaction } = require("./database");
 const { fail, HttpError, integer } = require("./errors");
 const { configuration } = require("./config");
@@ -16,8 +31,15 @@ const { WPPClient, SGAClient, IntegrationError } = require("./integrations");
 const { orderPdf, settlementPdf } = require("./pdf");
 const { configurePortal } = require("./portal-routes");
 const portal = require("./portal-service");
+const { documentOrder } = require("./order-document-load");
+const {
+  groupedPage,
+  presentOrders,
+  orderHistory,
+} = require("./order-presentation");
 function createApp(pool, env = process.env) {
   const cfg = configuration(env),
+    google = googleSettings(cfg),
     app = express();
   app.disable("x-powered-by");
   const origins = (
@@ -29,16 +51,37 @@ function createApp(pool, env = process.env) {
   if (origins.includes("*"))
     throw Error("CORS_ORIGINS exige origens explícitas.");
   origins.push(new URL(cfg.PUBLIC_URL).origin);
+  if (cfg.TECHNICIAN_PORTAL_URL)
+    origins.push(new URL(cfg.TECHNICIAN_PORTAL_URL).origin);
+  if (google) origins.push(google.central);
   if (cfg.TRUST_PROXY)
     app.set("trust proxy", integer(cfg.TRUST_PROXY, "TRUST_PROXY"));
   app.use(
     helmet({
+      ...(google
+        ? { crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" } }
+        : {}),
       contentSecurityPolicy: {
         directives: {
           imgSrc: ["'self'", "data:", "blob:"],
-          scriptSrc: ["'self'", "'wasm-unsafe-eval'"],
+          scriptSrc: [
+            "'self'",
+            "'wasm-unsafe-eval'",
+            ...(google ? [googleOrigin + "/gsi/client"] : []),
+          ],
           workerSrc: ["'self'"],
           frameAncestors: ["'none'"],
+          ...(google
+            ? {
+                frameSrc: ["'self'", googleOrigin + "/gsi/"],
+                connectSrc: ["'self'", googleOrigin + "/gsi/"],
+                styleSrc: [
+                  "'self'",
+                  "'unsafe-inline'",
+                  googleOrigin + "/gsi/style",
+                ],
+              }
+            : {}),
         },
       },
     }),
@@ -56,15 +99,29 @@ function createApp(pool, env = process.env) {
     }),
   );
   app.use("/api/technician/batches", express.json({ limit: "12mb" }));
+  app.use("/api/technician/requests", express.json({ limit: "6mb" }));
   app.use("/api/evidence", express.json({ limit: "24mb" }));
+  app.use("/api/finance-v2/closings", express.json({ limit: "6mb" }));
+  app.use("/api/spreadsheet-imports", express.json({ limit: "2mb" }));
   app.use(express.json({ limit: "512kb" }));
   app.get("/healthz", async (req, res) => {
-    await pool.query("SELECT 1");
-    res.json({
-      status: "ok",
-      version: "6.2.0",
-      media_storage: cfg.MEDIA_STORAGE || "local",
-    });
+    try {
+      await pool.query("SELECT 1");
+      res.json({
+        status: "ok",
+        version: "6.4.0",
+        media_storage: cfg.MEDIA_STORAGE || "local",
+        chat_directory_version: chatDirectoryVersion,
+        chat_photo_version: chatPhotoVersion,
+        spreadsheet_import_version: 9,
+        order_numbering_version: 1,
+        sga_import_control_version: 1,
+        sga_eligibility_version: 1,
+        sga_intake_version: 1,
+      });
+    } catch {
+      res.status(503).json({ status: "unavailable" });
+    }
   });
   configureWebhook(app, pool, cfg);
   app.use("/api", (req, res, next) => {
@@ -76,13 +133,33 @@ function createApp(pool, env = process.env) {
     }
     next();
   });
-  const auth = configureAuth(app, cfg, pool);
+  configurePasswordRecovery(app, pool, cfg);
+  const sgaClient = new SGAClient(cfg);
+  const stockPlanning = require("./sga-stock-planning");
+  const auth = configureAuth(app, cfg, pool, configureGoogleAccess,
+    (input, user) => stockPlanning.handle(pool, cfg, sgaClient, user, input));
   app.locals.ready = async () => {
     await createMediaStore(cfg).ready();
     await auth.ready();
   };
   app.locals.config = cfg;
+  configureProfile(app, pool);
+  configureChat(app, pool, cfg);
+  require("./field-access").configureFieldAccess(app, pool);
+  require("./operational-routes").configureOperational(app, pool, auth);
+  require("./ecosystem-routes").configureEcosystem(app, pool, cfg, auth);
   configurePortal(app, pool, cfg, auth);
+  require("./sga-intake-routes").configureSgaIntake(app, pool, cfg, sgaClient);
+  require("./spreadsheet-import").configureSpreadsheetImport(
+    app,
+    pool,
+    auth,
+    sgaClient,
+  );
+  app.post("/api/technician-recommendations", async (req,res)=>{
+    if(!["admin","operador"].includes(req.user?.papel))fail(403,"Acesso restrito à operação.");
+    res.json(await require("./technician-recommendations").recommend(pool,cfg,req.body));
+  });
   const admin = auth.requireAdmin;
   const actor = (req) => req.user.nome || req.user.login;
   const page = (req) => ({
@@ -91,26 +168,27 @@ function createApp(pool, env = process.env) {
   });
   app.get("/api/meta", (req, res) =>
     res.json({
+      sga_scheduling_required: cfg.SGA_SCHEDULING_GUARD,
       statuses: d.statuses,
       services: d.services,
       today: d.today(),
-      version: "6.2.0",
+      version: "6.4.0",
     }),
   );
   app.get("/api/overview", async (req, res) => {
     const today = d.today();
     const totals = await d.one(
       pool,
-      "SELECT count(*)::int total,count(*) FILTER(WHERE substring(scheduled_at,1,10)=$1)::int today,count(*) FILTER(WHERE scheduled_at<>'' AND substring(scheduled_at,1,10)<$1 AND status NOT IN ('CONCLUÍDO','CANCELADO'))::int overdue FROM zc_orders WHERE deleted_at=''",
+      "SELECT count(*)::int total,count(*) FILTER(WHERE substring(scheduled_at,1,10)=$1)::int today,count(*) FILTER(WHERE scheduled_at<>'' AND substring(scheduled_at,1,10)<$1 AND status NOT IN ('CONCLUÍDO','CANCELADO'))::int overdue FROM zc_orders WHERE deleted_at='' AND parent_order_id IS NULL",
       [today],
     );
     const status = await d.rows(
       pool,
-      "SELECT status,count(*)::int n FROM zc_orders WHERE deleted_at='' GROUP BY status",
+      "SELECT status,count(*)::int n FROM zc_orders WHERE deleted_at='' AND parent_order_id IS NULL GROUP BY status",
     );
     const technicians = await d.rows(
       pool,
-      "SELECT t.id,t.name,count(o.id)::int open_orders FROM zc_technicians t LEFT JOIN zc_orders o ON o.technician_id=t.id AND o.deleted_at='' AND o.status NOT IN ('CONCLUÍDO','CANCELADO') WHERE t.active=true GROUP BY t.id ORDER BY open_orders DESC,t.name LIMIT 8",
+      "SELECT t.id,t.name,count(o.id)::int open_orders FROM zc_technicians t LEFT JOIN zc_orders o ON o.technician_id=t.id AND o.deleted_at='' AND o.parent_order_id IS NULL AND o.status NOT IN ('CONCLUÍDO','CANCELADO') WHERE t.active=true GROUP BY t.id ORDER BY open_orders DESC,t.name LIMIT 8",
     );
     res.json({
       totals,
@@ -124,15 +202,26 @@ function createApp(pool, env = process.env) {
         (
           await d.one(
             pool,
-            "SELECT count(*) n FROM zc_batches WHERE state IN ('needs_review','ready','submitted','stock_failed')",
+            "SELECT count(*) n FROM zc_batches WHERE source<>'bundle' AND state IN ('needs_review','ready','submitted','stock_failed')",
           )
         ).n,
       ),
     });
   });
+  app.get("/api/agenda/summary", async(req,res)=>{
+    if(!["admin","operador"].includes(req.user?.papel))fail(403,"Acesso restrito à operação.");
+    const agenda=require("./agenda-summary");
+    res.json(await agenda.summarize(pool,agenda.filters(req.query)));
+  });
   app.get("/api/orders", async (req, res) => {
-    const p = page(req),
-      conditions = ["deleted_at=''"],
+    const p = page(req);
+    if(req.query.day||req.query.agenda_from||req.query.agenda_to){
+      const agenda=require("./agenda-summary"),filter=agenda.filters(req.query);
+      const result=await groupedPage(pool,{...filter,...p,sort:"scheduled_at,id"});
+      res.json({...result,items:await presentOrders(pool,result.items),summary:await agenda.summarize(pool,filter)});
+      return;
+    }
+    const conditions = [],
       args = [];
     const where = (s, v) => {
       args.push(v);
@@ -143,7 +232,7 @@ function createApp(pool, env = process.env) {
     if (req.query.q) {
       args.push("%" + String(req.query.q).slice(0, 200) + "%");
       conditions.push(
-        `(id ILIKE $${args.length} OR vehicle ILIKE $${args.length} OR customer_name ILIKE $${args.length} OR technician_name ILIKE $${args.length})`,
+        `(id ILIKE $${args.length} OR vehicle ILIKE $${args.length} OR customer_name ILIKE $${args.length} OR technician_name ILIKE $${args.length} OR EXISTS(SELECT 1 FROM zc_batches b WHERE b.order_id=eligible.id AND b.source='portal' AND b.submitted_at<>'' AND b.imeis::text ILIKE $${args.length}))`,
       );
     }
     if (req.query.day) {
@@ -156,47 +245,36 @@ function createApp(pool, env = process.env) {
         d.today(),
       );
     const clause = conditions.join(" AND ");
-    const total = Number(
-      (
-        await d.one(
-          pool,
-          "SELECT count(*) n FROM zc_orders WHERE " + clause,
-          args,
-        )
-      ).n,
-    );
-    const list = await d.rows(
-      pool,
-      `SELECT * FROM zc_orders WHERE ${clause} ORDER BY ${req.query.day ? "scheduled_at,id" : "updated_at DESC,id DESC"} LIMIT $${args.length + 1} OFFSET $${args.length + 2}`,
-      [...args, p.limit, (p.page - 1) * p.limit],
-    );
-    res.json({ items: list.map(d.publicOrder), total, ...p });
+    const result = await groupedPage(pool, {
+      base: "deleted_at=''",
+      conditions: clause,
+      args,
+      ...p,
+      sort: req.query.day ? "scheduled_at,id" : "updated_at DESC,id DESC",
+    });
+    res.json({ ...result, items: await presentOrders(pool, result.items) });
   });
   app.post("/api/orders", async (req, res) =>
     res
       .status(201)
-      .json(d.publicOrder(await o.create(pool, req.body, actor(req)))),
+      .json(d.publicOrder(await o.create(pool, req.body, actor(req), cfg))),
   );
   app.get("/api/orders/:id", async (req, res) => {
-    const order = d.publicOrder(await o.get(pool, req.params.id));
-    order.history = await d.rows(
-      pool,
-      "SELECT * FROM zc_audit WHERE entity_type='order' AND entity_id=$1 ORDER BY id DESC LIMIT 50",
-      [order.id],
-    );
+    const [order] = await presentOrders(pool, [
+      await o.get(pool, req.params.id),
+    ]);
+    order.demo_simulation=await require("./demo-rj").isDemoAttendance(pool,cfg,order);
+    Object.assign(order, await orderHistory(pool, order));
     order.jobs = await d.rows(
       pool,
       "SELECT id,kind,state,last_error,created_at FROM zc_jobs WHERE order_id=$1 ORDER BY created_at DESC LIMIT 20",
       [order.id],
     );
-    order.extras =
-      req.user.papel === "admin"
-        ? await d.rows(
-            pool,
-            "SELECT * FROM zc_order_extras WHERE order_id=$1",
-            [order.id],
-          )
-        : [];
+    order.extras = ["admin", "operador"].includes(req.user.papel)
+      ? await d.rows(pool, "SELECT * FROM zc_order_extras WHERE order_id=$1", [
+          order.id,
+        ])
+      : [];
     order.submissions = await d.rows(
       pool,
       "SELECT id,state,version,submitted_at FROM zc_batches WHERE order_id=$1 ORDER BY created_at DESC",
@@ -206,7 +284,9 @@ function createApp(pool, env = process.env) {
   });
   app.patch("/api/orders/:id", async (req, res) =>
     res.json(
-      d.publicOrder(await o.edit(pool, req.params.id, req.body, actor(req))),
+      d.publicOrder(
+        await o.edit(pool, req.params.id, req.body, actor(req), cfg),
+      ),
     ),
   );
   app.post("/api/orders/:id/complete", async (req, res) => {
@@ -251,6 +331,16 @@ function createApp(pool, env = process.env) {
         },
         true,
       );
+      await db.query(
+        "UPDATE zc_financial_ledger SET state='awaiting_approval',eligible_on='' WHERE order_id=$1",
+        [order.id],
+      );
+      await require("./notifications").orderEvent(
+        db,
+        { ...order, version: order.version + 1 },
+        "updated",
+        { reason },
+      );
       await d.audit(db, actor(req), "reopened", "order", order.id, { reason });
     });
     res.json({ ok: true });
@@ -258,12 +348,14 @@ function createApp(pool, env = process.env) {
   app.delete("/api/orders/:id", admin, async (req, res) => {
     await transaction(pool, async (db) => {
       const order = await o.get(db, req.params.id);
+      if (order.parent_order_id && order.document_data?.equipment_counts)
+        fail(409, "Arquive o atendimento pela OS principal.");
       await o.guard(db, order.id);
       if (req.body.version !== order.version) fail(409, "A OS mudou.");
       if (
         await d.one(
           db,
-          "SELECT 1 FROM zc_settlement_orders WHERE order_id=$1",
+          "SELECT 1 FROM zc_settlement_orders WHERE order_id=$1 OR order_id IN (SELECT id FROM zc_orders WHERE parent_order_id=$1)",
           [order.id],
         )
       )
@@ -278,29 +370,51 @@ function createApp(pool, env = process.env) {
         { deleted_at: d.now() },
         true,
       );
+      if (order.document_data?.equipment_counts)
+        await db.query(
+          "UPDATE zc_orders SET deleted_at=$2,status='CANCELADO',updated_at=$2,version=version+1 WHERE parent_order_id=$1 AND deleted_at=''",
+          [order.id, d.now()],
+        );
+      await db.query(
+        "UPDATE zc_financial_ledger SET state='cancelled' WHERE order_id=$1 OR order_id IN (SELECT id FROM zc_orders WHERE parent_order_id=$1)",
+        [order.id],
+      );
+      await require("./notifications").orderEvent(
+        db,
+        { ...order, version: order.version + 1 },
+        "cancelled",
+        { reason },
+      );
       await d.audit(db, actor(req), "deleted", "order", order.id, { reason });
     });
     res.json({ ok: true });
   });
   app.post("/api/orders/:id/dispatch", async (req, res) => {
-    if (req.body.masked === false && req.user.papel !== "admin")
+    if (
+      req.body.masked === false &&
+      !["admin", "operador"].includes(req.user.papel)
+    )
       fail(403, "A versão integral da OS exige administrador.");
-    if (req.body.masked === false && req.user.papel !== "admin")
+    if (
+      req.body.masked === false &&
+      !["admin", "operador"].includes(req.user.papel)
+    )
       fail(403, "Envio integral exige administração.");
     res.status(202).json({
       job_id: await o.dispatch(pool, req.params.id, req.body, actor(req), cfg),
     });
   });
   app.get("/api/orders/:id/pdf", async (req, res) => {
-    const order = await o.get(pool, req.params.id);
+    const order = await documentOrder(pool, await o.get(pool, req.params.id));
     res
       .type("pdf")
       .attachment(order.id + ".pdf")
       .send(
         await orderPdf(
           order,
-          req.query.integral !== "1" || req.user.papel !== "admin",
-          { portalUrl: cfg.PUBLIC_URL },
+          req.query.integral !== "1" ||
+            !["admin", "operador"].includes(req.user.papel),
+          { portalUrl: cfg.TECHNICIAN_PORTAL_URL || cfg.PUBLIC_URL },
         ),
       );
   });
@@ -311,7 +425,8 @@ function createApp(pool, env = process.env) {
     );
     for (const t of list) {
       delete t.extra_info;
-      if (req.user.papel !== "admin")
+      if (!["admin", "operador"].includes(req.user.papel)) delete t.operational_base;
+      if (!["admin", "operador"].includes(req.user.papel))
         for (const k of [
           "price_install",
           "price_maintenance",
@@ -336,6 +451,15 @@ function createApp(pool, env = process.env) {
     }))
       if (req.body[key] !== undefined)
         data[key] = d.string(req.body[key], key, max, key === "name");
+    if (req.body.operational_base !== undefined) {
+      if (req.body.operational_base === null) {
+        data.operational_base = {};
+      } else {
+        const normalized = require("./technician-base").normalizeBase(req.body.operational_base);
+        data.operational_base = normalized.base;
+        data.address = normalized.address;
+      }
+    }
     if (req.body.stock_technician_id !== undefined)
       data.stock_technician_id =
         req.body.stock_technician_id === null ||
@@ -359,8 +483,10 @@ function createApp(pool, env = process.env) {
         fail(400, "JID de grupo inválido.");
     if (req.body.active !== undefined)
       data.active = d.boolean(req.body.active, "Ativo");
+    let access;
     const tech = await transaction(pool, async (db) => {
-      let row;
+      let row,
+        rateChanged = false;
       if (req.params.id) {
         const old = await d.one(
           db,
@@ -385,6 +511,15 @@ function createApp(pool, env = process.env) {
             409,
             "Aguarde a confirmação do estoque antes de alterar o vínculo.",
           );
+        // Older clients can edit the legacy address; do not retain contradictory structured data.
+        if (data.operational_base === undefined && data.address !== undefined && data.address !== old.address)
+          data.operational_base = {};
+        rateChanged = [
+          "price_install",
+          "price_maintenance",
+          "price_removal",
+          "price_visit",
+        ].some((k) => data[k] !== undefined && data[k] !== old[k]);
         row = await o.update(db, "zc_technicians", "id", old.id, data, true);
         if (data.name && data.name !== old.name)
           await db.query(
@@ -395,51 +530,109 @@ function createApp(pool, env = process.env) {
         if (!data.name) fail(400, "Informe o nome.");
         row = await o.insert(db, "zc_technicians", data);
       }
+      if (!req.params.id) {
+        access = await require("./technician-access").createTechnicianAccount(
+          db,
+          row,
+          actor(req),
+          req.body.recovery_email === undefined
+            ? null
+            : recoveryEmail(req.body.recovery_email),
+        );
+        await require("./finance-engine").initialRate(db, row, actor(req));
+      }
+      if (data.active !== undefined)
+        await db.query(
+          "UPDATE usuarios SET ativo=$1,versao_sessao=versao_sessao+1 WHERE id IN (SELECT user_id FROM zc_technician_accounts WHERE technician_id=$2)",
+          [row.active, row.id],
+        );
+      if (req.params.id && rateChanged) {
+        await require("./finance-engine").addRate(
+          db,
+          row.id,
+          {
+            effective_on: d.today(),
+            prices: {
+              Instalação: row.price_install,
+              Reinstalação: row.price_install,
+              Manutenção: row.price_maintenance,
+              Retirada: row.price_removal,
+              Visita: row.price_visit,
+              Improdutiva: row.price_visit,
+            },
+          },
+          actor(req),
+        );
+      }
       await d.audit(db, actor(req), "saved", "technician", row.id);
       return row;
     });
-    res.json({ id: tech.id });
+    res.json({ id: tech.id, access });
   };
   app.post("/api/technicians", admin, saveTech);
   app.patch("/api/technicians/:id", admin, saveTech);
+  app.get("/api/regionals", admin, async (req,res)=>{
+    const p=page(req),q="%"+String(req.query.q||"").slice(0,200)+"%",status=String(req.query.status||"");
+    if(!["","ATIVO","INATIVO","UNKNOWN"].includes(status))fail(400,"Situação inválida.");
+    const where="(name ILIKE $1 OR sga_code ILIKE $1) AND ($2='' OR sga_status=$2 OR ($2='UNKNOWN' AND sga_status=''))";
+    const stats=await d.one(pool,"SELECT count(*)::int total,count(*) FILTER(WHERE sga_status='ATIVO')::int active,count(*) FILTER(WHERE sga_status='INATIVO')::int inactive,count(*) FILTER(WHERE sga_status='')::int unknown,max(sga_synced_at) last_sync FROM zc_sga_regionals");
+    res.json({items:await d.rows(pool,"SELECT * FROM zc_sga_regionals WHERE "+where+" ORDER BY name,sga_code LIMIT $3 OFFSET $4",[q,status,p.limit,(p.page-1)*p.limit]),total:Number((await d.one(pool,"SELECT count(*) n FROM zc_sga_regionals WHERE "+where,[q,status])).n),stats,...p});
+  });
+  let regionalsSyncRunning=false;
+  app.post("/api/regionals/sga/sync",admin,async(req,res)=>{
+    if(regionalsSyncRunning)fail(409,"Já existe uma sincronização de regionais em andamento.");
+    regionalsSyncRunning=true;
+    console.info(JSON.stringify({event:"sga_regionals_sync_start",configured:sgaClient.ready()}));
+    try{
+      const result=await require("./sga-regionals").synchronize(pool,sgaClient,actor(req));
+      console.info(JSON.stringify({event:"sga_regionals_sync_success",received:result.received,created:result.created,updated:result.updated,skipped:result.skipped,source:result.source}));
+      res.json(result);
+    }catch(e){
+      console.warn(JSON.stringify({event:"sga_regionals_sync_failed",status:e.status||null,upstream_status:e.upstreamStatus||null,code:e.code||e.name}));
+      throw e;
+    }finally{regionalsSyncRunning=false;}
+  });
   app.get("/api/volunteers", async (req, res) => {
-    const p = page(req),
-      q = "%" + String(req.query.q || "").slice(0, 200) + "%";
+    const p = page(req), q = "%" + String(req.query.q || "").slice(0, 200) + "%";
+    const status = String(req.query.status || "");
+    const where = "(name ILIKE $1 OR sga_code ILIKE $1) AND ($2='' OR sga_status=$2 OR ($2='LOCAL' AND sga_synced_at IS NULL))";
+    const stats = await d.one(pool,"SELECT count(*)::int total,count(*) FILTER(WHERE sga_status='ATIVO')::int active,count(*) FILTER(WHERE sga_status='INATIVO')::int inactive,count(*) FILTER(WHERE sga_synced_at IS NULL)::int local,max(sga_synced_at) last_sync FROM zc_volunteers");
     res.json({
-      items: await d.rows(
-        pool,
-        "SELECT * FROM zc_volunteers WHERE name ILIKE $1 OR sga_code ILIKE $1 ORDER BY name LIMIT $2 OFFSET $3",
-        [q, p.limit, (p.page - 1) * p.limit],
-      ),
-      total: Number(
-        (
-          await d.one(
-            pool,
-            "SELECT count(*) n FROM zc_volunteers WHERE name ILIKE $1 OR sga_code ILIKE $1",
-            [q],
-          )
-        ).n,
-      ),
-      ...p,
+      items: await d.rows(pool,"SELECT * FROM zc_volunteers WHERE "+where+" ORDER BY name,id LIMIT $3 OFFSET $4",[q,status,p.limit,(p.page-1)*p.limit]),
+      total: Number((await d.one(pool,"SELECT count(*) n FROM zc_volunteers WHERE "+where,[q,status])).n),
+      stats, ...p,
     });
   });
-  app.post("/api/volunteers", async (req, res) => {
+  let volunteersSyncRunning=false;
+  app.post("/api/volunteers/sga/sync", admin, async (req,res)=>{
+    if(volunteersSyncRunning)fail(409,"Já existe uma sincronização de consultores em andamento.");
+    volunteersSyncRunning=true;
+    try{
+      res.json(await require("./sga-volunteers").synchronize(pool,sgaClient,actor(req)));
+    }finally{volunteersSyncRunning=false;}
+  });
+  app.post("/api/volunteers", admin, async (req, res) => {
     const v = await transaction(pool, async (db) => {
-      const row = await o.insert(db, "zc_volunteers", {
-        name: d.string(req.body.name, "Nome", 200, true),
-        sga_code: d.string(req.body.sga_code || "", "Código SGA", 50),
-      });
-      await d.audit(db, actor(req), "created", "volunteer", row.id);
+      await db.query("LOCK TABLE zc_volunteers IN SHARE ROW EXCLUSIVE MODE");
+      const name=d.string(req.body.name,"Nome",200,true),sga_code=d.string(req.body.sga_code||"","Código SGA",50);
+      if(sga_code&&!/^\d{1,20}$/.test(sga_code))fail(400,"Código SGA inválido.");
+      if(await d.one(db,"SELECT id FROM zc_volunteers WHERE lower(trim(name))=lower(trim($1)) OR ($2<>'' AND sga_code=$2)",[name,sga_code]))fail(409,"Já existe um consultor com esse nome ou código SGA.");
+      const row=await o.insert(db,"zc_volunteers",{name,sga_code});
+      await d.audit(db,actor(req),"created","volunteer",row.id);
       return row;
     });
-    res.status(201).json({ id: v.id });
+    res.status(201).json({id:v.id});
   });
-  app.delete("/api/volunteers/:id", admin, async (req, res) => {
-    await transaction(pool, async (db) => {
-      await db.query("DELETE FROM zc_volunteers WHERE id=$1", [req.params.id]);
-      await d.audit(db, actor(req), "deleted", "volunteer", req.params.id);
+  app.delete("/api/volunteers/:id", admin, async (req,res)=>{
+    await transaction(pool,async db=>{
+      await db.query("LOCK TABLE zc_volunteers IN SHARE ROW EXCLUSIVE MODE");
+      const v=await d.one(db,"SELECT * FROM zc_volunteers WHERE id=$1",[req.params.id]);
+      if(!v)fail(404,"Consultor não encontrado.");
+      if(v.sga_synced_at)fail(409,"Consultores sincronizados são administrados no SGA.");
+      await db.query("DELETE FROM zc_volunteers WHERE id=$1",[v.id]);
+      await d.audit(db,actor(req),"deleted","volunteer",v.id);
     });
-    res.json({ ok: true });
+    res.json({ok:true});
   });
   app.get("/api/users", admin, async (req, res) =>
     res.json({
@@ -448,7 +641,14 @@ function createApp(pool, env = process.env) {
           pool,
           "SELECT u.*,a.technician_id FROM usuarios u LEFT JOIN zc_technician_accounts a ON a.user_id=u.id ORDER BY u.nome,u.id",
         )
-      ).map((u) => ({ ...publicUser(u), technician_id: u.technician_id })),
+      ).map((u) => ({
+        ...publicUser(u),
+        technician_id: u.technician_id,
+        activation_required: u.activation_required,
+        ...(req.user.papel === "admin" || u.papel === "tecnico"
+          ? { recovery_email: u.recovery_email }
+          : {}),
+      })),
     }),
   );
   const saveUser = async (req, res) => {
@@ -461,8 +661,12 @@ function createApp(pool, env = process.env) {
     const active =
       body.ativo === undefined ? true : d.boolean(body.ativo, "Ativo");
     const hash = body.password ? await hashPassword(body.password) : null;
+    const email =
+      body.recovery_email === undefined
+        ? undefined
+        : recoveryEmail(body.recovery_email);
     const user = await transaction(pool, async (db) => {
-      let row;
+      let row, originalRole;
       if (req.params.id) {
         const old = await d.one(
           db,
@@ -470,7 +674,11 @@ function createApp(pool, env = process.env) {
           [req.params.id],
         );
         if (!old) fail(404, "Usuário não encontrado.");
-        if (old.id === req.user.id && (!active || role !== "admin"))
+        originalRole = old.papel;
+        if (
+          old.id === req.user.id &&
+          (!active || (old.papel === "admin" && role !== "admin"))
+        )
           fail(409, "Você não pode desativar a própria conta administrativa.");
         if (
           old.ativo &&
@@ -517,6 +725,18 @@ function createApp(pool, env = process.env) {
         await db.query("DELETE FROM zc_technician_accounts WHERE user_id=$1", [
           row.id,
         ]);
+      if (email !== undefined && email !== row.recovery_email) {
+        if (
+          req.user.papel !== "admin" &&
+          (role !== "tecnico" || (originalRole && originalRole !== "tecnico"))
+        )
+          fail(403, "A administração deve alterar o e-mail desta conta.");
+        await db.query("UPDATE usuarios SET recovery_email=$2 WHERE id=$1", [
+          row.id,
+          email,
+        ]);
+        await d.audit(db, actor(req), "recovery_email_updated", "user", row.id);
+      }
       await d.audit(db, actor(req), "saved", "user", row.id, {
         papel: role,
         ativo: active,
@@ -550,7 +770,7 @@ function createApp(pool, env = process.env) {
     res.json({
       items: await d.rows(
         pool,
-        "SELECT b.*,t.name technician_name,(SELECT count(*)::int FROM zc_evidence e WHERE e.batch_id=b.id AND e.state='ready') ready_count FROM zc_batches b JOIN zc_technicians t ON t.id=b.technician_id ORDER BY b.created_at DESC LIMIT 100",
+        "SELECT b.*,t.name technician_name,(SELECT count(*)::int FROM zc_evidence e WHERE e.batch_id=b.id AND e.state='ready') ready_count FROM zc_batches b JOIN zc_technicians t ON t.id=b.technician_id WHERE b.source<>'bundle' ORDER BY b.created_at DESC LIMIT 100",
       ),
     }),
   );
@@ -561,15 +781,19 @@ function createApp(pool, env = process.env) {
     if (!batch) fail(404, "Lote não encontrado.");
     batch.files = await d.rows(
       pool,
-      "SELECT id,state,mime,sha256,kind,serial_code FROM zc_evidence WHERE batch_id=$1",
+      "SELECT id,state,mime,sha256,kind,serial_code,equipment_type,equipment_model FROM zc_evidence WHERE batch_id=$1",
       [batch.id],
     );
-    batch.rule = batch.order_id
-      ? await portal.rule(pool, (await o.get(pool, batch.order_id)).service)
+    const currentOrder = batch.order_id
+      ? await o.get(pool, batch.order_id)
       : null;
-    batch.current_order = batch.order_id
-      ? d.publicOrder(await o.get(pool, batch.order_id))
+    batch.rule = currentOrder
+      ? await portal.rule(pool, currentOrder.service, currentOrder)
       : null;
+    batch.required_equipment = currentOrder
+      ? portal.requiredEquipment(currentOrder)
+      : {};
+    batch.current_order = currentOrder ? d.publicOrder(currentOrder) : null;
     res.json(batch);
   });
   app.get("/api/evidence/:id", async (req, res) => {
@@ -578,11 +802,17 @@ function createApp(pool, env = process.env) {
       "SELECT * FROM zc_evidence WHERE id=$1 AND state='ready'",
       [req.params.id],
     );
-    if (!item || !/^[-a-f0-9]+\.jpg$/.test(item.path))
+    if (!item || !/^[-a-f0-9]+\.(?:jpg|pdf)$/.test(item.path))
       fail(404, "Foto indisponível.");
     res
       .set("Cache-Control", "no-store")
       .type(item.mime)
+      .set(
+        "Content-Disposition",
+        item.mime === "application/pdf"
+          ? 'attachment; filename="checklist-assinado.pdf"'
+          : "inline",
+      )
       .send(await createMediaStore(cfg).read(item.path));
   });
   app.post("/api/evidence/:id/edit", async (req, res) => {
@@ -854,6 +1084,15 @@ function createApp(pool, env = process.env) {
         )
       )
         fail(409, "Fechamento já registrado.");
+      if (
+        await d.one(db, "SELECT 1 FROM zc_financial_ledger WHERE order_id=$1", [
+          order.id,
+        ])
+      )
+        fail(
+          409,
+          "Composição financeira já registrada. Use um ajuste auditado.",
+        );
       const extra = await o.insert(db, "zc_order_extras", {
         order_id: order.id,
         type: d.string(req.body.type || "Extra", "Tipo", 100, true),
@@ -882,6 +1121,15 @@ function createApp(pool, env = process.env) {
         )
       )
         fail(409, "Fechamento já registrado.");
+      if (
+        await d.one(db, "SELECT 1 FROM zc_financial_ledger WHERE order_id=$1", [
+          x.order_id,
+        ])
+      )
+        fail(
+          409,
+          "Composição financeira já registrada. Use um ajuste auditado.",
+        );
       await db.query("DELETE FROM zc_order_extras WHERE id=$1", [x.id]);
       await d.audit(db, actor(req), "extra_deleted", "order", x.order_id, {
         id: x.id,
@@ -908,6 +1156,18 @@ function createApp(pool, env = process.env) {
         req.body.end,
       );
       if (!p.orders.length) fail(400, "Nenhuma OS elegível.");
+      if (
+        (
+          await db.query(
+            "SELECT 1 FROM zc_orders WHERE id=ANY($1::text[]) AND workflow_mode='controlled' LIMIT 1",
+            [p.orders.map((x) => x.id)],
+          )
+        ).rowCount
+      )
+        fail(
+          409,
+          "OS do portal exige o módulo Financeiro 6.4 com conferência de fechamento.",
+        );
       if (
         p.total_cents !== req.body.expected_total ||
         JSON.stringify(p.orders.map((x) => x.id)) !==
@@ -948,14 +1208,14 @@ function createApp(pool, env = process.env) {
   app.get("/api/finance/settlements/:id/pdf", admin, async (req, res) => {
     const s = await d.one(
       pool,
-      "SELECT snapshot FROM zc_settlements WHERE id=$1",
+      "SELECT snapshot,state FROM zc_settlements WHERE id=$1",
       [req.params.id],
     );
     if (!s) fail(404, "Fechamento não encontrado.");
     res
       .type("pdf")
       .attachment("Fechamento-" + req.params.id + ".pdf")
-      .send(await settlementPdf(s.snapshot));
+      .send(await settlementPdf(s.snapshot, s.state));
   });
   app.get("/api/audit", admin, async (req, res) => {
     const p = page(req);
@@ -1021,15 +1281,35 @@ function createApp(pool, env = process.env) {
       ),
     }),
   );
-  app.post("/api/sga/lookup", async (req, res) =>
-    res.json(
-      await new SGAClient(cfg).lookup({
-        term: req.body.term,
-        sga_id: req.body.sga_id,
-        chassis: req.body.chassis,
-      }),
-    ),
-  );
+  app.post("/api/orders/:id/sga-sync", admin, async (req,res) => {
+    const order=await o.get(pool,req.params.id);
+    if(await require("./demo-rj").isDemoAttendance(pool,cfg,order)){
+      // No provider lookup, no simulated verification token, no changes to the order.
+      return res.json({demo_simulation:true,order_version:order.version,message:"OS fictícia de homologação: consulta ao SGA não realizada. Utilize os dados cadastrados para simular a atribuição."});
+    }
+    const data=await sgaClient.lookup({sga_id:order.sga_id,term:order.vehicle,chassis:order.chassis});
+    if(order.sga_id && String(data.sga_id)!==String(order.sga_id)) fail(409,"O SGA retornou outro veículo.");
+    const identities=[d.vehicle(order.vehicle),d.vehicle(order.chassis)].filter(Boolean);
+    if(!order.sga_id && ![d.vehicle(data.vehicle),d.vehicle(data.chassis)].some(v=>identities.includes(v))) fail(409,"O cadastro retornado não corresponde à OS.");
+    const eligibility=require("./sga-eligibility");
+    data.sga_check=eligibility.snapshot(data);
+    data.sga_verification=eligibility.sign(data.sga_check,cfg.SESSION_SECRET);
+    res.json({...data,order_version:order.version});
+  });
+  app.post("/api/sga/lookup", async (req, res) => {
+    const data = await sgaClient.lookup({
+      term: req.body.term,
+      sga_id: req.body.sga_id,
+      chassis: req.body.chassis,
+    });
+    const eligibility = require("./sga-eligibility");
+    data.sga_check = eligibility.snapshot(data);
+    data.sga_verification = eligibility.sign(
+      data.sga_check,
+      cfg.SESSION_SECRET,
+    );
+    res.json(data);
+  });
   app.post("/api/archive-month", admin, async (req, res) => {
     const month = req.body.month;
     if (
@@ -1043,81 +1323,12 @@ function createApp(pool, env = process.env) {
       req.body.dry_run === undefined
         ? true
         : d.boolean(req.body.dry_run, "Simulação");
-    const result = await transaction(pool, async (db) => {
-      const list = await d.rows(
-        db,
-        "SELECT * FROM zc_orders WHERE deleted_at=''",
-      );
-      const changes = [];
-      for (const order of list) {
-        let target = "HOT";
-        if (["CONCLUÍDO", "CANCELADO"].includes(order.status)) {
-          const dates = [d.date(order.completed_at), d.date(order.created_date)]
-            .filter(Boolean)
-            .sort();
-          if (!dates.length) continue;
-          const last = dates.at(-1),
-            age =
-              (Number(month.slice(0, 4)) - Number(last.slice(0, 4))) * 12 +
-              Number(month.slice(5, 7)) -
-              Number(last.slice(5, 7));
-          target = age >= 4 ? "COLD" : age >= 1 ? "WARM" : "HOT";
-        }
-        if (target !== order.archive) {
-          changes.push({ id: order.id, from: order.archive, to: target });
-          if (!dry)
-            await o.update(
-              db,
-              "zc_orders",
-              "id",
-              order.id,
-              { archive: target },
-              true,
-            );
-        }
-      }
-      if (!dry)
-        await d.audit(db, actor(req), "archive_month", "system", month, {
-          count: changes.length,
-        });
-      return { month, count: changes.length, dry_run: dry, changes };
-    });
+    if (!dry && month !== d.today().slice(0,7)) fail(400,"A política só pode ser aplicada no mês vigente.");
+    const result = await require("./storage-policy").reconcile(pool,month,dry,actor(req));
     res.json(result);
   });
-  app.get("/api/export/orders.csv", admin, async (req, res) => {
-    const rows = await d.rows(
-        pool,
-        "SELECT * FROM zc_orders WHERE deleted_at='' ORDER BY created_date,id",
-      ),
-      cols = [
-        "id",
-        "created_date",
-        "service",
-        "vehicle",
-        "customer_name",
-        "contact",
-        "technician_name",
-        "status",
-        "scheduled_at",
-        "completed_at",
-        "archive",
-        "notes",
-      ];
-    const cell = (v) => {
-      let s = String(v ?? "");
-      if (/^[=+@-]/.test(s.trimStart())) s = "'" + s;
-      return '"' + s.replaceAll('"', '""') + '"';
-    };
-    res
-      .type("text/csv; charset=utf-8")
-      .attachment("ZenControl-ordens.csv")
-      .send(
-        "\ufeff" +
-          [cols, ...rows.map((r) => cols.map((c) => r[c]))]
-            .map((row) => row.map(cell).join(";"))
-            .join("\r\n"),
-      );
-  });
+  app.get("/api/export/orders.csv", admin, (req,res) => require("./orders-export").exportOrders(pool,req,res,"csv"));
+  app.get("/api/export/orders.xlsx", admin, (req,res) => require("./orders-export").exportOrders(pool,req,res,"xlsx"));
   app.get("/api/backup", admin, async (req, res) => {
     const { database, manifest, files, cleanup } =
       await require("./backup").prepareBackup(pool, cfg);
@@ -1143,6 +1354,16 @@ function createApp(pool, env = process.env) {
   app.use("/api", (req, res) =>
     res.status(404).json({ error: "Rota não encontrada." }),
   );
+  app.get("/tecnico", (req, res) => {
+    if (cfg.TECHNICIAN_PORTAL_URL)
+      return res.redirect(302, cfg.TECHNICIAN_PORTAL_URL);
+    res
+      .status(503)
+      .type("text")
+      .send(
+        "O Portal do Técnico é um aplicativo separado. Peça à central o endereço de acesso.",
+      );
+  });
   app.use(express.static(path.join(cfg.ROOT, "apps/web/dist")));
   app.get("/{*splat}", (req, res) =>
     res.sendFile(path.join(cfg.ROOT, "apps/web/dist/index.html")),
@@ -1160,7 +1381,14 @@ function createApp(pool, env = process.env) {
           : error.code === "23503"
             ? 409
             : 500);
-    if (code >= 500) console.error("Falha na API:", error.code || error.name);
+    if (code >= 500)
+      console.error(
+        JSON.stringify({
+          event: "api_error",
+          method: req.method,
+          code: error.code || error.name,
+        }),
+      );
     res.status(code).json({
       error:
         code >= 500
