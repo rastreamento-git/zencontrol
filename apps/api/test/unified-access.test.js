@@ -15,6 +15,8 @@ const { createApp } = require("../src/app"),
     createApp: stockApp,
   } = require("../../../integrations/estoque-pro/src/app");
 const { hashPassword } = require("../src/auth");
+const intake = require("../src/sga-intake");
+const { today } = require("../src/domain");
 const password = "Unified1!teste",
   secret = "test-only-stock-integration-secret-123456789";
 let db,
@@ -93,6 +95,10 @@ before(async () => {
     SSO_STOCK_URL: "http://127.0.0.1:4321",
     TECHNICIAN_PORTAL_URL: "http://127.0.0.1:4319",
     ZEN_DATA_DIR: folder,
+    SGA_READ_ENABLED: "true",
+    HINOVA_TOKEN_ASSOC: "test-only",
+    HINOVA_USER: "test-only",
+    HINOVA_PASS: "test-only",
   });
   await central.locals.ready();
   server = central.listen(0, "127.0.0.1");
@@ -347,4 +353,79 @@ test("stock planning lists pending installation demand through a stock session",
   const simulation = await req(sbase, route + "/cobertura", { ids: [entry] }, token);
   assert.equal(simulation.status, 200);
   assert.equal(simulation.data.items[0].state, "route_pending");
+});
+
+test("stock collection scans the requested period and verifies existing entries again", async () => {
+  const route = "/api/compras/instalacoes-pendentes";
+  const end = today();
+  const start = new Date(Date.parse(end) - 86400000).toISOString().slice(0, 10);
+  const payload = { start, end, confirmed: true };
+  const { token: adminToken } = await grant(await login("admin"));
+  const { token: operatorToken } = await grant(await login("operador"));
+  const collect = (body, token = adminToken) => req(sbase, route + "/coletas", body, token);
+  assert.equal((await collect(payload, technical)).status, 401);
+  assert.equal((await collect(payload, operatorToken)).status, 403);
+  assert.equal((await collect({ ...payload, confirmed: false })).status, 400);
+  assert.equal((await collect({ ...payload, start: "2020-01-01" })).status, 400);
+  assert.equal((await collect({ ...payload, end: "9999-01-01" })).status, 400);
+  const days = [];
+  let stillPending = true;
+  const client = {
+    ready: () => true,
+    catalogs: async () => ({
+      items: { classifications: [{ code: "42", label: "INSTALAÇÃO PENDENTE", active: true }] },
+    }),
+    pendingMovements: async (day, kind, code) => {
+      days.push([day, kind, code]);
+      return [day === end ? "999999" : "999998"].map((id) => ({
+        codigo_veiculo: id,
+        nome_campo_tabela: "codigo_classificacao",
+        valor_anterior: "41",
+        valor_posterior: "42",
+        data_alteracao: day + "T10:00:00-0300",
+      }));
+    },
+    lookup: async ({ sga_id }) => ({
+      sga_id,
+      customer_name: "Segundo associado fictício",
+      vehicle: "FIC9A98",
+      sga_source: { classification_code: stillPending ? "42" : "43" },
+    }),
+  };
+  await intake.saveConfiguration(db.pool, client, {
+    ...await intake.configuration(db.pool),
+    pending_kind: "classifications",
+    pending_code: "42",
+    enabled: false,
+  }, "Administrador fictício");
+  const queued = await Promise.all([
+    collect({ ...payload, pending_code: "43" }),
+    collect(payload),
+  ]);
+  assert.equal(queued[0].status, 202);
+  assert.equal(queued[1].data.id, queued[0].data.id);
+  const get = (suffix) => req(sbase, route + suffix, undefined, operatorToken);
+  const id = queued[0].data.id;
+  assert.equal((await get("/coletas/" + id)).data.state, "queued");
+  assert.equal((await get("?coleta=" + id)).status, 409);
+  assert.equal(await intake.runCycle(db.pool, {}, { client }), true);
+  assert.deepEqual(days, [[start, "classifications", "42"], [end, "classifications", "42"]]);
+  const lookup = await get(`/coletas?start=${start}&end=${end}`);
+  assert.equal(lookup.data.state, "completed");
+  assert.equal(lookup.data.id, id);
+  assert.equal(lookup.data.checked_days, 2);
+  assert.ok(!("config" in lookup.data));
+  const list = await get("?coleta=" + id);
+  assert.equal(list.data.total, 2);
+  assert.deepEqual(list.data.items.map((item) => item.vehicle).sort(), ["FIC9A98", "FIC9A99"]);
+  assert.ok(list.data.items.every((item) => !item.ordered));
+  assert.equal((await req(sbase, route + "/cobertura", {
+    coleta: id, ids: ["7f30271a-82e5-493a-80fd-e99e6ba4db91"],
+  }, operatorToken)).status, 400);
+  stillPending = false;
+  const second = await collect(payload);
+  assert.equal(second.status, 202);
+  assert.equal(await intake.runCycle(db.pool, {}, { client }), true);
+  assert.equal((await get("?coleta=" + second.data.id)).data.total, 0);
+  assert.equal((await get("")).data.total, 2);
 });

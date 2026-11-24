@@ -238,7 +238,7 @@ async function enqueue(
   pool,
   client,
   actor,
-  { automatic = false, now = new Date(), start, end, complementary = true } = {},
+  { automatic = false, now = new Date(), start, end, complementary = true, stockPlanning = false } = {},
 ) {
   const config = await configuration(pool);
   const day = new Intl.DateTimeFormat("en-CA", {
@@ -256,8 +256,20 @@ async function enqueue(
   const first = automatic ? day : (start ?? day), last = automatic ? day : (end ?? day);
   periodDays(first, last, day);
   if (!config.pending_code) { if (automatic) return null; fail(409, "Configure a etapa Instalação pendente antes de iniciar."); }
-  const snapshot = { ...config, period_start: first, period_end: last, complementary: automatic ? true : d.boolean(complementary, "Consulta complementar") };
+  const snapshot = { ...config, period_start: first, period_end: last, complementary: automatic ? true : d.boolean(complementary, "Consulta complementar"), ...(stockPlanning && { stock_planning: true }) };
   return transaction(pool, async (db) => {
+    if (stockPlanning) {
+      await db.query("SELECT pg_advisory_xact_lock(hashtext('sga-stock-planning'))");
+      const active = await d.one(db,
+        `SELECT * FROM zc_sga_intake_runs WHERE config->>'stock_planning'='true'
+        AND (state IN ('queued','running') OR (state='failed' AND attempts<3)) LIMIT 1`,
+      );
+      if (active) {
+        if (active.config.period_start === first && active.config.period_end === last)
+          return active;
+        fail(409, "Já existe uma coleta de Compras em andamento. Aguarde a conclusão.");
+      }
+    }
     const row = await d.one(
       db,
       `INSERT INTO zc_sga_intake_runs(id,run_key,day,state,config,actor,created_at)
@@ -326,8 +338,8 @@ async function persistEntry(pool, run, movement, data) {
         [data.sga_id, customer, identities],
       )
     )
-      return false;
-    if (await existingOrder(db, data)) return false;
+      return null;
+    if (await existingOrder(db, data)) return null;
     const saved = await db.query(
       `INSERT INTO zc_sga_intake(id,sga_vehicle_id,customer_key,vehicle_key,customer_name,vehicle,chassis,movement_at,received_at,run_id,data,raw_source)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT DO NOTHING RETURNING id`,
@@ -353,10 +365,11 @@ async function persistEntry(pool, run, movement, data) {
         ),
       ],
     );
-    return saved.rowCount > 0;
+    return saved.rows[0]?.id ?? null;
   });
 }
 async function collect(pool, client, run, signal) {
+  const planningIds = run.config.stock_planning ? [] : null;
   const days = periodDays(run.config.period_start || run.day, run.config.period_end || run.day, run.day);
   const progress = async (summary, message) => pool.query("UPDATE zc_sga_intake_runs SET summary=$2,message=$3 WHERE id=$1 AND state='running'", [run.id, JSON.stringify(summary), message]);
   await progress({ phase: "catalog", total_days: days.length }, "Validando etapa no catálogo SGA…");
@@ -431,10 +444,10 @@ async function collect(pool, client, run, signal) {
     try {
       const exists = await d.one(
         pool,
-        "SELECT id FROM zc_sga_intake WHERE sga_vehicle_id=$1",
+        "SELECT id,order_id FROM zc_sga_intake WHERE sga_vehicle_id=$1",
         [id],
       );
-      if (exists) {
+      if (exists && (!planningIds || exists.order_id)) {
         summary.duplicates++;
         continue;
       }
@@ -481,8 +494,17 @@ async function collect(pool, client, run, signal) {
         continue;
       }
       stage = "gravação no banco";
-      if (await persistEntry(pool, run, movement, data)) summary.imported++;
+      const saved = exists ? null : await persistEntry(pool, run, movement, data);
+      if (saved) summary.imported++;
       else summary.duplicates++;
+      if (planningIds) {
+        // Reuse the original intake record, including any draft used by the central team.
+        const entry = saved || exists?.id || (await d.one(
+          pool, "SELECT id FROM zc_sga_intake WHERE sga_vehicle_id=$1 AND order_id IS NULL",
+          [id],
+        ))?.id;
+        if (entry) planningIds.push(entry);
+      }
     } catch (error) {
       signal?.throwIfAborted();
       summary.failed++;
@@ -500,6 +522,7 @@ async function collect(pool, client, run, signal) {
     }
   }
   summary.phase = "finished";
+  if (planningIds) summary.stock_planning_ids = planningIds;
   return summary;
 }
 async function runCycle(

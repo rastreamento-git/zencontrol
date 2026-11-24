@@ -53,7 +53,7 @@ function identity(env, pool, publicUser) {
     if (!r.ok)
       fail(
         ([401, 403].includes(r.status) ||
-          (action === "stock-planning" && [400, 409, 429].includes(r.status))) ? r.status : 503,
+          (action === "stock-planning" && [400, 404, 409, 429].includes(r.status))) ? r.status : 503,
         data.error || "Não foi possível validar a conta ZEN.",
       );
     return data;
